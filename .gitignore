@@ -361,3 +361,9 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# MeCab辞書ファイル（大きいためGitに含めない）
+dic/mecab-ipadic-neologd/
+dic/ipadic/
+# README.mdは除外しない
+!dic/README.md
