@@ -14,8 +14,13 @@ namespace DesktopAiMascot.utils
     /// </summary>
     public class MeCabDictionaryDownloader
     {
-        // 標準IPAdic辞書（軽量・確実に動作）
-        private const string IPADIC_DOWNLOAD_URL = "https://github.com/taku910/mecab/releases/download/v0.996/mecab-ipadic-2.7.0-20070801.tar.gz";
+        // MeCab IPAdic辞書（SourceForge）
+        // 注意: 現在、公式のWindows用ビルド済みバイナリは提供されていないため、
+        // 手動ダウンロードと配置を推奨します。
+        private const string IPADIC_DOWNLOAD_URL = "https://sourceforge.net/projects/mecab/files/mecab-ipadic/2.7.0-20070801/mecab-ipadic-2.7.0-20070801.tar.gz/download";
+        
+        // 代替URL（Drive.googleなど）も404の可能性があるため、
+        // 現時点では手動ダウンロードを推奨
         
         private readonly string _dicDirectory;
         private readonly HttpClient _httpClient;
@@ -30,6 +35,9 @@ namespace DesktopAiMascot.utils
             {
                 Timeout = TimeSpan.FromMinutes(10)
             };
+            
+            // SourceForgeからのダウンロード時にリダイレクトを許可
+            _httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0");
         }
 
         /// <summary>
@@ -56,6 +64,11 @@ namespace DesktopAiMascot.utils
             try
             {
                 OnStatusChanged("IPAdic辞書のダウンロードを開始します...");
+                
+                // 警告: 自動ダウンロードは現在不安定です
+                OnStatusChanged("警告: MeCab辞書の自動ダウンロードは現在不安定です。");
+                OnStatusChanged("手動でのダウンロードと配置を推奨します。");
+                OnStatusChanged("詳細は dic/README.md を参照してください。");
                 
                 // 一時ディレクトリを作成
                 tempDir = Path.Combine(Path.GetTempPath(), $"mecab_download_{Guid.NewGuid():N}");
@@ -110,6 +123,15 @@ namespace DesktopAiMascot.utils
                     }
                 }
                 
+                CleanupTempDirectory(tempDir);
+                return false;
+            }
+            catch (HttpRequestException ex)
+            {
+                Debug.WriteLine($"[MeCabDictionaryDownloader] ダウンロードエラー: {ex.Message}");
+                OnStatusChanged($"ダウンロードエラー: {ex.Message}");
+                OnStatusChanged("自動ダウンロードは現在利用できません。");
+                OnStatusChanged("手動で辞書を配置してください。詳細は dic/README.md を参照。");
                 CleanupTempDirectory(tempDir);
                 return false;
             }

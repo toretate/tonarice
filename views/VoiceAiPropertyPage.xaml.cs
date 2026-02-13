@@ -949,12 +949,14 @@ namespace DesktopAiMascot.views
                 
                 // ユーザーに手動配置を案内
                 var result = System.Windows.MessageBox.Show(
-                    "MeCab辞書は大きなファイルのため、手動でのダウンロードと配置を推奨します。\n\n" +
+                    "【重要】MeCab辞書の自動ダウンロードは現在不安定です。\n\n" +
+                    "手動でのダウンロードと配置を強く推奨します。\n" +
                     "詳細は dic\\README.md を参照してください。\n\n" +
-                    "それでも自動ダウンロードを試みますか？",
+                    "それでも自動ダウンロードを試みますか？\n" +
+                    "（失敗する可能性が高いです）",
                     "辞書のダウンロード",
                     MessageBoxButton.YesNo,
-                    MessageBoxImage.Question);
+                    MessageBoxImage.Warning);
 
                 if (result == MessageBoxResult.No)
                 {
@@ -964,7 +966,25 @@ namespace DesktopAiMascot.views
                     {
                         System.IO.Directory.CreateDirectory(dicPath);
                     }
-                    Process.Start("explorer.exe", dicPath);
+                    
+                    // README.mdを開く
+                    var readmePath = System.IO.Path.Combine(dicPath, "README.md");
+                    if (System.IO.File.Exists(readmePath))
+                    {
+                        try
+                        {
+                            Process.Start("notepad.exe", readmePath);
+                        }
+                        catch
+                        {
+                            // Notepadが起動できない場合はフォルダを開く
+                            Process.Start("explorer.exe", dicPath);
+                        }
+                    }
+                    else
+                    {
+                        Process.Start("explorer.exe", dicPath);
+                    }
                     
                     // UI状態をリセット
                     ResetDownloadUI();
