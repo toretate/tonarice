@@ -50,58 +50,74 @@ namespace DesktopAiMascot.utils
         /// </summary>
         public async Task<bool> DownloadAndInstallIpadicAsync(CancellationToken cancellationToken = default)
         {
+            string? downloadPath = null;
+            string? tempDir = null;
+            
             try
             {
                 OnStatusChanged("IPAdic辞書のダウンロードを開始します...");
                 
                 // 一時ディレクトリを作成
-                var tempDir = Path.Combine(Path.GetTempPath(), $"mecab_download_{Guid.NewGuid():N}");
+                tempDir = Path.Combine(Path.GetTempPath(), $"mecab_download_{Guid.NewGuid():N}");
                 Directory.CreateDirectory(tempDir);
 
                 try
                 {
                     // tar.gzファイルをダウンロード
                     OnStatusChanged("辞書ファイルをダウンロード中...");
-                    var downloadPath = Path.Combine(tempDir, "ipadic.tar.gz");
+                    downloadPath = Path.Combine(tempDir, "ipadic.tar.gz");
                     
                     await DownloadFileAsync(IPADIC_DOWNLOAD_URL, downloadPath, cancellationToken);
+                    
+                    // キャンセルチェック
+                    cancellationToken.ThrowIfCancellationRequested();
                     
                     OnStatusChanged("辞書ファイルを展開中...");
                     var extractPath = Path.Combine(tempDir, "extracted");
                     await ExtractTarGzAsync(downloadPath, extractPath, cancellationToken);
                     
+                    // キャンセルチェック
+                    cancellationToken.ThrowIfCancellationRequested();
+                    
                     OnStatusChanged("辞書ファイルをインストール中...");
                     await InstallDictionaryAsync(extractPath, "ipadic", cancellationToken);
                     
                     OnStatusChanged("辞書のインストールが完了しました");
-                    OnProgressChanged(100, "完了");
+                    OnProgressChanged(100, "完了", currentStep: "完了");
                     return true;
                 }
                 finally
                 {
                     // 一時ディレクトリを削除
-                    try
-                    {
-                        if (Directory.Exists(tempDir))
-                        {
-                            Directory.Delete(tempDir, true);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"[MeCabDictionaryDownloader] 一時ディレクトリの削除に失敗: {ex.Message}");
-                    }
+                    CleanupTempDirectory(tempDir);
                 }
             }
             catch (OperationCanceledException)
             {
                 OnStatusChanged("ダウンロードがキャンセルされました");
+                
+                // キャンセル時の一時ファイル削除
+                if (downloadPath != null && File.Exists(downloadPath))
+                {
+                    try
+                    {
+                        File.Delete(downloadPath);
+                        Debug.WriteLine($"[MeCabDictionaryDownloader] 一時ファイルを削除しました: {downloadPath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[MeCabDictionaryDownloader] 一時ファイルの削除に失敗: {ex.Message}");
+                    }
+                }
+                
+                CleanupTempDirectory(tempDir);
                 return false;
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[MeCabDictionaryDownloader] エラー: {ex.Message}");
                 OnStatusChanged($"エラーが発生しました: {ex.Message}");
+                CleanupTempDirectory(tempDir);
                 return false;
             }
         }
@@ -301,6 +317,27 @@ namespace DesktopAiMascot.utils
         {
             StatusChanged?.Invoke(this, status);
             Debug.WriteLine($"[MeCabDictionaryDownloader] {status}");
+        }
+
+        /// <summary>
+        /// 一時ディレクトリをクリーンアップ
+        /// </summary>
+        private void CleanupTempDirectory(string? tempDir)
+        {
+            if (tempDir == null) return;
+            
+            try
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    Directory.Delete(tempDir, true);
+                    Debug.WriteLine($"[MeCabDictionaryDownloader] 一時ディレクトリを削除しました: {tempDir}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[MeCabDictionaryDownloader] 一時ディレクトリの削除に失敗: {ex.Message}");
+            }
         }
 
         public void Dispose()

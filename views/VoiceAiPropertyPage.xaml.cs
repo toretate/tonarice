@@ -922,7 +922,10 @@ namespace DesktopAiMascot.views
             // 既にダウンロード中の場合はキャンセル
             if (_downloadCancellationTokenSource != null)
             {
+                Debug.WriteLine("[VoiceAiPropertyPage] ダウンロードをキャンセルします...");
                 _downloadCancellationTokenSource.Cancel();
+                downloadDictionaryButton.IsEnabled = false;
+                downloadDictionaryButton.Content = "キャンセル中...";
                 return;
             }
 
@@ -962,10 +965,13 @@ namespace DesktopAiMascot.views
                         System.IO.Directory.CreateDirectory(dicPath);
                     }
                     Process.Start("explorer.exe", dicPath);
+                    
+                    // UI状態をリセット
+                    ResetDownloadUI();
                     return;
                 }
 
-                bool success = await _dictionaryDownloader.DownloadAndInstallNeologdAsync(_downloadCancellationTokenSource.Token);
+                bool success = await _dictionaryDownloader.DownloadAndInstallIpadicAsync(_downloadCancellationTokenSource.Token);
                 
                 if (success)
                 {
@@ -981,6 +987,7 @@ namespace DesktopAiMascot.views
             catch (OperationCanceledException)
             {
                 dictionaryDownloadStatusText.Text = "キャンセルされました";
+                Debug.WriteLine("[VoiceAiPropertyPage] ダウンロードがキャンセルされました");
             }
             catch (Exception ex)
             {
@@ -994,15 +1001,8 @@ namespace DesktopAiMascot.views
             }
             finally
             {
-                // UIをリセット
-                downloadDictionaryButton.Content = _dictionaryDownloader.IsNeologdInstalled() 
-                    ? "辞書を再ダウンロード" 
-                    : "辞書をダウンロード";
-                downloadDictionaryButton.IsEnabled = true;
-                dictionaryDownloadProgressBar.Visibility = Visibility.Collapsed;
-                dictionaryDownloadStatusText.Visibility = Visibility.Collapsed;
-                dictionaryDownloadStepText.Visibility = Visibility.Collapsed;
-                dictionaryDownloadDetailsText.Visibility = Visibility.Collapsed;
+                // UI状態をリセット
+                ResetDownloadUI();
                 
                 // イベントハンドラを解除
                 if (_dictionaryDownloader != null)
@@ -1014,6 +1014,21 @@ namespace DesktopAiMascot.views
                 _downloadCancellationTokenSource?.Dispose();
                 _downloadCancellationTokenSource = null;
             }
+        }
+
+        /// <summary>
+        /// ダウンロードUIをリセット
+        /// </summary>
+        private void ResetDownloadUI()
+        {
+            downloadDictionaryButton.Content = _dictionaryDownloader?.IsNeologdInstalled() == true
+                ? "辞書を再ダウンロード"
+                : "辞書をダウンロード";
+            downloadDictionaryButton.IsEnabled = true;
+            dictionaryDownloadProgressBar.Visibility = Visibility.Collapsed;
+            dictionaryDownloadStatusText.Visibility = Visibility.Collapsed;
+            dictionaryDownloadStepText.Visibility = Visibility.Collapsed;
+            dictionaryDownloadDetailsText.Visibility = Visibility.Collapsed;
         }
 
         private void OnDictionaryDownloadProgressChanged(object? sender, DownloadProgressEventArgs e)
