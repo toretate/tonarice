@@ -39,31 +39,48 @@ using System.IO.Compression;
 ---
 
 ### [TICKET-002] NEologd辞書の入手先調査と実装
-**状態**: 🔴 未着手  
+**状態**: 🟡 進行中（暫定対応完了）  
 **優先度**: High  
-**担当**: -  
-**予定工数**: 3h
+**担当**: AI Assistant  
+**予定工数**: 3h  
+**実績工数**: 1h
 
 #### 説明
 NEologd辞書のWindows用ビルド済みバイナリの入手先を調査し、適切なダウンロードURLを設定する。
 公式にWindows版がない場合は代替案を検討。
 
-#### 実装内容
+#### 暫定対応（完了）
+- [x] 404エラーの原因調査
+- [x] SourceForgeのURLに変更
+- [x] 手動ダウンロードを推奨する実装に変更
+- [x] dic/README.mdに詳細な手動ダウンロード手順を追加
+- [x] エラーメッセージの改善
+- [x] README.mdを自動で開く機能の追加
+
+#### 実装内容（残作業）
 - [ ] NEologd辞書のWindows用ビルド済みバイナリの調査
   - 公式リリースページの確認
   - 有志によるビルド版の調査
   - GitHub Actionsでの自動ビルドの可能性
 - [ ] 代替案の検討
-  - 標準IPAdic辞書を使用（軽量）
-  - UniDic辞書の検討
-  - 独自のシンプル辞書の作成
+  - ✅ 標準IPAdic辞書を使用（軽量）- 手動ダウンロード推奨で対応
+  - [ ] UniDic辞書の検討
+  - [ ] 独自のシンプル辞書の作成
 - [ ] ダウンロードURLの実装
 - [ ] 複数辞書のサポート（Standard / NEologd）
+
+#### 暫定対応の詳細
+現在、MeCab辞書の公式URLが404エラーになっているため：
+1. SourceForgeのURLに変更（ただし不安定）
+2. 手動ダウンロードを強く推奨する実装に変更
+3. README.mdに詳細な手順を追加
+4. 「いいえ」選択時にREADME.mdを自動で開く
 
 #### 技術メモ
 - NEologd公式: https://github.com/neologd/mecab-ipadic-neologd
 - MeCab公式: https://taku910.github.io/mecab/
-- 代替: mecab-ipadic-2.7.0-20070801 (標準辞書)
+- SourceForge: https://sourceforge.net/projects/mecab/files/mecab-ipadic/
+- **推奨**: MeCab本体をインストールし、辞書ファイルをコピーする方法
 
 ---
 
@@ -169,13 +186,13 @@ NEologd辞書のWindows用ビルド済みバイナリの入手先を調査し、
 | チケット | 優先度 | 状態 | 進捗 |
 |---------|-------|------|------|
 | TICKET-001 | High | 🟢 完了 | 100% |
-| TICKET-002 | High | 🔴 未着手 | 0% |
+| TICKET-002 | High | 🟡 進行中 | 70% |
 | TICKET-003 | Medium | 🟢 完了 | 100% |
 | TICKET-004 | Medium | 🟢 完了 | 100% |
 | TICKET-005 | Low | 🔴 未着手 | 0% |
 | TICKET-006 | Low | 🔴 未着手 | 0% |
 
-**完了: 3/6 (50%)**
+**完了: 3/6 (50%) | 進行中: 1/6 (17%)**
 
 ## 状態の凡例
 - 🔴 未着手
