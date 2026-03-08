@@ -1,0 +1,12 @@
+﻿using System.Windows.Controls;
+
+namespace DesktopAiMascot.views
+{
+    public partial class MascotPropertyPage : System.Windows.Controls.UserControl
+    {
+        public MascotPropertyPage()
+        {
+            InitializeComponent();
+        }
+    }
+}
