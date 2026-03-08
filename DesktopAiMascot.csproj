@@ -1,19 +1,21 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Godot.NET.Sdk/4.6.1">
 
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <DefaultItemExcludes>$(DefaultItemExcludes);_legacy_views\**;_legacy_controls\**;**\*.legacy</DefaultItemExcludes>
     <UseWindowsForms>true</UseWindowsForms>
-	<UseWPF>true</UseWPF>
+	<UseWPF>false</UseWPF>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- Windows x64向けのみに絞り込む -->
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- Windows x64向けのみに絞り込む (Godot実行エラー回避のためPublish時のみ指定) -->
+    <RuntimeIdentifier Condition="'$(PublishSingleFile)' == 'true'">win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
     <!-- 日本語と英語のみを含める（他の言語リソースを除外） -->
     <SatelliteResourceLanguages>ja;en</SatelliteResourceLanguages>
     <!-- 単一ファイル発行を有効化 -->
-    <PublishSingleFile>true</PublishSingleFile>
+    <PublishSingleFile Condition="'$(Configuration)' == 'Release'">true</PublishSingleFile>
     <!-- ネイティブDLLやassetsは単一ファイルに含めない（互換性のため） -->
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <IncludeAllContentForSelfExtract>false</IncludeAllContentForSelfExtract>
@@ -69,7 +71,9 @@
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.1.1-preview.1.25612.2" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="OpenAI" Version="2.8.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <PackageReference Include="System.Speech" Version="8.0.0" />
+    <PackageReference Include="System.Windows.Extensions" Version="8.0.0" />
     <PackageReference Include="YamlDotNet" Version="16.3.0" />
   </ItemGroup>
 
@@ -111,6 +115,15 @@
     <Page Remove="MozcDictionaryBuilder\**" />
     <!-- 音声合成ベースの読み取得は一時的に除外（Windows.Media依存関係の問題） -->
     <Compile Remove="skills\EnglishReadingSkill.cs" />
+    <!-- 移行中につき、WPFのUI部分をコンパイルから除外 -->
+    <Compile Remove="MascotWindow.xaml.cs" />
+    <Page Remove="MascotWindow.xaml" />
+    <Compile Remove="views\**" />
+    <Page Remove="views\**" />
+    <None Remove="views\**" />
+    <Compile Remove="controls\**" />
+    <Page Remove="controls\**" />
+    <None Remove="controls\**" />
   </ItemGroup>
 
   <ItemGroup>
