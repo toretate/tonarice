@@ -1,10 +1,8 @@
 using System;
-using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.IO;
-using ImageMagick;
 using System.Collections.Generic;
 using System.Diagnostics;
+using Godot;
 
 namespace DesktopAiMascot.mascots
 {
@@ -15,21 +13,18 @@ namespace DesktopAiMascot.mascots
     {
         // 現在のマスコットモデル
         public MascotModel? Model { get; private set; }
-        public Point Position { get; set; }
-        public Size Size { get; set; }
+        public Vector2I Position { get; set; }
+        public Vector2I Size { get; set; }
         public int CurrentFrame { get; private set; }
-        private int frameCount = 1;
         private MascotImageItem[]? images;
-        private System.Drawing.Image? coverImage;
+        private Godot.Image? coverImage;
         private bool disposed = false;
 
-        public Mascot(Point position, Size size)
+        public Mascot(Vector2I position, Vector2I size)
         {
             Position = position;
             Size = size;
             CurrentFrame = 0;
-            // Initially load nothing or default if needed. 
-            // Caller should call Reload with a model.
         }
 
         public void Reload(MascotModel newModel)
@@ -46,7 +41,7 @@ namespace DesktopAiMascot.mascots
         /// <summary>
         /// cover.pngを読み込む
         /// </summary>
-        public System.Drawing.Image? LoadCoverImage()
+        public Godot.Image? LoadCoverImage()
         {
             if (Model == null) return null;
 
@@ -64,9 +59,15 @@ namespace DesktopAiMascot.mascots
                     coverImage.Dispose();
                 }
 
-                coverImage = new Bitmap(coverPath);
-                Debug.WriteLine($"[Mascot] cover.png loaded: {coverPath}");
-                return coverImage;
+                var img = new Godot.Image();
+                var err = img.Load(coverPath);
+                if (err == Godot.Error.Ok)
+                {
+                    coverImage = img;
+                    Debug.WriteLine($"[Mascot] cover.png loaded: {coverPath}");
+                    return coverImage;
+                }
+                return null;
             }
             catch (Exception ex)
             {
@@ -75,73 +76,31 @@ namespace DesktopAiMascot.mascots
             }
         }
 
-        // 描画
-        public void Draw(Graphics g)
-        {
-            // Save/restore graphics state to avoid side-effects
-            var state = g.Save();
-            try
-            {
-                // Improve rendering quality and support alpha compositing
-                g.CompositingMode = CompositingMode.SourceOver;
-                g.CompositingQuality = CompositingQuality.HighQuality;
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-
-                if (images != null && images.Length > 0 && images[CurrentFrame] != null)
-                {
-                    var imgItem = images[CurrentFrame];
-                    var img = imgItem?.Image;
-                    if (img != null)
-                    {
-                        // アスペクト比を維持しつつ、Size内に収める (Contain)
-                        float ratio = Math.Min((float)Size.Width / img.Width, (float)Size.Height / img.Height);
-                        int w = (int)(img.Width * ratio);
-                        int h = (int)(img.Height * ratio);
-
-                        // 中央揃え
-                        int x = Position.X + (Size.Width - w) / 2;
-                        int y = Position.Y + (Size.Height - h) / 2;
-
-                        g.DrawImage(img, x, y, w, h);
-                    }
-                }
-                else
-                {
-                    int x = Position.X + CurrentFrame * 10;
-                    int y = Position.Y;
-                    g.FillEllipse(Brushes.Blue, x, y, Size.Width, Size.Height);
-                }
-            }
-            finally
-            {
-                g.Restore(state);
-            }
-        }
-
-        public void MoveTo(Point newPosition)
+        public void MoveTo(Vector2I newPosition)
         {
             Position = newPosition;
         }
 
-        public bool IsClicked(Point clickPoint)
+        public bool IsClicked(Vector2I clickPoint)
         {
-            Rectangle bounds = new Rectangle(Position, Size);
-            return bounds.Contains(clickPoint);
+            Rect2I bounds = new Rect2I(Position, Size);
+            return bounds.HasPoint(clickPoint);
         }
 
         /**
          * 現在のフレームの画像のクローンを取得する
          */
-        public System.Drawing.Image? GetCurrentImageClone()
+        public Godot.Image? GetCurrentImageClone()
         {
             try
             {
                 if (images == null || images.Length == 0) return null;
                 var current = images[CurrentFrame];
                 if (current?.Image == null) return null;
-                return new Bitmap(current.Image);
+                
+                var newImg = new Godot.Image();
+                newImg.CopyFrom(current.Image);
+                return newImg;
             }
             catch
             {
@@ -152,12 +111,14 @@ namespace DesktopAiMascot.mascots
         /// <summary>
         /// cover.pngのクローンを取得する
         /// </summary>
-        public System.Drawing.Image? GetCoverImageClone()
+        public Godot.Image? GetCoverImageClone()
         {
             try
             {
                 if (coverImage == null) return null;
-                return new Bitmap(coverImage);
+                var newImg = new Godot.Image();
+                newImg.CopyFrom(coverImage);
+                return newImg;
             }
             catch
             {

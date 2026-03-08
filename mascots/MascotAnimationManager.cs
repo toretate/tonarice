@@ -1,5 +1,5 @@
 using System;
-using System.Windows.Threading;
+using Godot;
 
 namespace DesktopAiMascot.mascots
 {
@@ -13,7 +13,7 @@ namespace DesktopAiMascot.mascots
 
         public static MascotAnimationManager Instance => _instance.Value;
 
-        private DispatcherTimer? animationTimer;
+        private Godot.Timer? animationTimer;
         private bool isPaused = false;
 
         private MascotAnimationManager()
@@ -23,7 +23,7 @@ namespace DesktopAiMascot.mascots
         /// <summary>
         /// アニメーションタイマーを登録
         /// </summary>
-        public void RegisterAnimationTimer(DispatcherTimer timer)
+        public void RegisterAnimationTimer(Godot.Timer timer)
         {
             animationTimer = timer;
         }
@@ -33,9 +33,9 @@ namespace DesktopAiMascot.mascots
         /// </summary>
         public void PauseAnimation()
         {
-            if (animationTimer != null && animationTimer.IsEnabled)
+            if (animationTimer != null && !animationTimer.IsStopped())
             {
-                animationTimer.Stop();
+                animationTimer.Paused = true;
                 isPaused = true;
             }
         }
@@ -47,7 +47,7 @@ namespace DesktopAiMascot.mascots
         {
             if (animationTimer != null && isPaused)
             {
-                animationTimer.Start();
+                animationTimer.Paused = false;
                 isPaused = false;
             }
         }
@@ -58,8 +58,3 @@ namespace DesktopAiMascot.mascots
         public bool IsPaused => isPaused;
     }
 }
-
-
-
-
-

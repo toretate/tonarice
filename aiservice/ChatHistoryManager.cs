@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
-using DesktopAiMascot.Controls;
+using DesktopAiMascot.ui.chat;
 
 namespace DesktopAiMascot.aiservice
 {

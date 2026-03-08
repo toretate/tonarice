@@ -5,7 +5,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using System.Diagnostics;
 using DesktopAiMascot.mascots;
-using DesktopAiMascot.Controls;
+using DesktopAiMascot.ui.chat;
 using Google.GenAI;
 
 namespace DesktopAiMascot.aiservice.chat

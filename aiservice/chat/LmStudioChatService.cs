@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using System.Diagnostics;
 using System.Collections.Generic;
-using DesktopAiMascot.Controls;
+using DesktopAiMascot.ui.chat;
 
 using OpenAI;
 using OpenAI.Chat;
