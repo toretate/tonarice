@@ -58,9 +58,35 @@
     <Message Text="不要なファイルを削除しました" Importance="high" />
   </Target>
 
+  <!-- System.Drawing.Commonを出力ディレクトリにコピー -->
+  <Target Name="CopySystemDrawingCommon" AfterTargets="Build">
+    <PropertyGroup>
+      <GodotOutputPath>.godot\mono\temp\bin\$(Configuration)</GodotOutputPath>
+      <GodotWinX64OutputPath>.godot\mono\temp\bin\$(Configuration)\win-x64</GodotWinX64OutputPath>
+    </PropertyGroup>
+    <ItemGroup>
+      <SystemDrawingFiles Include="$(NuGetPackageRoot)system.drawing.common\8.0.0\lib\net8.0\*.dll" />
+      <SystemDrawingRuntimeFiles Include="$(NuGetPackageRoot)system.drawing.common\8.0.0\runtimes\win\lib\net8.0\*.dll" />
+    </ItemGroup>
+    <!-- 通常の出力ディレクトリにコピー -->
+    <Copy SourceFiles="@(SystemDrawingFiles)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(SystemDrawingRuntimeFiles)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <!-- Godotの出力ディレクトリにもコピー -->
+    <Copy SourceFiles="@(SystemDrawingFiles)" DestinationFolder="$(GodotOutputPath)" SkipUnchangedFiles="true" Condition="Exists('$(GodotOutputPath)')" />
+    <Copy SourceFiles="@(SystemDrawingRuntimeFiles)" DestinationFolder="$(GodotOutputPath)" SkipUnchangedFiles="true" Condition="Exists('$(GodotOutputPath)')" />
+    <!-- Godotの win-x64 出力ディレクトリにもコピー -->
+    <Copy SourceFiles="@(SystemDrawingFiles)" DestinationFolder="$(GodotWinX64OutputPath)" SkipUnchangedFiles="true" Condition="Exists('$(GodotWinX64OutputPath)')" />
+    <Copy SourceFiles="@(SystemDrawingRuntimeFiles)" DestinationFolder="$(GodotWinX64OutputPath)" SkipUnchangedFiles="true" Condition="Exists('$(GodotWinX64OutputPath)')" />
+    <Message Text="System.Drawing.Common DLLs copied to $(OutputPath), $(GodotOutputPath), and $(GodotWinX64OutputPath)" Importance="high" />
+  </Target>
 
+  <!-- System.Drawing.Commonへの参照を常にコピー -->
   <ItemGroup>
-    <Reference Include="WindowsFormsIntegration" />
+    <Reference Include="System.Drawing.Common">
+      <HintPath>$(NuGetPackageRoot)system.drawing.common\8.0.0\lib\net8.0\System.Drawing.Common.dll</HintPath>
+      <Private>true</Private>
+      <CopyLocal>true</CopyLocal>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
@@ -71,7 +97,8 @@
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.1.1-preview.1.25612.2" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="OpenAI" Version="2.8.0" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.3" />
     <PackageReference Include="System.Speech" Version="8.0.0" />
     <PackageReference Include="System.Windows.Extensions" Version="8.0.0" />
     <PackageReference Include="YamlDotNet" Version="16.3.0" />
@@ -148,6 +175,19 @@
   <ItemGroup>
     <None Include=".github\workflows\build.yml" />
     <None Include=".github\copilot-instructions.md" />
+    <None Include="docs\MASCOT_EDIT_WINDOW_MIGRATION.md" />
+    <None Include="ui\mascot_edit\AngleViewControl.cs.uid" />
+    <None Include="ui\mascot_edit\AngleViewControl.tscn" />
+    <None Include="ui\mascot_edit\AngleViewControl.tscn.uid" />
+    <None Include="ui\mascot_edit\EmoteGenerationTabPage.cs.uid" />
+    <None Include="ui\mascot_edit\EmoteGenerationTabPage.tscn" />
+    <None Include="ui\mascot_edit\EmoteGenerationTabPage.tscn.uid" />
+    <None Include="ui\mascot_edit\MascotEditSettingControl.cs.uid" />
+    <None Include="ui\mascot_edit\MascotEditSettingControl.tscn" />
+    <None Include="ui\mascot_edit\MascotEditSettingControl.tscn.uid" />
+    <None Include="ui\mascot_edit\MascotEditWindow.cs.uid" />
+    <None Include="ui\mascot_edit\MascotEditWindow.tscn" />
+    <None Include="ui\mascot_edit\MascotEditWindow.tscn.uid" />
   </ItemGroup>
 
 </Project>

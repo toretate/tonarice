@@ -260,7 +260,7 @@ namespace DesktopAiMascot.ui.mascot_edit
         }
 
         /// <summary>
-        /// 画像一覧を読み込み、セットにグループ化する
+        /// 画像一覧を読み込み、単一の画像セットとして表示する
         /// </summary>
         private void LoadImageList()
         {
@@ -277,88 +277,29 @@ namespace DesktopAiMascot.ui.mascot_edit
 
                 Debug.WriteLine($"[MascotEditWindow] 画像一覧を読み込み中: {_mascotDirectory}");
 
+                // 1マスコット = 1画像セットとして再構築
                 var allFiles = Directory.GetFiles(_mascotDirectory);
-                var imageItems = ImageLoadHelper.LoadImages(_mascotModel.Name, allFiles);
+                var imageSet = MascotImageSetBuilder.CreateFromPaths(_mascotModel.Name, allFiles);
 
-                // 画像セットのディクショナリ (Key: SetName)
-                var imageSets = new Dictionary<string, MascotImageSet>();
-
-                foreach (var item in imageItems)
+                if (imageSet.Image == null)
                 {
-                    string fileName = Path.GetFileNameWithoutExtension(item.FileName);
-
-                    string setName = fileName;
-                    string suffix = "";
-                    string type = "main"; // main, angle, pose, emotion
-
-                    // サフィックスの判定
-                    if (fileName.Contains("_"))
-                    {
-                        var parts = fileName.Split('_');
-                        string lastPart = parts.Last().ToLower();
-
-                        // 角度サフィックス
-                        var angleSuffixes = new[] { "left", "right", "front", "back", "top", "bottom", "above", "below", "behind" };
-                        if (angleSuffixes.Contains(lastPart))
-                        {
-                            setName = string.Join("_", parts.Take(parts.Length - 1));
-                            suffix = lastPart;
-                            type = "angle";
-                        }
-                    }
-
-                    if (!imageSets.ContainsKey(setName))
-                    {
-                        imageSets[setName] = new MascotImageSet(setName);
-                    }
-
-                    var currentSet = imageSets[setName];
-
-                    switch (type)
-                    {
-                        case "angle":
-                            currentSet.AngleImages[suffix] = item;
-                            break;
-
-                        case "main":
-                        default:
-                            if (currentSet.Image == null)
-                            {
-                                currentSet.Image = item;
-                            }
-                            else
-                            {
-                                currentSet.Image = item;
-                            }
-                            break;
-                    }
+                    imageSet.Image = imageSet.GetPrimaryImage() ?? imageSet.GetAllImages().FirstOrDefault();
                 }
 
-                // セットをリストに追加 (Imageがnullでないもの、またはAngleImagesがあるもの)
-                var sortedSets = imageSets.Values
-                    .Where(s => s.Image != null || s.AngleImages.Count > 0)
-                    .OrderBy(s => s.Name.Equals("cover", StringComparison.OrdinalIgnoreCase) ? "" : s.Name)
-                    .ToList();
-
-                foreach (var set in sortedSets)
+                if (imageSet.Image != null || imageSet.GetAllImages().Any())
                 {
-                    // 暫定対応: ImageがnullならAngleImagesの最初のものをImageに入れておく
-                    if (set.Image == null && set.AngleImages.Count > 0)
-                    {
-                        set.Image = set.AngleImages.Values.First();
-                    }
-
-                    _imageItems.Add(set);
+                    _imageItems.Add(imageSet);
                 }
 
-                // ItemListに追加
+                // ItemListには単一の画像セットを表示
                 _imageList.FixedIconSize = new Vector2I(120, 120);
-                foreach (var imageSet in _imageItems)
+                foreach (var listItem in _imageItems)
                 {
-                    if (imageSet.Image?.ImageSource != null)
+                    var thumbnail = listItem.GetPrimaryImage() ?? listItem.Image;
+                    if (thumbnail?.ImageSource != null)
                     {
-                        _imageList.AddItem(imageSet.Name);
-                        var texture = ImageLoadHelper.LoadGodotTexture(imageSet.Image.ImagePath);
+                        _imageList.AddItem(_mascotModel.Name);
+                        var texture = ImageLoadHelper.LoadGodotTexture(thumbnail.ImagePath);
                         if (texture != null)
                         {
                             _imageList.SetItemIcon(_imageList.ItemCount - 1, texture);
@@ -366,7 +307,17 @@ namespace DesktopAiMascot.ui.mascot_edit
                     }
                 }
 
-                Debug.WriteLine($"[MascotEditWindow] {_imageItems.Count}個の画像セットをItemListに設定しました");
+                if (_imageItems.Count > 0)
+                {
+                    _imageList.Select(0);
+                    _settingControl.SelectedMascotImageSet = _imageItems[0];
+                }
+                else
+                {
+                    _settingControl.SelectedMascotImageSet = null;
+                }
+
+                Debug.WriteLine($"[MascotEditWindow] 単一画像セットをItemListに設定: count={_imageItems.Count}");
 
             }
             catch (Exception ex)

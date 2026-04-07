@@ -81,7 +81,7 @@ namespace DesktopAiMascot.mascots
             try
             {
                 var result = deserializer.Deserialize<MascotConfig>(yaml);
-                
+
                 // デバッグログ
                 System.Diagnostics.Debug.WriteLine($"[MascotConfigIO.Load] 解析成功");
                 System.Diagnostics.Debug.WriteLine($"[MascotConfigIO.Load] SystemPrompt is null: {result?.SystemPrompt == null}");
@@ -90,7 +90,7 @@ namespace DesktopAiMascot.mascots
                     System.Diagnostics.Debug.WriteLine($"[MascotConfigIO.Load] Profile.Name: {result.SystemPrompt.Profile?.Name}");
                     System.Diagnostics.Debug.WriteLine($"[MascotConfigIO.Load] Personality.Count: {result.SystemPrompt.Personality?.Count ?? -1}");
                 }
-                
+
                 return result ?? new MascotConfig();
             }
             catch (Exception ex)
@@ -129,20 +129,19 @@ namespace DesktopAiMascot.mascots
 
             // プロンプト文字列を生成（SystemPrompt から人間が読めるプロンプトテキストを生成）
             string prompt = GenerateSystemPrompt(config.SystemPrompt);
-            
+
             // デバッグログ
-            System.Diagnostics.Debug.WriteLine($"[MascotConfigIO] ParseFromYaml - マスコット名: {name}");
-            System.Diagnostics.Debug.WriteLine($"[MascotConfigIO] SystemPrompt.Profile.Name: {config.SystemPrompt.Profile.Name}");
-            System.Diagnostics.Debug.WriteLine($"[MascotConfigIO] SystemPrompt.Personality.Count: {config.SystemPrompt.Personality.Count}");
-            System.Diagnostics.Debug.WriteLine($"[MascotConfigIO] 生成されたプロンプト長: {prompt.Length}");
-            if (prompt.Length > 200)
-            {
-                System.Diagnostics.Debug.WriteLine($"[MascotConfigIO] プロンプト (最初の200文字): {prompt.Substring(0, 200)}...");
-            }
-            else
-            {
-                System.Diagnostics.Debug.WriteLine($"[MascotConfigIO] プロンプト: {prompt}");
-            }
+            System.Diagnostics.Debug.WriteLine($"[MascotConfigIO] ParseFromYaml - マスコット名: {name} ({config.SystemPrompt.Profile.Name})");
+            // System.Diagnostics.Debug.WriteLine($"[MascotConfigIO] SystemPrompt.Personality.Count: {config.SystemPrompt.Personality.Count}");
+            // System.Diagnostics.Debug.WriteLine($"[MascotConfigIO] 生成されたプロンプト長: {prompt.Length}");
+            // if (prompt.Length > 200)
+            // {
+            //     System.Diagnostics.Debug.WriteLine($"[MascotConfigIO] プロンプト (最初の200文字): {prompt.Substring(0, 200)}...");
+            // }
+            // else
+            // {
+            //     System.Diagnostics.Debug.WriteLine($"[MascotConfigIO] プロンプト: {prompt}");
+            // }
 
             return (name, prompt, config);
         }
@@ -153,7 +152,7 @@ namespace DesktopAiMascot.mascots
         private static string GenerateSystemPrompt(SystemPrompt systemPrompt)
         {
             var sb = new System.Text.StringBuilder();
-            
+
             System.Diagnostics.Debug.WriteLine($"[GenerateSystemPrompt] 開始");
             System.Diagnostics.Debug.WriteLine($"[GenerateSystemPrompt] Profile.Name: {systemPrompt?.Profile?.Name}");
 
@@ -272,11 +271,11 @@ namespace DesktopAiMascot.mascots
             try
             {
                 string yaml = Save(config);
-                
+
                 // デバッグ用：生成されたYAMLをログ出力
                 System.Diagnostics.Debug.WriteLine($"[MascotConfigIO] 保存するYAML:\n{yaml}");
                 System.Diagnostics.Debug.WriteLine($"[MascotConfigIO] 保存先: {path}");
-                
+
                 // Voice設定の内容を確認
                 if (config.Voice != null && config.Voice.Count > 0)
                 {
@@ -290,7 +289,7 @@ namespace DesktopAiMascot.mascots
                 {
                     System.Diagnostics.Debug.WriteLine("[MascotConfigIO] Voice設定が空です");
                 }
-                
+
                 File.WriteAllText(path, yaml);
                 System.Diagnostics.Debug.WriteLine($"[MascotConfigIO] ファイルへの書き込み完了");
             }
