@@ -16,6 +16,7 @@ namespace DesktopAiMascot.ui.settings
 		private ImageAiPropertyPage _imageAiPage = null!;
 		private MovieAiPropertyPage _movieAiPage = null!;
 		private ApiKeyPropertyPage _apiKeyPage = null!;
+		public event Action<DesktopAiMascot.mascots.MascotModel>? MascotChanged;
 
 		public override void _Ready()
 		{
@@ -30,6 +31,8 @@ namespace DesktopAiMascot.ui.settings
 			_imageAiPage = GetNode<ImageAiPropertyPage>("%ImageAiPropertyPage");
 			_movieAiPage = GetNode<MovieAiPropertyPage>("%MovieAiPropertyPage");
 			_apiKeyPage = GetNode<ApiKeyPropertyPage>("%ApiKeyPropertyPage");
+
+			_mascotPage.MascotChanged += (model) => MascotChanged?.Invoke(model);
 
 			// 左側のカテゴリリスト設定
 			_categoryList.AddItem("Mascot");
