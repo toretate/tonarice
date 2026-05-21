@@ -157,32 +157,38 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_panel_bg")
 [node name="Margin" type="MarginContainer" parent="HBoxContainer/LeftPanel"]
 layout_mode = 2
 theme_override_constants/margin_left = 16
-theme_override_constants/margin_top = 16
+theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 16
 theme_override_constants/margin_bottom = 16
 
 [node name="VBox" type="VBoxContainer" parent="HBoxContainer/LeftPanel/Margin"]
 layout_mode = 2
-theme_override_constants/separation = 12
+theme_override_constants/separation = 6
 
 [node name="Title" type="Label" parent="HBoxContainer/LeftPanel/Margin/VBox"]
+visible = false
 layout_mode = 2
 theme_type_variation = &"HeaderLarge"
 text = "Chat AI Settings"
 label_settings = ExtResource("2_title")
 
-[node name="AreaHeader" type="Label" parent="HBoxContainer/LeftPanel/Margin/VBox"]
+[node name="ListGroupVBox" type="VBoxContainer" parent="HBoxContainer/LeftPanel/Margin/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 4
+
+[node name="AreaHeader" type="Label" parent="HBoxContainer/LeftPanel/Margin/VBox/ListGroupVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.4, 0.4, 0.45, 1)
 theme_override_font_sizes/font_size = 14
 text = "AI Engine (Select Provider)"
 
-[node name="Scroll" type="ScrollContainer" parent="HBoxContainer/LeftPanel/Margin/VBox"]
+[node name="Scroll" type="ScrollContainer" parent="HBoxContainer/LeftPanel/Margin/VBox/ListGroupVBox"]
 layout_mode = 2
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
-[node name="ProviderListContainer" type="VBoxContainer" parent="HBoxContainer/LeftPanel/Margin/VBox/Scroll"]
+[node name="ProviderListContainer" type="VBoxContainer" parent="HBoxContainer/LeftPanel/Margin/VBox/ListGroupVBox/Scroll"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
