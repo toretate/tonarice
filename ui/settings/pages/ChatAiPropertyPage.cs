@@ -237,14 +237,36 @@ namespace DesktopAiMascot.ui.settings.pages
                 
                 try
                 {
-                    if (!string.IsNullOrEmpty(prov.IconPath) && ResourceLoader.Exists(prov.IconPath))
+                    if (!string.IsNullOrEmpty(prov.IconPath))
                     {
-                        iconRect.Texture = ResourceLoader.Load<Texture2D>(prov.IconPath);
+                        if (ResourceLoader.Exists(prov.IconPath))
+                        {
+                            try
+                            {
+                                iconRect.Texture = ResourceLoader.Load<Texture2D>(prov.IconPath);
+                            }
+                            catch
+                            {
+                                var image = Godot.Image.LoadFromFile(prov.IconPath);
+                                if (image != null)
+                                {
+                                    iconRect.Texture = ImageTexture.CreateFromImage(image);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            var image = Godot.Image.LoadFromFile(prov.IconPath);
+                            if (image != null)
+                            {
+                                iconRect.Texture = ImageTexture.CreateFromImage(image);
+                            }
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
-                    GD.PrintErr($"Failed to load provider icon: {ex.Message}");
+                    GD.PrintErr($"Failed to load provider icon ({prov.IconPath}): {ex.Message}");
                 }
                 hbox.AddChild(iconRect);
 
