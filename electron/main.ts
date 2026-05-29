@@ -5,6 +5,9 @@ import * as fs from 'fs';
 // 開発環境と本番環境の判定
 const isDev = process.env.VITE_DEV_SERVER_URL !== undefined;
 
+// アプリケーション名を明示的に指定し、起動方法（VS Codeデバッガ vs CLI）によるuserDataディレクトリ（config.json保存先）のズレを防止
+app.setName('desktop-ai-mascot');
+
 // --- 設定管理 (AppConfig) の定義 ---
 interface ConfigData {
     mascotX: number;
@@ -32,6 +35,7 @@ class AppConfig {
 
     constructor() {
         this.configPath = path.join(app.getPath('userData'), 'config.json');
+        console.log(`[Config] Persistent configuration path: ${this.configPath}`);
         this.data = this.load();
     }
 
