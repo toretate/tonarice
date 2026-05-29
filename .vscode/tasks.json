@@ -14,76 +14,28 @@
 			"problemMatcher": "$msCompile"
 		},
 		{
-			"label": "build",
+			// Godot プロジェクトをデバッグなしで起動するタスク
+			"label": "Godot を起動-headless",
 			"type": "shell",
-			"command": "dotnet",
+			"command": "C:\\Free\\Godot_v4.6.1-stable_mono_win64\\Godot_v4.6.1-stable_mono_win64\\Godot_v4.6.1-stable_mono_win64.exe",
 			"args": [
-				"build",
-				"${workspaceFolder}/DesktopAiMascot.csproj",
-				"/property:GenerateFullPaths=true",
-				"/consoleloggerparameters:NoSummary"
+				"--path",
+				"${workspaceFolder}",
+				"--headless"
 			],
-			"group": "build"
+			"problemMatcher": []
 		},
 		{
-			"label": "build",
+			// Godot エディタを開くタスク
+			"label": "Godot エディタを開く",
 			"type": "shell",
-			"command": "dotnet",
+			"command": "C:\\Free\\Godot_v4.6.1-stable_mono_win64\\Godot_v4.6.1-stable_mono_win64\\Godot_v4.6.1-stable_mono_win64.exe",
 			"args": [
-				"build",
-				"${workspaceFolder}/DesktopAiMascot.csproj",
-				"/property:GenerateFullPaths=true",
-				"/consoleloggerparameters:NoSummary"
+				"--path",
+				"${workspaceFolder}",
+				"-e"
 			],
-			"group": "build"
-		},
-		{
-			"label": "build",
-			"type": "shell",
-			"command": "dotnet",
-			"args": [
-				"build",
-				"${workspaceFolder}/DesktopAiMascot.csproj",
-				"/property:GenerateFullPaths=true",
-				"/consoleloggerparameters:NoSummary"
-			],
-			"group": "build"
-		},
-		{
-			"label": "build",
-			"type": "shell",
-			"command": "dotnet",
-			"args": [
-				"build",
-				"${workspaceFolder}/DesktopAiMascot.csproj",
-				"/property:GenerateFullPaths=true",
-				"/consoleloggerparameters:NoSummary"
-			],
-			"group": "build"
-		},
-		{
-			"label": "build",
-			"type": "shell",
-			"command": "dotnet",
-			"args": [
-				"build",
-				"${workspaceFolder}/DesktopAiMascot.csproj",
-				"/property:GenerateFullPaths=true",
-				"/consoleloggerparameters:NoSummary"
-			],
-			"group": "build"
-		},
-		{
-			"label": "build",
-			"type": "shell",
-			"command": "dotnet",
-			"args": [
-				"build",
-				"${workspaceFolder}/DesktopAiMascot.csproj",
-				"/property:GenerateFullPaths=true",
-				"/consoleloggerparameters:NoSummary"
-			],
-			"group": "build"
+			"problemMatcher": []
 		},
 		{
 			"label": "build",

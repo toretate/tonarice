@@ -22,6 +22,7 @@ namespace DesktopAiMascot.ui.mascot_edit
         private TextureRect _coverTextureRect = null!;
         private ItemList _imageList = null!;
         private MascotEditSettingControl _settingControl = null!;
+        private Button _addImageButton = null!;
         private Button _saveButton = null!;
         private Button _cancelButton = null!;
 
@@ -122,10 +123,15 @@ namespace DesktopAiMascot.ui.mascot_edit
                 _cancelButton = GetNode<Button>("%CancelButton");
                 Debug.WriteLine($"[MascotEditWindow] _cancelButton: {(_cancelButton != null ? "OK" : "NULL")}");
 
+                _addImageButton = GetNode<Button>("%AddImageButton");
+                Debug.WriteLine($"[MascotEditWindow] _addImageButton: {(_addImageButton != null ? "OK" : "NULL")}");
+ 
                 Debug.WriteLine("[MascotEditWindow] ノード取得完了");
-
+ 
                 if (_imageList != null)
                     _imageList.ItemSelected += OnImageSelected;
+                if (_addImageButton != null)
+                    _addImageButton.Pressed += OnAddImageButtonPressed;
                 if (_saveButton != null)
                     _saveButton.Pressed += OnSaveButtonPressed;
                 if (_cancelButton != null)
@@ -387,6 +393,147 @@ namespace DesktopAiMascot.ui.mascot_edit
         private void OnCancelButtonPressed()
         {
             QueueFree();
+        }
+
+        /// <summary>
+        /// 画像追加ボタンのイベントハンドラー
+        /// </summary>
+        private void OnAddImageButtonPressed()
+        {
+            try
+            {
+                string[] selectedFiles = ShowOpenFileDialogViaPowerShell();
+
+                if (selectedFiles == null || selectedFiles.Length == 0)
+                {
+                    return;
+                }
+
+                // CLIXMLなどの進行状況ストリームが混入した場合や、空文字がある場合の防護フィルタリング
+                var validFiles = new List<string>();
+                foreach (var file in selectedFiles)
+                {
+                    var trimmed = file.Trim();
+                    if (!string.IsNullOrEmpty(trimmed) && 
+                        !trimmed.StartsWith("<") && 
+                        !trimmed.StartsWith("#") && 
+                        File.Exists(trimmed))
+                    {
+                        validFiles.Add(trimmed);
+                    }
+                }
+
+                if (validFiles.Count == 0)
+                {
+                    Debug.WriteLine("[MascotEditWindow] 画像追加: 有効なファイルパスが選択されませんでした。");
+                    return;
+                }
+
+                try
+                {
+                    foreach (var sourceFile in validFiles)
+                    {
+                        string fileName = Path.GetFileName(sourceFile);
+                        string destPath = Path.Combine(_mascotDirectory, fileName);
+
+                        if (File.Exists(destPath))
+                        {
+                            string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+                            string extension = Path.GetExtension(fileName);
+                            int counter = 1;
+
+                            while (File.Exists(destPath))
+                            {
+                                fileName = $"{nameWithoutExt}_{counter}{extension}";
+                                destPath = Path.Combine(_mascotDirectory, fileName);
+                                counter++;
+                            }
+                        }
+
+                        File.Copy(sourceFile, destPath);
+                        Debug.WriteLine($"[MascotEditWindow] 画像をコピーしました: {sourceFile} -> {destPath}");
+                    }
+
+                    // リストを再読み込み
+                    LoadImageList();
+                    
+                    // SettingControlにも通知して再読み込み
+                    if (_imageItems.Count > 0)
+                    {
+                        _settingControl.SelectedMascotImageSet = _imageItems[0];
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[MascotEditWindow] 画像追加エラー: {ex.Message}");
+                    GD.PrintErr($"画像の追加に失敗しました。\n{ex.Message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[MascotEditWindow] 画像追加ダイアログ表示エラー: {ex.Message}");
+                GD.PrintErr($"画像の追加に失敗しました。\n{ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// PowerShell経由でOS標準のファイル選択ダイアログを表示し、選択されたファイルパスを取得する
+        /// </summary>
+        private string[] ShowOpenFileDialogViaPowerShell()
+        {
+            try
+            {
+                // Windows Forms の OpenFileDialog を表示する PowerShell スクリプト
+                // ProgressPreference を SilentlyContinue にして進捗表示ストリームの出力を完全に抑制します
+                string script = @"
+$ProgressPreference = 'SilentlyContinue'
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = '画像を選択'
+$dialog.Filter = '画像ファイル (*.png;*.jpg;*.jpeg;*.gif;*.webp)|*.png;*.jpg;*.jpeg;*.gif;*.webp|すべてのファイル (*.*)|*.*'
+$dialog.Multiselect = $true
+$result = $dialog.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+    $dialog.FileNames | ForEach-Object { Write-Output $_ }
+}
+";
+                // 文字化けやエスケープの問題を回避するため Base64 でエンコードして渡す (UTF-16LEが必要)
+                byte[] bytes = System.Text.Encoding.Unicode.GetBytes(script);
+                string base64 = Convert.ToBase64String(bytes);
+
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {base64}",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true
+                };
+
+                using (var process = Process.Start(startInfo))
+                {
+                    if (process == null)
+                    {
+                        return Array.Empty<string>();
+                    }
+
+                    string output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit();
+
+                    if (string.IsNullOrWhiteSpace(output))
+                    {
+                        return Array.Empty<string>();
+                    }
+
+                    // 改行区切りで結果を取得
+                    return output.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[MascotEditWindow] PowerShellダイアログ起動エラー: {ex.Message}");
+                return Array.Empty<string>();
+            }
         }
     }
 }

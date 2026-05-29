@@ -1,16 +1,26 @@
 {
-    "version": "0.2.1",
+    "version": "0.2.0",
     "configurations": [
         {
-            "name": ".NET Core Launch (console)",
+            "name": "Play in Godot (C# Debugger)",
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "build",
-            "program": "${workspaceFolder}/bin/Debug/net8.0-windows/win-x64/DesktopAiMascot.dll",
-            "args": [],
+            "program": "C:\\Free\\Godot_v4.6.1-stable_mono_win64\\Godot_v4.6.1-stable_mono_win64\\Godot_v4.6.1-stable_mono_win64.exe",
+            "args": [
+                "--path",
+                "${workspaceFolder}"
+            ],
             "cwd": "${workspaceFolder}",
-            "console": "internalConsole",
-            "stopAtEntry": false
+            "stopAtEntry": false,
+            "justMyCode": true,
+            "console": "internalConsole"
+        },
+        {
+            "name": "Godot にアタッチ (C# Debugger)",
+            "type": "coreclr",
+            "request": "attach",
+            "processName": "Godot_v4.6.1-stable_mono_win64.exe"
         }
     ]
 }
