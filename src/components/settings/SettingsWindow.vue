@@ -311,8 +311,9 @@ onMounted(async () => {
     }
 
     mascots.value = savedMascots;
-    activeMascotId.value = savedMascots[0].id;
-    editingMascot.value = JSON.parse(JSON.stringify(savedMascots[0]));
+    if (savedMascots.length > 0) {
+        selectMascot(savedMascots[0]);
+    }
     activeMascotSubTab.value = 'expression';
 });
 
@@ -443,6 +444,20 @@ const activeOutfit = ref<MascotAsset | null>(null);
 const activeExpression = ref<MascotAsset | null>(null);
 const activePose = ref<MascotAsset | null>(null);
 
+const selectMascot = (mascot: MascotData) => {
+    if (editingMascot.value && editingMascot.value.id) {
+        const idx = mascots.value.findIndex(m => m.id === editingMascot.value.id);
+        if (idx !== -1) {
+            mascots.value[idx] = JSON.parse(JSON.stringify(editingMascot.value));
+        }
+    }
+    activeMascotId.value = mascot.id;
+    editingMascot.value = JSON.parse(JSON.stringify(mascot));
+    activeExpression.value = mascot.assets.expressions.find(e => e.name === '通常') || mascot.assets.expressions[0] || null;
+    activeOutfit.value = mascot.assets.outfits?.[0] || null;
+    activePose.value = mascot.assets.poses?.[0] || null;
+};
+
 // 表情モーダル用状態変数
 const isEditingExpressionsModal = ref(false);
 const isAssigningEmotionsModal = ref(false);
@@ -531,6 +546,12 @@ const openExpressionEditModal = () => {
     isEditingExpressionsModal.value = true;
 };
 
+const openExpressionEditModalWithExpression = (expr: MascotAsset) => {
+    editingMascot.value.assets.expressions = ensure28Expressions(editingMascot.value.assets.expressions);
+    selectedModalExpression.value = editingMascot.value.assets.expressions.find(e => e.id === expr.id) || null;
+    isEditingExpressionsModal.value = true;
+};
+
 // 表情の微調整値を即座に反映させるためのハンドラー
 const handleLiveUpdate = async () => {
     // ユーザー要望によりモーダル起動中のマスコットウィンドウへの即時反映は行わない
@@ -575,6 +596,16 @@ const clearExpressionSlot = (slot: MascotAsset) => {
 const registeredExpressions = computed(() => {
     if (!editingMascot.value || !Array.isArray(editingMascot.value.assets?.expressions)) return [];
     return editingMascot.value.assets.expressions.filter(e => e.path) || [];
+});
+
+const normalExpression = computed(() => {
+    if (!editingMascot.value || !Array.isArray(editingMascot.value.assets?.expressions)) return null;
+    return editingMascot.value.assets.expressions.find(e => e.name === '通常') || null;
+});
+
+const otherRegisteredExpressions = computed(() => {
+    if (!editingMascot.value || !Array.isArray(editingMascot.value.assets?.expressions)) return [];
+    return editingMascot.value.assets.expressions.filter(e => e.path && e.name !== '通常') || [];
 });
 
 const toggleDefaultExpression = (checked: boolean) => {
@@ -954,7 +985,7 @@ const onSpriteDrop = (event: DragEvent, slot: MascotAsset) => {
 
         <!-- 2. 右側メインコンテンツエリア -->
         <main class="main-content">
-            <div class="content-container">
+            <div class="content-container" :class="{ 'full-width': activeMenu === 'mascot' }">
                 <!-- パネル1: マスコット -->
                 <div v-if="activeMenu === 'mascot'" class="panel-section">
                     <Card class="premium-card">
@@ -962,27 +993,35 @@ const onSpriteDrop = (event: DragEvent, slot: MascotAsset) => {
                         <template #content>
                             <div class="flex gap-4">
                                 <!-- 左側: マスコットリスト -->
-                                <div class="mascot-list flex flex-column gap-2" style="width: 240px; min-width: 240px;">
-                                    <div class="mascot-item active">
-                                        <span class="avatar">🤖</span>
+                                <div class="mascot-list flex flex-column gap-3" style="width: 240px; min-width: 240px; max-height: calc(100vh - 160px); overflow-y: auto;">
+                                    <div 
+                                        v-for="mascot in mascots" 
+                                        :key="mascot.id"
+                                        class="mascot-item"
+                                        :class="{ active: activeMascotId === mascot.id }"
+                                        @click="selectMascot(mascot)"
+                                    >
+                                        <div class="avatar-container flex align-items-center justify-content-center bg-slate-50 border-round overflow-hidden" style="width: 150px; height: 200px; font-size: 64px; flex-shrink: 0; border: 1px solid rgba(0, 0, 0, 0.04);">
+                                            <img v-if="mascot.avatar && mascot.avatar.startsWith('data:image/')" :src="mascot.avatar" style="width: 100%; height: 100%; object-fit: contain;" />
+                                            <span v-else class="avatar">{{ mascot.avatar || '🤖' }}</span>
+                                        </div>
                                         <div class="info">
-                                            <span class="name">デフォルトロボット</span>
-                                            <span class="desc">親しみやすいベーシックなAIマスコット</span>
+                                            <span class="name">{{ mascot.name }}</span>
                                         </div>
                                     </div>
                                 </div>
 
                                 <!-- 右側: マスコットアセット・詳細調整 -->
-                                <div class="flex-1 bg-gray-900 border-round p-3 border-1 border-gray-800 flex flex-column gap-3">
+                                <div class="flex-1 bg-slate-50 border-round p-3 border-1 border-gray-200 flex flex-column gap-3">
                                     <div class="flex justify-content-between align-items-center">
-                                        <h3 class="m-0 text-white font-bold flex align-items-center gap-2">
+                                        <h3 class="m-0 text-gray-800 font-bold flex align-items-center gap-2">
                                             <i class="pi pi-cog text-purple-400"></i>
                                             <span>マスコット詳細設定</span>
                                         </h3>
                                     </div>
 
                                     <!-- サブタブ -->
-                                    <div class="flex border-bottom border-gray-800 pb-2 gap-2">
+                                    <div class="flex border-bottom border-gray-200 pb-2 gap-2">
                                         <Button 
                                             label="表情アセット" 
                                             icon="pi pi-sliders-h" 
@@ -1024,9 +1063,48 @@ const onSpriteDrop = (event: DragEvent, slot: MascotAsset) => {
                                             />
                                         </div>
 
+                                        <!-- 4列 x n行 の表情アセットグリッド -->
+                                        <div class="form-field p-3 bg-white border-round border-1 border-gray-200 mt-2 flex flex-column gap-2">
+                                            <label class="font-bold text-xs text-gray-700 flex align-items-center gap-1 select-none">
+                                                <i class="pi pi-images text-purple-500"></i>
+                                                <span>表情グリッド ({{ registeredExpressions.length }} / 28 登録済み)</span>
+                                            </label>
+                                            
+                                            <div class="expression-grid-container pt-1" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; max-height: 420px; overflow-y: auto; width: 100%;">
+                                                <div 
+                                                    v-for="expr in editingMascot.assets.expressions" 
+                                                    :key="expr.id"
+                                                    class="expression-grid-cell relative flex flex-column align-items-center justify-content-center border-round border-1 border-gray-200 cursor-pointer bg-slate-50 overflow-hidden p-2"
+                                                    style="height: 108px; width: 100%; min-width: 0;"
+                                                    :class="{
+                                                        'has-image bg-white': expr.path,
+                                                        'default-expression': editingMascot.defaultExpressionId === expr.id
+                                                    }"
+                                                    @click="openExpressionEditModalWithExpression(expr)"
+                                                    title="クリックして位置調整を開く"
+                                                >
+                                                    <!-- 右上の標準（通常表示）スターバッジ -->
+                                                    <div v-if="editingMascot.defaultExpressionId === expr.id" class="absolute" style="top: 6px; right: 6px; z-index: 2;" title="通常表示（標準）">
+                                                        <i class="pi pi-star-fill text-yellow-500" style="font-size: 10px;"></i>
+                                                    </div>
+
+                                                    <!-- 表情画像 -->
+                                                    <div class="flex align-items-center justify-content-center border-round bg-white overflow-hidden" style="width: 52px; height: 52px; border: 1px solid rgba(0,0,0,0.03); flex-shrink: 0;">
+                                                        <img v-if="expr.path" :src="expr.path" class="w-full h-full object-contain" />
+                                                        <i v-else class="pi pi-plus text-gray-300 hover-text-gray-400" style="font-size: 12px;" title="表情を追加"></i>
+                                                    </div>
+
+                                                    <!-- 画像の下の表情ラベル -->
+                                                    <span class="text-xxs font-bold text-gray-600 text-center w-full text-ellipsis overflow-hidden mt-2 select-none flex align-items-center justify-content-center" style="height: 20px; line-height: 1; text-align: center; justify-content: center; align-items: center;">
+                                                        {{ expr.name }}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+
                                         <!-- 標準（通常表示）の表情設定 -->
-                                        <div class="form-field p-3 bg-gray-950 border-round border-1 border-gray-800 flex flex-column gap-2 mt-2">
-                                            <label class="font-bold text-xs text-gray-300 flex align-items-center gap-1 select-none">
+                                        <div class="form-field p-3 bg-white border-round border-1 border-gray-200 flex flex-column gap-2 mt-2">
+                                            <label class="font-bold text-xs text-gray-700 flex align-items-center gap-1 select-none">
                                                 <i class="pi pi-star text-yellow-500"></i>
                                                 <span>通常表示（標準）の表情</span>
                                             </label>
@@ -1048,12 +1126,12 @@ const onSpriteDrop = (event: DragEvent, slot: MascotAsset) => {
                                     <!-- サブタブ中身: プロフィール -->
                                     <div v-else class="flex flex-column gap-2">
                                         <div class="form-field">
-                                            <label class="text-xs font-semibold text-gray-300">マスコットキャラクターの性格・プロファイル</label>
+                                            <label class="text-xs font-semibold text-gray-700">マスコットキャラクターの性格・プロファイル</label>
                                             <textarea 
                                                 v-model="editingMascot.profile" 
                                                 placeholder="例: ツンデレなアンドロイド女子高生..." 
                                                 rows="5"
-                                                class="w-full p-2 bg-gray-950 border-1 border-gray-800 border-round text-white text-sm"
+                                                class="w-full p-2 bg-white border-1 border-gray-200 border-round text-gray-800 text-sm focus:border-purple-400 focus:outline-none"
                                                 style="resize: none;"
                                             ></textarea>
                                         </div>
@@ -1896,6 +1974,12 @@ const onSpriteDrop = (event: DragEvent, slot: MascotAsset) => {
 .content-container {
     max-width: 680px;
     margin: 0 auto;
+    transition: max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.content-container.full-width {
+    max-width: 100% !important;
+    margin: 0 !important;
 }
 
 .panel-section {
@@ -1930,40 +2014,45 @@ const onSpriteDrop = (event: DragEvent, slot: MascotAsset) => {
 
 .mascot-item {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 16px;
-    padding: 12px;
+    gap: 12px;
+    padding: 16px;
     background: #ffffff;
     border: 1px solid rgba(0, 0, 0, 0.06);
-    border-radius: 8px;
+    border-radius: 12px;
     cursor: pointer;
     transition: all 0.2s ease;
 }
 
 .mascot-item:hover {
     background: #f8fafc;
-    border-color: rgba(0, 0, 0, 0.1);
+    border-color: rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
 }
 
 .mascot-item.active {
     border-color: #a855f7;
-    background: rgba(168, 85, 247, 0.04);
+    background: rgba(168, 85, 247, 0.03);
+    box-shadow: 0 4px 16px rgba(168, 85, 247, 0.06);
 }
 
 .mascot-item .avatar {
-    font-size: 32px;
+    font-size: 64px;
+    line-height: 1;
 }
 
 .mascot-item .info {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    justify-content: center;
+    width: 100%;
 }
 
 .mascot-item .name {
-    font-weight: 600;
+    font-weight: 700;
     font-size: 14px;
     color: #1e293b;
+    text-align: center;
 }
 
 .mascot-item .desc {
@@ -2275,4 +2364,39 @@ const onSpriteDrop = (event: DragEvent, slot: MascotAsset) => {
 .crop-corner.top-right { top: -4px; right: -4px; cursor: nesw-resize; }
 .crop-corner.bottom-left { bottom: -4px; left: -4px; cursor: nesw-resize; }
 .crop-corner.bottom-right { bottom: -4px; right: -4px; cursor: nwse-resize; }
+
+.expression-grid-cell {
+    border: 1px dashed #cbd5e1 !important;
+    border-radius: 12px !important;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.expression-grid-cell:hover {
+    background-color: #f8fafc !important;
+    border: 1.5px dashed #a855f7 !important;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(168, 85, 247, 0.08);
+}
+
+.expression-grid-cell.default-expression {
+    border: 1.5px dashed #eab308 !important;
+    background-color: #fefce8 !important;
+}
+
+.expression-grid-cell.default-expression:hover {
+    box-shadow: 0 4px 12px rgba(234, 179, 8, 0.12);
+}
+
+.expression-cell-label {
+    background: rgba(255, 255, 255, 0.85);
+    padding: 1px 4px;
+    border-radius: 4px;
+    backdrop-filter: blur(2px);
+    border: 1px solid rgba(0, 0, 0, 0.03);
+    color: #64748b;
+}
+
+.expression-grid-cell.has-image .expression-cell-label {
+    color: #475569 !important;
+}
 </style>
