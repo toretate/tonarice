@@ -14,12 +14,5 @@
 - [x] グローバルCSS `main.css` への Tailwind および PrimeFlex ディレクティブの統合設定
 - [x] `ExpressionEditorModal.vue` の style scoped に一時的に入れた Vanilla 補完用 CSS を綺麗にクリーンアップ（削除）
 - [x] `ImageCropModal.vue` において、四隅の `.crop-corner` (■) および四辺の境界バーのドラッグによる縦・横・自由縦横・および Shift キーによるアスペクト比ロックリサイズ機能を統合実装
+- [x] トリミング設定枠のパーセント配置の基準を、余白を含む親コンテナからアセット画像実表示サイズ完全一致ラッパーに変更し、実際の切り出し物理ピクセルとの座標ズレ不具合を完璧に修正
 - [x] ビルド検証 (`cmd /c npm run build`) を行い、エラーなしで正常終了することを確認
-
-
-
-
-
-
-
-
