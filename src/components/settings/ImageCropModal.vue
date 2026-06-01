@@ -264,40 +264,43 @@ onMounted(() => {
                     class="crop-work-container flex-1 border-round bg-slate-50 border-1 border-gray-200 flex align-items-center justify-content-center relative overflow-hidden"
                     style="min-height: 0; box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.05);"
                 >
-                    <img 
-                        ref="cropImageRef"
-                        :src="imageSrc" 
-                        class="crop-base-img max-width-full max-height-full object-contain select-none"
-                        style="max-width: 100%; max-height: 100%; pointer-events: none;"
-                        @load="handleCropImageLoaded"
-                    />
+                    <!-- 画像の実際の表示サイズに完全にフィットする相対位置ラッパー -->
+                    <div class="relative flex align-items-center justify-content-center" style="position: relative; max-width: 100%; max-height: 100%; display: flex; align-items: center; justify-content: center;">
+                        <img 
+                            ref="cropImageRef"
+                            :src="imageSrc" 
+                            class="crop-base-img select-none"
+                            style="max-width: 100%; max-height: 100%; display: block; pointer-events: none; object-fit: contain;"
+                            @load="handleCropImageLoaded"
+                        />
 
-                    <!-- 切り出し枠 (紫のアウトラインと明るい内側) -->
-                    <div 
-                        v-if="cropImageWidth > 0 && cropImageRef"
-                        class="crop-box absolute border-2 border-purple-500 cursor-move"
-                        :style="{
-                            width: ((cropWidth / cropImageWidth) * 100) + '%',
-                            height: ((cropHeight / cropImageHeight) * 100) + '%',
-                            left: ((cropX / cropImageWidth) * 100) + '%',
-                            top: ((cropY / cropImageHeight) * 100) + '%',
-                            boxShadow: '0 0 0 9999px rgba(255, 255, 255, 0.45)'
-                        }"
-                        @mousedown="onCropMouseDown"
-                    >
-                        <!-- 上下の枠（ボーダー検出用バー） -->
-                        <div class="crop-edge edge-top" @mousedown.stop="onResizeMouseDown($event, 'top')"></div>
-                        <div class="crop-edge edge-bottom" @mousedown.stop="onResizeMouseDown($event, 'bottom')"></div>
-                        
-                        <!-- 左右の枠（ボーダー検出用バー） -->
-                        <div class="crop-edge edge-left" @mousedown.stop="onResizeMouseDown($event, 'left')"></div>
-                        <div class="crop-edge edge-right" @mousedown.stop="onResizeMouseDown($event, 'right')"></div>
+                        <!-- 切り出し枠 (基準が画像の実表示領域になるため完全に一致します) -->
+                        <div 
+                            v-if="cropImageWidth > 0 && cropImageRef"
+                            class="crop-box absolute border-2 border-purple-500 cursor-move"
+                            :style="{
+                                width: ((cropWidth / cropImageWidth) * 100) + '%',
+                                height: ((cropHeight / cropImageHeight) * 100) + '%',
+                                left: ((cropX / cropImageWidth) * 100) + '%',
+                                top: ((cropY / cropImageHeight) * 100) + '%',
+                                boxShadow: '0 0 0 9999px rgba(255, 255, 255, 0.45)'
+                            }"
+                            @mousedown="onCropMouseDown"
+                        >
+                            <!-- 上下の枠（ボーダー検出用バー） -->
+                            <div class="crop-edge edge-top" @mousedown.stop="onResizeMouseDown($event, 'top')"></div>
+                            <div class="crop-edge edge-bottom" @mousedown.stop="onResizeMouseDown($event, 'bottom')"></div>
+                            
+                            <!-- 左右の枠（ボーダー検出用バー） -->
+                            <div class="crop-edge edge-left" @mousedown.stop="onResizeMouseDown($event, 'left')"></div>
+                            <div class="crop-edge edge-right" @mousedown.stop="onResizeMouseDown($event, 'right')"></div>
 
-                        <!-- 四隅のハンドル (■) -->
-                        <div class="crop-corner top-left" @mousedown.stop="onResizeMouseDown($event, 'top-left')"></div>
-                        <div class="crop-corner top-right" @mousedown.stop="onResizeMouseDown($event, 'top-right')"></div>
-                        <div class="crop-corner bottom-left" @mousedown.stop="onResizeMouseDown($event, 'bottom-left')"></div>
-                        <div class="crop-corner bottom-right" @mousedown.stop="onResizeMouseDown($event, 'bottom-right')"></div>
+                            <!-- 四隅のハンドル (■) -->
+                            <div class="crop-corner top-left" @mousedown.stop="onResizeMouseDown($event, 'top-left')"></div>
+                            <div class="crop-corner top-right" @mousedown.stop="onResizeMouseDown($event, 'top-right')"></div>
+                            <div class="crop-corner bottom-left" @mousedown.stop="onResizeMouseDown($event, 'bottom-left')"></div>
+                            <div class="crop-corner bottom-right" @mousedown.stop="onResizeMouseDown($event, 'bottom-right')"></div>
+                        </div>
                     </div>
                 </div>
             </div>
