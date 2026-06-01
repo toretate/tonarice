@@ -458,6 +458,27 @@ const selectMascot = (mascot: MascotData) => {
     activePose.value = mascot.assets.poses?.[0] || null;
 };
 
+// サイドバー開閉管理
+const isSidebarCollapsed = ref(true); // 基本は閉じている
+
+const handleMouseEnter = () => {
+    isSidebarCollapsed.value = false;
+};
+
+const handleMouseLeave = () => {
+    isSidebarCollapsed.value = true;
+};
+
+const menuItems = ref([
+    { name: 'マスコット', value: 'mascot', icon: 'pi pi-user' },
+    { name: 'チャットAI', value: 'chat', icon: 'pi pi-comments' },
+    { name: 'チャットウィンドウ', value: 'chatwindow', icon: 'pi pi-window-maximize' },
+    { name: '音声AI', value: 'voice', icon: 'pi pi-volume-up' },
+    { name: '画像AI', value: 'image', icon: 'pi pi-image' },
+    { name: '動画AI', value: 'video', icon: 'pi pi-video' },
+    { name: 'APIキー', value: 'apikey', icon: 'pi pi-key' }
+]);
+
 // 表情モーダル用状態変数
 const isEditingExpressionsModal = ref(false);
 const isAssigningEmotionsModal = ref(false);
@@ -905,80 +926,45 @@ const onSpriteDrop = (event: DragEvent, slot: MascotAsset) => {
 <template>
     <div class="settings-layout">
         <!-- 1. 左サイドバー -->
-        <aside class="sidebar drag-area">
-            <div class="brand no-drag">
-                <span class="logo">🤖</span>
-                <div class="brand-text">
-                    <h2>Mascot App</h2>
-                    <p>環境設定</p>
+        <aside 
+            class="sidebar drag-area" 
+            :class="{ 'collapsed': isSidebarCollapsed }"
+            @mouseenter="handleMouseEnter"
+            @mouseleave="handleMouseLeave"
+        >
+            <div class="brand no-drag flex justify-content-between align-items-center">
+                <div class="brand-info flex align-items-center gap-2" v-if="!isSidebarCollapsed">
+                    <span class="logo">🤖</span>
+                    <div class="brand-text">
+                        <h2>Mascot App</h2>
+                        <p>環境設定</p>
+                    </div>
+                </div>
+                <div class="brand-info flex align-items-center justify-content-center w-full" v-else>
+                    <span class="logo" style="font-size: 24px;">🤖</span>
                 </div>
             </div>
 
             <!-- ナビゲーションメニュー -->
             <nav class="menu no-drag">
                 <button 
+                    v-for="item in menuItems"
+                    :key="item.value"
                     class="menu-item" 
-                    :class="{ active: activeMenu === 'mascot' }"
-                    @click="activeMenu = 'mascot'"
+                    :class="{ active: activeMenu === item.value, 'collapsed': isSidebarCollapsed }"
+                    @click="activeMenu = item.value"
+                    :title="isSidebarCollapsed ? item.name : ''"
                 >
-                    <i class="pi pi-user"></i>
-                    <span>マスコット</span>
-                </button>
-                <button 
-                    class="menu-item" 
-                    :class="{ active: activeMenu === 'chat' }"
-                    @click="activeMenu = 'chat'"
-                >
-                    <i class="pi pi-comments"></i>
-                    <span>チャットAI</span>
-                </button>
-                <button 
-                    class="menu-item" 
-                    :class="{ active: activeMenu === 'chatwindow' }"
-                    @click="activeMenu = 'chatwindow'"
-                >
-                    <i class="pi pi-window-maximize"></i>
-                    <span>チャットウィンドウ</span>
-                </button>
-                <button 
-                    class="menu-item" 
-                    :class="{ active: activeMenu === 'voice' }"
-                    @click="activeMenu = 'voice'"
-                >
-                    <i class="pi pi-volume-up"></i>
-                    <span>音声AI</span>
-                </button>
-                <button 
-                    class="menu-item" 
-                    :class="{ active: activeMenu === 'image' }"
-                    @click="activeMenu = 'image'"
-                >
-                    <i class="pi pi-image"></i>
-                    <span>画像AI</span>
-                </button>
-                <button 
-                    class="menu-item" 
-                    :class="{ active: activeMenu === 'video' }"
-                    @click="activeMenu = 'video'"
-                >
-                    <i class="pi pi-video"></i>
-                    <span>動画AI</span>
-                </button>
-                <button 
-                    class="menu-item" 
-                    :class="{ active: activeMenu === 'apikey' }"
-                    @click="activeMenu = 'apikey'"
-                >
-                    <i class="pi pi-key"></i>
-                    <span>APIキー</span>
+                    <i :class="item.icon"></i>
+                    <span v-if="!isSidebarCollapsed">{{ item.name }}</span>
                 </button>
             </nav>
 
             <!-- 最下部：アプリ終了ボタン -->
             <div class="sidebar-footer no-drag">
-                <button class="quit-btn" @click="quitApp">
+                <button class="quit-btn" @click="quitApp" :title="isSidebarCollapsed ? 'アプリ終了' : ''">
                     <i class="pi pi-power-off"></i>
-                    <span>アプリ終了</span>
+                    <span v-if="!isSidebarCollapsed">アプリ終了</span>
                 </button>
             </div>
         </aside>
@@ -1858,6 +1844,11 @@ const onSpriteDrop = (event: DragEvent, slot: MascotAsset) => {
 
 /* --- 左サイドバーのスタイル --- */
 .sidebar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    z-index: 1000;
     width: 240px;
     background: #ffffff; /* 純白 */
     border-right: 1px solid rgba(0, 0, 0, 0.06); /* 淡い境界線 */
@@ -1866,6 +1857,17 @@ const onSpriteDrop = (event: DragEvent, slot: MascotAsset) => {
     padding: 24px 16px;
     box-sizing: border-box;
     cursor: grab;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+    flex-shrink: 0;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.06);
+}
+
+/* 折りたたみ時のサイドバー */
+.sidebar.collapsed {
+    width: 64px;
+    padding: 24px 8px;
+    box-shadow: none;
 }
 
 .brand {
@@ -1875,10 +1877,18 @@ const onSpriteDrop = (event: DragEvent, slot: MascotAsset) => {
     padding-bottom: 24px;
     border-bottom: 1px solid rgba(0, 0, 0, 0.06);
     margin-bottom: 20px;
+    position: relative;
+    min-height: 48px;
+}
+
+.sidebar.collapsed .brand {
+    justify-content: center;
+    gap: 0;
 }
 
 .logo {
     font-size: 28px;
+    flex-shrink: 0;
 }
 
 .brand-text h2 {
@@ -1915,10 +1925,19 @@ const onSpriteDrop = (event: DragEvent, slot: MascotAsset) => {
     cursor: pointer;
     text-align: left;
     transition: all 0.2s ease;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.sidebar.collapsed .menu-item {
+    justify-content: center;
+    padding: 10px 0;
+    gap: 0;
 }
 
 .menu-item i {
     font-size: 15px;
+    flex-shrink: 0;
 }
 
 .menu-item:hover {
@@ -1954,6 +1973,12 @@ const onSpriteDrop = (event: DragEvent, slot: MascotAsset) => {
     transition: all 0.2s ease;
 }
 
+.sidebar.collapsed .quit-btn {
+    padding: 10px 0;
+    justify-content: center;
+    gap: 0;
+}
+
 .quit-btn:hover {
     background: rgba(239, 68, 68, 0.1);
     color: #dc2626;
@@ -1967,6 +1992,7 @@ const onSpriteDrop = (event: DragEvent, slot: MascotAsset) => {
     height: 100%;
     overflow-y: auto;
     padding: 32px;
+    margin-left: 64px; /* 折りたたまれたサイドバー(64px)分の余白を確保して被らないようにする */
     box-sizing: border-box;
     background: #f1f5f9; /* 明るい背景 */
 }
