@@ -241,25 +241,35 @@ export const useConfigStore = defineStore('config', () => {
             activeMascotId: activeMascotId.value
         };
 
-        if (window.electronAPI) {
-            await window.electronAPI.updateAppConfig(payload);
-        }
-
         // 外部サーバー連携が有効な場合、サーバー側にも設定データを送信して一元保存
+        let savedPayload = payload;
         if (useServer.value) {
             try {
                 const serverUrl = `http://${serverHost.value}:${serverPort.value}/api/config`;
                 console.log(`[Config] Saving config to server: ${serverUrl}`);
-                await fetch(serverUrl, {
+                const response = await fetch(serverUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify(payload)
                 });
+                if (response.ok) {
+                    const resJson = await response.json();
+                    if (resJson.success && resJson.config) {
+                        console.log('[Config] Config successfully updated with server resolved static URLs');
+                        // サーバーで画像パスが置換された最新の設定にストアを同期
+                        updateConfig(resJson.config);
+                        savedPayload = resJson.config;
+                    }
+                }
             } catch (e: any) {
                 console.warn('[Config] Failed to save config to server:', e.message);
             }
+        }
+
+        if (window.electronAPI) {
+            await window.electronAPI.updateAppConfig(savedPayload);
         }
 
         // localStorage へのバックアップ書き込み
