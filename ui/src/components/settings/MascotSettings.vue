@@ -90,6 +90,8 @@ const emit = defineEmits<{
     (e: 'update:activeMascotId', id: string): void;
     (e: 'live-update'): void;
     (e: 'save-settings'): void;
+    (e: 'add-mascot'): void;
+    (e: 'delete-mascot', id: string): void;
 }>();
 
 const activeMascotSubTab = ref<'profile' | 'outfit' | 'expression'>('expression');
@@ -568,6 +570,13 @@ const closeAssigningEmotionsModal = async () => {
                 :class="{ active: activeMascotId === mascot.id }"
                 @click="selectMascot(mascot)"
             >
+                <!-- マスコット削除ボタン -->
+                <Button 
+                    icon="pi pi-trash" 
+                    class="p-button-danger p-button-text p-button-sm mascot-delete-btn" 
+                    @click.stop="emit('delete-mascot', mascot.id)"
+                    title="マスコットを削除"
+                />
                 <div class="avatar-container flex align-items-center justify-content-center bg-slate-50 border-round overflow-hidden" style="width: 150px; height: 200px; font-size: 64px; flex-shrink: 0; border: 1px solid rgba(0, 0, 0, 0.04); position: relative;">
                     <!-- 大画面プレビュー（420x420）とアスペクト比を完全に一致させるための 140x140 正方形ラッパー -->
                     <div class="mascot-composite-preview relative flex align-items-center justify-content-center" style="width: 140px; height: 140px; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden;">
@@ -617,6 +626,13 @@ const closeAssigningEmotionsModal = async () => {
                     <span class="name">{{ mascot.name }}</span>
                 </div>
             </div>
+            <!-- マスコット追加ボタン -->
+            <Button 
+                label="マスコット追加" 
+                icon="pi pi-plus" 
+                class="p-button-outlined p-button-secondary w-full py-3"
+                @click="emit('add-mascot')"
+            />
         </div>
 
         <!-- 右側: マスコットアセット・詳細調整 (白基調) -->
@@ -907,6 +923,7 @@ const closeAssigningEmotionsModal = async () => {
 }
 
 .mascot-item {
+    position: relative !important;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
     padding: 8px;
@@ -923,6 +940,25 @@ const closeAssigningEmotionsModal = async () => {
     background: #f8fafc;
     transform: translateY(-2px);
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+.mascot-delete-btn {
+    position: absolute !important;
+    top: 8px !important;
+    right: 8px !important;
+    z-index: 20 !important;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    background: rgba(255, 255, 255, 0.9) !important;
+    border-radius: 50% !important;
+    width: 28px !important;
+    height: 28px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
+}
+.mascot-item:hover .mascot-delete-btn {
+    opacity: 1;
 }
 .mascot-item.active {
     border-color: #a855f7;
