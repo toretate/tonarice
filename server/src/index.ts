@@ -7,6 +7,7 @@ import http from 'http';
 import { WebSocketServer } from 'ws';
 import { removeBackground } from './services/remove-bg-service';
 import { VoiceAiService } from './services/voice-ai-service';
+import { ChatAiService } from './services/chat-ai-service';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -222,72 +223,17 @@ wss.on('connection', (ws) => {
                     data: { status: 'thinking' }
                 }));
 
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 60000);
-
                 let reply = '';
                 try {
-                    const currentEngine = engine || 'gemini';
-                    if (currentEngine === 'lmstudio') {
-                        // LM Studio への接続
-                        const defaultEndpoint = 'http://127.0.0.1:1234/v1/';
-                        const apiBase = lmstudioEndpoint || defaultEndpoint;
-                        const url = apiBase.endsWith('/') ? `${apiBase}chat/completions` : `${apiBase}/chat/completions`;
-                        const targetModel = model || 'unspecified';
-
-                        console.log(`[WS] Routing to LM Studio: ${url} (Model: ${targetModel})`);
-
-                        const response = await fetch(url, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                model: targetModel,
-                                messages: [
-                                    { role: 'system', content: systemPrompt },
-                                    { role: 'user', content: message }
-                                ]
-                            }),
-                            signal: controller.signal
-                        });
-
-                        clearTimeout(timeoutId);
-
-                        if (!response.ok) {
-                            const errorText = await response.text();
-                            throw new Error(`LM Studio Error: ${response.status} ${errorText}`);
-                        }
-
-                        const resJson: any = await response.json();
-                        reply = resJson.choices?.[0]?.message?.content || '';
-                    } else {
-                        // Gemini への接続
-                        const targetModel = model || 'gemini-1.5-flash';
-                        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`;
-
-                        console.log(`[WS] Routing to Gemini: ${geminiUrl} (Model: ${targetModel})`);
-
-                        const response = await fetch(geminiUrl, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                contents: [{ role: 'user', parts: [{ text: message }] }],
-                                systemInstruction: { parts: [{ text: systemPrompt || 'You are a helpful assistant.' }] }
-                            }),
-                            signal: controller.signal
-                        });
-
-                        clearTimeout(timeoutId);
-
-                        if (!response.ok) {
-                            const errorText = await response.text();
-                            throw new Error(`Gemini API Error: ${response.status} ${errorText}`);
-                        }
-
-                        const resJson: any = await response.json();
-                        reply = resJson.candidates?.[0]?.content?.parts?.[0]?.text || '';
-                    }
+                    reply = await ChatAiService.generateResponse({
+                        message,
+                        apiKey,
+                        systemPrompt,
+                        model,
+                        engine,
+                        lmstudioEndpoint
+                    });
                 } catch (aiError: any) {
-                    clearTimeout(timeoutId);
                     console.error('[WS] AI Engine Error:', aiError.message);
                     ws.send(JSON.stringify({
                         event: 'chat-error',
