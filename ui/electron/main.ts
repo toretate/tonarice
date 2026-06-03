@@ -9,7 +9,13 @@ AiExpressionService.setAdapter({
     existsSync: (p: string) => fs.existsSync(p),
     pathJoin: (...args: string[]) => path.join(...args),
     pathExtname: (p: string) => path.extname(p),
-    cwd: () => process.cwd()
+    cwd: () => {
+        const currentCwd = process.cwd();
+        if (path.basename(currentCwd) === 'ui') {
+            return path.dirname(currentCwd);
+        }
+        return currentCwd;
+    }
 });
 
 // 開発環境と本番環境の判定
