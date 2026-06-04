@@ -1,6 +1,36 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
+import { useConfigStore } from '../../store/config';
 import Button from 'primevue/button';
+
+const configStore = useConfigStore();
+
+// 画像かどうかの判定
+const isImage = (path: string | undefined | null): boolean => {
+    if (!path) return false;
+    return path.startsWith('data:image/') || 
+           path.startsWith('/mascots/') || 
+           path.startsWith('http://') || 
+           path.startsWith('https://') ||
+           /\.(png|jpg|jpeg|webp|gif)$/i.test(path);
+};
+
+// アセットURLの解決
+const resolveImageUrl = (path: string | undefined | null): string => {
+    if (!path) return '';
+    if (path.startsWith('data:image/')) {
+        return path;
+    }
+    let resolved = path;
+    if (path.startsWith('/mascots/') && configStore.useServer) {
+        resolved = `http://${configStore.serverHost}:${configStore.serverPort}${path}`;
+    }
+    if (/^[a-zA-Z]:\\/.test(resolved)) {
+        return resolved;
+    }
+    const separator = resolved.includes('?') ? '&' : '?';
+    return `${resolved}${separator}v=${configStore.configVersion}`;
+};
 
 interface MascotAsset {
     id: string;
@@ -386,20 +416,43 @@ const importGeneratedSprite = () => {
                                 {{ selectedCount }} / 16 選択中
                             </span>
                         </div>
-                        <div class="emotions-chips-grid mt-1 flex flex-wrap gap-1.5" style="max-height: 140px; overflow-y: auto;">
+                        <div class="emotions-cards-grid mt-1" style="max-height: 240px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; padding: 2px;">
                             <div 
                                 v-for="expr in currentExpressions" 
                                 :key="expr.id"
-                                class="emotion-chip flex align-items-center gap-1.5 px-2.5 py-1.5 border-round border-1 cursor-pointer transition-all text-xxs font-bold select-none"
+                                class="emotion-card flex flex-column border-round border-1 cursor-pointer transition-all relative overflow-hidden"
+                                :style="{
+                                    aspectRatio: '2/3',
+                                    height: '108px'
+                                }"
                                 :class="{
-                                    'active bg-purple-50 border-purple-400 text-purple-700 shadow-sm': selectedEmotions.includes(expr.name),
-                                    'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100': !selectedEmotions.includes(expr.name),
-                                    'opacity-50 cursor-not-allowed': selectedCount >= 16 && !selectedEmotions.includes(expr.name)
+                                    'active border-purple-500 shadow-sm': selectedEmotions.includes(expr.name),
+                                    'border-slate-200 bg-white hover:bg-slate-50': !selectedEmotions.includes(expr.name),
+                                    'opacity-50 cursor-not-allowed': selectedCount >= 16 && !selectedEmotions.includes(expr.name),
+                                    'border-dashed opacity-75': !expr.path
                                 }"
                                 @click="toggleEmotion(expr.name)"
                             >
-                                <i class="pi" :class="selectedEmotions.includes(expr.name) ? 'pi-check-circle' : 'pi-circle'"></i>
-                                <span>{{ expr.name }}</span>
+                                <!-- 画像表示エリア -->
+                                <div class="card-image-area flex-1 flex align-items-center justify-content-center bg-slate-50 overflow-hidden relative">
+                                    <img v-if="expr.path && isImage(expr.path)" :src="resolveImageUrl(expr.path)" class="w-full h-full object-contain" />
+                                    <i v-else class="pi pi-image text-slate-300" style="font-size: 24px;"></i>
+                                    
+                                    <!-- 選択状態のオーバーレイ / アイコン -->
+                                    <div v-if="selectedEmotions.includes(expr.name)" class="absolute inset-0 bg-purple-500/10 flex align-items-center justify-content-center">
+                                        <i class="pi pi-check-circle text-purple-600 bg-white rounded-full text-base shadow-sm"></i>
+                                    </div>
+                                    
+                                    <!-- 作成済みバッジ (右上の小さな緑チェックマーク) -->
+                                    <div v-if="expr.path" class="absolute top-1 right-1 bg-green-500 text-white rounded-full flex align-items-center justify-content-center" style="width: 14px; height: 14px;" title="作成済み">
+                                        <i class="pi pi-check" style="font-size: 8px;"></i>
+                                    </div>
+                                </div>
+                                
+                                <!-- ラベルエリア -->
+                                <div class="card-label-area p-1 text-center border-top border-slate-100 flex align-items-center justify-content-center bg-white" style="height: 24px;">
+                                    <span class="text-xxs font-bold text-slate-700 text-ellipsis overflow-hidden whitespace-nowrap w-full">{{ expr.name }}</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -572,12 +625,15 @@ const importGeneratedSprite = () => {
     border: 1px solid #e2e8f0;
 }
 
-.emotion-chip {
+.emotion-card {
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.emotion-chip:hover:not(.opacity-50) {
+.emotion-card:hover:not(.opacity-50) {
     transform: translateY(-1px);
-    box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+.emotion-card.active {
+    box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.2);
 }
 
 .text-xxs {
