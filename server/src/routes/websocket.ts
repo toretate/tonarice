@@ -5,6 +5,38 @@ import { ChatAiService } from '../services/chat-ai-service';
 import { VoiceAiService } from '../services/voice-ai-service';
 import { authenticateUserToken, parseCookies } from '../middlewares/auth-middleware';
 
+// ユーザーごとのWebSocket接続を管理するマップ（認証なしの場合は 'anonymous' を使用）
+const userConnections = new Map<string, Set<WebSocket>>();
+
+function addConnection(userId: string, ws: WebSocket) {
+    if (!userConnections.has(userId)) {
+        userConnections.set(userId, new Set());
+    }
+    userConnections.get(userId)!.add(ws);
+}
+
+function removeConnection(userId: string, ws: WebSocket) {
+    const conns = userConnections.get(userId);
+    if (conns) {
+        conns.delete(ws);
+        if (conns.size === 0) {
+            userConnections.delete(userId);
+        }
+    }
+}
+
+function broadcastToUser(userId: string, event: string, data: any) {
+    const conns = userConnections.get(userId);
+    if (conns) {
+        const payload = JSON.stringify({ event, data });
+        conns.forEach((client) => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(payload);
+            }
+        });
+    }
+}
+
 export function setupWebSocket(wss: WebSocketServer) {
     wss.on('connection', async (ws: WebSocket, req: IncomingMessage) => {
         console.log('[WS] Client connecting...');
@@ -21,6 +53,7 @@ export function setupWebSocket(wss: WebSocketServer) {
             token = cookies['session_token'];
         }
 
+        let userId = 'anonymous';
         try {
             if (!process.env.GOOGLE_CLIENT_ID) {
                 console.warn('[WS] 警告: GOOGLE_CLIENT_ID が環境変数に設定されていません。認証なしで接続を許可します。');
@@ -32,6 +65,7 @@ export function setupWebSocket(wss: WebSocketServer) {
                 }
                 const user = await authenticateUserToken(token);
                 console.log(`[WS] Authentication successful for user: ${user.email}`);
+                userId = user.email;
             }
         } catch (authError: any) {
             console.error('[WS] Authentication failed:', authError.message);
@@ -39,7 +73,9 @@ export function setupWebSocket(wss: WebSocketServer) {
             return;
         }
 
-        console.log('[WS] Client connected successfully');
+        // コネクションの登録
+        addConnection(userId, ws);
+        console.log(`[WS] Client connected successfully (User: ${userId})`);
 
 
         ws.on('message', async (messageData) => {
@@ -97,24 +133,49 @@ export function setupWebSocket(wss: WebSocketServer) {
                         return;
                     }
 
+                    // タイマータグのパース
+                    let timerData: { seconds: number; memo: string } | null = null;
+                    const timerMatch = reply.match(/\[TIMER:(\d+),(.+?)\]/i);
+                    if (timerMatch && timerMatch[1] && timerMatch[2]) {
+                        timerData = {
+                            seconds: parseInt(timerMatch[1], 10),
+                            memo: timerMatch[2].trim()
+                        };
+                    }
+
+                    // タイマータグを除去したクリーンな応答
+                    const cleanReply = reply.replace(/\[TIMER:.*?\]/gi, '').trim();
+
                     // 感情タグのパース
                     let detectedEmotion = 'neutral';
-                    const emotionMatch = reply.match(/\[(\w+)\]/);
+                    const emotionMatch = cleanReply.match(/\[(\w+)\]/);
                     if (emotionMatch && emotionMatch[1]) {
                         detectedEmotion = emotionMatch[1].toLowerCase().trim();
                     }
 
-                    const speechText = reply.replace(/\[\w+\]/g, '').trim();
+                    const speechText = cleanReply.replace(/\[\w+\]/g, '').trim();
 
                     // 3. AI応答テキストのプッシュ
                     ws.send(JSON.stringify({
                         event: 'chat-response',
                         data: {
-                            text: reply,
+                            text: cleanReply,
                             speechText: speechText,
                             emotion: detectedEmotion
                         }
                     }));
+
+                    // タイマーが検出された場合、サーバー側でセットする
+                    if (timerData) {
+                        const durationMs = timerData.seconds * 1000;
+                        console.log(`[WS] Timer registered for user ${userId}: ${timerData.seconds}s, Memo: "${timerData.memo}"`);
+                        setTimeout(() => {
+                            console.log(`[WS] Timer triggered for user ${userId}: "${timerData!.memo}"`);
+                            broadcastToUser(userId, 'timer-trigger', {
+                                memo: timerData!.memo
+                            });
+                        }, durationMs);
+                    }
 
                     // 4. VOICEVOXによる音声合成
                     if (speechText) {
@@ -156,7 +217,8 @@ export function setupWebSocket(wss: WebSocketServer) {
         });
 
         ws.on('close', () => {
-            console.log('[WS] Client disconnected');
+            console.log(`[WS] Client disconnected (User: ${userId})`);
+            removeConnection(userId, ws);
         });
     });
 }
