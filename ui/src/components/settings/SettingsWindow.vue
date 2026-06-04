@@ -365,6 +365,7 @@ const testLmStudioConnection = async () => {
             if (result.success) {
                 connectionState.value = 'success';
                 lmstudioModels.value = result.models;
+                console.log('[LmStudio] Loaded models details:', JSON.stringify(result.models));
                 if (!lmstudioModel.value && result.models.length > 0) {
                     lmstudioModel.value = result.models[0].id;
                 }
