@@ -1112,7 +1112,14 @@ app.whenReady().then(() => {
     ipcMain.handle('get-lmstudio-models', async (event, endpoint: string) => {
         const defaultEndpoint = 'http://127.0.0.1:1234/v1/';
         const apiBase = endpoint || defaultEndpoint;
-        const url = apiBase.endsWith('/') ? `${apiBase}models` : `${apiBase}/models`;
+        
+        // LM Studioの独自拡張API（/api/v1/models）を利用して、詳細な capabilities を取得する
+        let url = '';
+        if (/\/v1\/?$/.test(apiBase)) {
+            url = apiBase.replace(/\/v1\/?$/, '/api/v1/models');
+        } else {
+            url = apiBase.endsWith('/') ? `${apiBase}models` : `${apiBase}/models`;
+        }
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒タイムアウト
