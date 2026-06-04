@@ -82,6 +82,9 @@ const fetchGeminiModels = async () => {
                 if (!geminiModel.value || !result.models.includes(geminiModel.value)) {
                     geminiModel.value = result.models.find((m: string) => m.includes('2.0-flash')) || result.models[0];
                 }
+                // キャッシュに保存
+                localStorage.setItem('geminiModelsCache', JSON.stringify(result.models));
+                localStorage.setItem('geminiApiKeyForCache', geminiApiKey.value);
             }
         } else {
             geminiConnectionState.value = 'failed';
@@ -537,19 +540,23 @@ onMounted(async () => {
         authStore.checkAuthStatus();
     }
 
-    if (geminiApiKey.value) {
-        fetchGeminiModels();
+    // Geminiのキャッシュロード
+    const cachedModels = localStorage.getItem('geminiModelsCache');
+    const cachedKey = localStorage.getItem('geminiApiKeyForCache');
+    if (cachedModels && cachedKey === geminiApiKey.value) {
+        try {
+            const parsed = JSON.parse(cachedModels);
+            geminiModels.value = parsed;
+            geminiModelOptions.value = parsed;
+            geminiConnectionState.value = 'success';
+        } catch (e) {
+            console.error('Failed to parse cached Gemini models', e);
+        }
     }
 
     if (selectedEngine.value === 'lmstudio') {
         testLmStudioConnection();
     }
-
-    watch(geminiApiKey, (newKey) => {
-        if (newKey) {
-            fetchGeminiModels();
-        }
-    });
     
     if (selectedVoiceEngine.value === 'voicevox') {
         testVoicevoxConnection();
