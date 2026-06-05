@@ -1,8 +1,8 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import { AppConfig } from '../app-config';
-import { getMascotWindow, debouncedSaveMascotPosition } from '../mascot-window';
-import { getChatWindow, setChatOffsets, getChatOffsets, syncChatWindowPosition } from '../chat-window';
-import { getSettingsWindow } from '../settings-window';
+import { getMascotWindow, debouncedSaveMascotPosition } from '../window/mascot-window';
+import { getChatWindow, setChatOffsets, getChatOffsets, syncChatWindowPosition } from '../window/chat-window';
+import { getSettingsWindow } from '../window/settings-window';
 
 /**
  * Window 操作関連の IPC ハンドラーを登録する

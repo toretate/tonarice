@@ -13,9 +13,9 @@ import { registerAuthHandlers } from './ipc-handlers/auth-handler';
 import { registerScheduleHandlers } from './ipc-handlers/schedule-handler';
 import { registerConfigHandlers } from './ipc-handlers/config-handler';
 import { registerWindowHandlers } from './ipc-handlers/window-handler';
-import { initSettingsWindow, getSettingsWindow, createSettingsWindow, openSettingsWindow } from './settings-window';
-import { initMascotWindow, getMascotWindow, createMascotWindow, debouncedSaveMascotPosition } from './mascot-window';
-import { initChatWindow, getChatWindow, createChatWindow, syncChatWindowPosition, adjustChatWindowPosition, getEffectiveChatAlwaysOnTop, setChatOffsets, getChatOffsets } from './chat-window';
+import { initSettingsWindow, getSettingsWindow, createSettingsWindow, openSettingsWindow } from './window/settings-window';
+import { initMascotWindow, getMascotWindow, createMascotWindow, debouncedSaveMascotPosition } from './window/mascot-window';
+import { initChatWindow, getChatWindow, createChatWindow, syncChatWindowPosition, adjustChatWindowPosition, getEffectiveChatAlwaysOnTop, setChatOffsets, getChatOffsets } from './window/chat-window';
 import { AppConfig, ConfigData } from './app-config';
 
 // AiExpressionService にプラットフォーム依存モジュールを注入

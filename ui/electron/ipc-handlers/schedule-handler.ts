@@ -1,6 +1,6 @@
 import { ipcMain, Notification } from 'electron';
-import { getMascotWindow } from '../mascot-window';
-import { getChatWindow } from '../chat-window';
+import { getMascotWindow } from '../window/mascot-window';
+import { getChatWindow } from '../window/chat-window';
 
 /**
  * タイマー通知のトリガー処理（OSの通知およびマスコットウィンドウ・チャットウィンドウへの配信）
@@ -10,7 +10,7 @@ function triggerTimerNotifications(memo: string) {
     if (mascotWin && !mascotWin.isDestroyed()) {
         mascotWin.webContents.send('timer-trigger', memo);
     }
-    
+
     const chatWin = getChatWindow();
     if (chatWin && !chatWin.isDestroyed()) {
         chatWin.webContents.send('timer-trigger', memo);
