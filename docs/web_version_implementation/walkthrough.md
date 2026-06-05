@@ -22,6 +22,11 @@
 ### 3. ルーティングの自動識別化
 - **[App.vue](file:///c:/workspace/workspace-win/DesktopAiMascot/ui/src/App.vue)**: ハッシュなしで初期起動された場合に、Web版のデフォルトレイアウトとして「統合レイアウト（マスコット ＋ チャット）」を表示するように調整しました。
 
+### 4. 設定の共有（サーバーマスター化）とローカル認証バイパス
+- **[app-config.ts](file:///c:/workspace/workspace-win/DesktopAiMascot/ui/electron/app-config.ts)**: Electronのローカル開発（`npm run dev`）時に、プロジェクトルートの `config.json` を直接読み書きするようパスを変更しました。これにより、デスクトップ版とサーバー版で物理的に同一の設定ファイルが使用されます。
+- **[auth-middleware.ts](file:///c:/workspace/workspace-win/DesktopAiMascot/server/src/middlewares/auth-middleware.ts)**: リクエスト送信元が `localhost` である場合、セキュリティチェックを通過させ、Google OAuth ログインを自動でバイパスします。これにより、ローカル環境でのWeb版利用時にログイン不要で動作します。
+- **[browser-polyfill.ts](file:///c:/workspace/workspace-win/DesktopAiMascot/ui/src/utils/browser-polyfill.ts)**: `getAppConfig` および `updateAppConfig` 実行時に、サーバー（`http://localhost:3000/api/config`）からの設定読み書きを最優先で行うように拡張しました。サーバー未起動時のみ `localStorage` にフォールバックします。
+
 ---
 
 ## 起動・利用方法

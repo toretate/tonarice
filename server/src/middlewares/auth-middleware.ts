@@ -112,6 +112,19 @@ export function parseCookies(cookieHeader: string | undefined): Record<string, s
 }
 
 export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
+    // ローカル（127.0.0.1 / ::1 / localhost）からのアクセスは認証を自動バイパスし、マスターデータを共有する
+    const ip = req.ip || req.socket.remoteAddress;
+    const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1' || req.hostname === 'localhost';
+
+    if (isLocal) {
+        req.user = {
+            email: 'test-user@gmail.com',
+            sub: 'local-dev-bypass',
+            role: 'user'
+        };
+        return next();
+    }
+
     let token = '';
 
     // 1. Authorization ヘッダーをチェック

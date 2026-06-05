@@ -74,9 +74,37 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
             window.location.reload();
         },
         getAppConfig: async () => {
+            try {
+                const response = await fetch('http://localhost:3000/api/config');
+                if (response.ok) {
+                    const resJson = await response.json();
+                    if (resJson.success && resJson.config && Object.keys(resJson.config).length > 0) {
+                        console.log('[Polyfill] Config successfully loaded from server');
+                        // ローカルのlocalStorageにも同期保存しておく
+                        saveStoredConfig(resJson.config);
+                        return resJson.config;
+                    }
+                }
+            } catch (e) {
+                console.warn('[Polyfill] Failed to fetch config from server, using local fallback:', e);
+            }
             return getStoredConfig();
         },
         updateAppConfig: async (config: any) => {
+            try {
+                const response = await fetch('http://localhost:3000/api/config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                });
+                if (response.ok) {
+                    console.log('[Polyfill] Config successfully saved to server');
+                }
+            } catch (e) {
+                console.warn('[Polyfill] Failed to save config to server, using local fallback:', e);
+            }
             saveStoredConfig(config);
         },
         testServerConnection: async (host: string, port: number) => {
