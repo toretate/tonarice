@@ -13,7 +13,12 @@ export class AppConfig {
     private data: ConfigData;
 
     constructor() {
-        this.configPath = path.join(app.getPath('userData'), 'config.json');
+        if (!app.isPackaged) {
+            // 開発環境ではプロジェクトのルートディレクトリにある config.json を使用してサーバーと同期する
+            this.configPath = path.resolve(__dirname, '../../config.json');
+        } else {
+            this.configPath = path.join(app.getPath('userData'), 'config.json');
+        }
         console.log(`[Config] Persistent configuration path: ${this.configPath}`);
         this.data = this.load();
     }
