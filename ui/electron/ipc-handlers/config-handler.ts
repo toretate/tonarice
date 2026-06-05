@@ -2,9 +2,9 @@ import { ipcMain } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AppConfig, ConfigData } from '../app-config';
-import { getChatWindow, getEffectiveChatAlwaysOnTop } from '../chat-window';
-import { getMascotWindow } from '../mascot-window';
-import { getSettingsWindow } from '../settings-window';
+import { getChatWindow, getEffectiveChatAlwaysOnTop } from '../window/chat-window';
+import { getMascotWindow } from '../window/mascot-window';
+import { getSettingsWindow } from '../window/settings-window';
 
 /**
  * Config 関連の IPC ハンドラーを登録する
