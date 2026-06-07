@@ -237,6 +237,9 @@ const selectMascot = (mascot: MascotData) => {
     // マスコット切り替え時もプレビューを更新
     updateMascotPreview();
     loadMascotPrompts();
+
+    // アクティブなマスコットの変更を即座に保存・反映する
+    emit('save-settings');
 };
 
 
@@ -736,6 +739,30 @@ const closeAssigningEmotionsModal = async () => {
         emit('save-settings');
     }
 };
+
+const getMascotCoverImage = (mascot: MascotData): string => {
+    if (!mascot) return '';
+    // 1. ポーズ優先
+    if (mascot.assets?.poses && mascot.currentPoseId) {
+        const pose = mascot.assets.poses.find(p => p.id === mascot.currentPoseId);
+        if (pose && isImage(pose.path)) return resolveImageUrl(pose.path);
+    }
+    // 2. 現在の衣装
+    if (mascot.assets?.outfits && mascot.currentOutfitId) {
+        const outfit = mascot.assets.outfits.find(o => o.id === mascot.currentOutfitId);
+        if (outfit && isImage(outfit.path)) return resolveImageUrl(outfit.path);
+    }
+    // 3. 最初の衣装
+    if (mascot.assets?.outfits && mascot.assets.outfits.length > 0) {
+        const outfit = mascot.assets.outfits[0];
+        if (outfit && isImage(outfit.path)) return resolveImageUrl(outfit.path);
+    }
+    // 4. アバター画像
+    if (mascot.avatar && isImage(mascot.avatar)) {
+        return resolveImageUrl(mascot.avatar);
+    }
+    return '';
+};
 </script>
 
 <template>
@@ -780,8 +807,8 @@ const closeAssigningEmotionsModal = async () => {
                             <span v-else class="avatar" style="position: absolute; z-index: 1;">{{ mascot.avatar || '🤖' }}</span>
                         </template>
                         <template v-else>
-                            <!-- 非アクティブなマスコットはベースアバターを表示 -->
-                            <img v-if="mascot.avatar && isImage(mascot.avatar)" :src="resolveImageUrl(mascot.avatar)" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1;" />
+                            <!-- 非アクティブなマスコットは最適なカバー画像を表示 -->
+                            <img v-if="getMascotCoverImage(mascot)" :src="getMascotCoverImage(mascot)" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1;" />
                             <span v-else class="avatar" style="position: absolute; z-index: 1;">{{ mascot.avatar || '🤖' }}</span>
                         </template>
 
