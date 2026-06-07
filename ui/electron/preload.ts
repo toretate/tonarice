@@ -93,6 +93,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // ローカルPCの画像ファイルを選択し、Base64データURLとして取得する
     selectLocalImage: () =>
         ipcRenderer.invoke('select-local-image'),
+
+    // 画像データを mascots/<mascotId> に保存する
+    saveMascotImage: (mascotId: string, filename: string, base64Data: string) =>
+        ipcRenderer.invoke('save-mascot-image', mascotId, filename, base64Data),
     
     // 感情の変更をメインプロセスへ通知する
     changeEmotion: (emotion: string) => ipcRenderer.send('emotion-changed', emotion),
