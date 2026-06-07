@@ -35,6 +35,7 @@ export interface IElectronAPI {
     getGeminiModels: (apiKey: string) => Promise<{ success: boolean; models: string[]; error?: string }>;
     analyzeSpriteSheet: (base64Image: string, apiKey: string) => Promise<any>;
     selectLocalImage: () => Promise<{ success: boolean; path: string; name: string } | null>;
+    saveMascotImage: (mascotId: string, filename: string, base64Data: string) => Promise<{ success: boolean; path?: string; error?: string }>;
     previewMascotState: (previewState: any) => void;
     onApplyPreviewState: (callback: (previewState: any) => void) => () => void;
     changeEmotion: (emotion: string) => void;

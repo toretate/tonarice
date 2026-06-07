@@ -157,4 +157,40 @@ export function registerConfigHandlers(config: AppConfig) {
             return { success: false, error: error.message };
         }
     });
+
+    // 画像データを mascots/<mascotId> に保存するハンドラー
+    ipcMain.handle('save-mascot-image', async (event, mascotId: string, filename: string, base64Data: string) => {
+        const currentCwd = process.cwd();
+        const baseCwd = path.basename(currentCwd) === 'ui' ? path.dirname(currentCwd) : currentCwd;
+        const mascotDir = path.join(baseCwd, 'mascots', mascotId);
+
+        try {
+            if (!fs.existsSync(mascotDir)) {
+                fs.mkdirSync(mascotDir, { recursive: true });
+            }
+
+            // data:image/png;base64,... のようなヘッダーがあれば除去
+            const base64Content = base64Data.replace(/^data:image\/\w+;base64,/, '');
+            const buffer = Buffer.from(base64Content, 'base64');
+
+            const filePath = path.join(mascotDir, filename);
+            const fileDir = path.dirname(filePath);
+            if (!fs.existsSync(fileDir)) {
+                fs.mkdirSync(fileDir, { recursive: true });
+            }
+
+            fs.writeFileSync(filePath, buffer);
+
+            console.log(`[Config] Mascot image saved: ${filePath}`);
+            
+            // UIからアクセス可能な相対アセットパスを返す
+            return {
+                success: true,
+                path: `/mascots/${mascotId}/${filename}`
+            };
+        } catch (error: any) {
+            console.error('[Config] Failed to save mascot image:', error);
+            return { success: false, error: error.message };
+        }
+    });
 }
