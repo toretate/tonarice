@@ -8,6 +8,7 @@ import removeBackgroundRoute from './routes/remove-background';
 import configRoute from './routes/config';
 import pingRoute from './routes/ping';
 import authRoute from './routes/auth';
+import historyRoute from './routes/history';
 import { setupWebSocket } from './routes/websocket';
 
 const app = express();
@@ -33,6 +34,7 @@ app.use('/api', removeBackgroundRoute);
 app.use('/api', configRoute);
 app.use('/api', pingRoute);
 app.use('/api', authRoute);
+app.use('/api', historyRoute);
 
 // HTTP サーバーを作成し、Express をラップ
 const server = http.createServer(app);
