@@ -21,3 +21,4 @@ export {
     type FeatureIsland,
     type EyeCenters,
 } from './feature-island-detector';
+export { applyEllipseFeatherMask, estimateFaceMask } from './mask';
