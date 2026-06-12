@@ -230,6 +230,11 @@ export function useChatConnection(params: {
             ? mascot.aiConfig.voice.speaker_id 
             : (configStore.voicevoxSpeaker !== undefined ? configStore.voicevoxSpeaker : 2);
 
+        const voiceEngine = configStore.selectedVoiceEngine || mascot?.aiConfig?.voice?.engine || 'voicevox';
+        const irodoriEndpointUrl = configStore.irodoriEndpoint || 'http://localhost:7861';
+        const irodoriModel = configStore.irodoriModel || 'irodori-tts-500m-v3';
+        const irodoriVoice = configStore.irodoriVoice || 'default';
+
         let systemPrompt = '';
         if (mascot && mascot.profile) {
             systemPrompt += `# Mascot Character Profile\n${mascot.profile}\n\n`;
@@ -270,6 +275,9 @@ export function useChatConnection(params: {
             systemPrompt += "\n# Timer Instructions\nユーザーから「〇分後に教えて」「後でお知らせして」「カップラーメンにお湯を入れた」など、特定の時間経過後のお知らせやリマインドを求められた場合は、会話 of 応答テキストの末尾（感情タグの直前）に、必ず次のフォーマットでタイマー起動タグを付与してください。\n[TIMER:秒数,お知らせ内容]\n※秒数は半角数字で指定してください。お知らせ内容には具体的なリマインド内容を記述してください。例:「了解、3分測るね。[TIMER:180,カップラーメンができました！] [happy]」";
         }
 
+        // 思考プロセスの非表示・出力防止指示をシステムプロンプトに追加
+        systemPrompt += "\n# Output Restrictions\n出力の際、<think>タグや思考プロセス、推論ログ(Reasoning/Thinking)は一切出力しないでください。ユーザーへの回答文(セリフ)のみを直接出力してください。";
+
         const currentSession = sessions.value.find(s => s.id === activeSessionId.value);
         if (currentSession && currentSession.summary) {
             systemPrompt += `\n\n# Previous Conversation Summary\n以下はこれまでのマスターとの会話履歴の要約です。この文脈を考慮して返答してください。\n${currentSession.summary}\n`;
@@ -305,6 +313,10 @@ export function useChatConnection(params: {
                     model: model,
                     voicevoxSpeakerId: voicevoxSpeakerId,
                     voicevoxEndpoint: voicevoxEndpointUrl,
+                    selectedVoiceEngine: voiceEngine,
+                    irodoriEndpoint: irodoriEndpointUrl,
+                    irodoriModel: irodoriModel,
+                    irodoriVoice: irodoriVoice,
                     engine: engine,
                     lmstudioEndpoint: lmsEndpoint,
                     history: historyToSend,
@@ -354,9 +366,10 @@ export function useChatConnection(params: {
                 window.electronAPI.startTimer(timerData.seconds, timerData.memo);
             }
 
+            let detectedEmotion = 'neutral';
             const emotionMatch = cleanReply.match(/\[(\w+)\]/);
             if (emotionMatch && emotionMatch[1]) {
-                const detectedEmotion = emotionMatch[1].toLowerCase();
+                detectedEmotion = emotionMatch[1].toLowerCase();
                 mascotStore.setEmotion(detectedEmotion);
                 if (window.electronAPI) {
                     window.electronAPI.changeEmotion(detectedEmotion);
@@ -375,9 +388,13 @@ export function useChatConnection(params: {
                     .map(s => s.trim())
                     .filter(s => s.length > 0);
 
-                const synthPromises = sentences.map(sentence =>
-                    api.synthesizeVoicevox(sentence, voicevoxSpeakerId, voicevoxEndpointUrl)
-                );
+                const synthPromises = sentences.map(sentence => {
+                    if (voiceEngine === 'irodori') {
+                        return api.synthesizeIrodori(sentence, irodoriEndpointUrl, irodoriModel, irodoriVoice, detectedEmotion);
+                    } else {
+                        return api.synthesizeVoicevox(sentence, voicevoxSpeakerId, voicevoxEndpointUrl);
+                    }
+                });
 
                 (async () => {
                     for (const promise of synthPromises) {
