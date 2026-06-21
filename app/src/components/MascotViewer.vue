@@ -445,6 +445,8 @@ const loadMascotAssets = async (bodyPath: string, expressionPath: string) => {
     if (!pixiApp || !bodySprite || !expressionSprite) return;
 
     isAssetsLoading.value = true;
+    bodySprite.visible = false;
+    expressionSprite.visible = false;
     try {
 
     const promises: Promise<any>[] = [];
@@ -549,6 +551,8 @@ const loadMascotAssets = async (bodyPath: string, expressionPath: string) => {
         stopBlinkLoop();
     }
     } finally {
+        if (bodySprite) bodySprite.visible = true;
+        if (expressionSprite) expressionSprite.visible = true;
         isAssetsLoading.value = false;
     }
 };
@@ -734,7 +738,7 @@ const applyExpressionTransform = () => {
 // パスの変更を監視してアトミックにロードを実行
 watch([currentBodyPath, currentExpressionPath], async ([newBodyPath, newExpressionPath]) => {
     await loadMascotAssets(newBodyPath, newExpressionPath);
-});
+}, { flush: 'sync' });
 
 // activeMascot の変更を監視してプリロードを実行
 watch(activeMascot, (newMascot) => {
@@ -1128,24 +1132,26 @@ onUnmounted(() => {
                 <canvas ref="pixiCanvas" class="pixi-canvas"></canvas>
 
                 <!-- キャラクター本体表示 (画像以外はフォールバックテキストで表示、画像はPixiJSで描画) -->
-                <!-- ポーズ優先 -->
-                <template v-if="activePose">
-                    <span v-if="!isImage(activePose.path)" class="preview-base-avatar">{{ activePose.path }}</span>
+                <template v-if="!isAssetsLoading">
+                    <!-- ポーズ優先 -->
+                    <template v-if="activePose">
+                        <span v-if="!isImage(activePose.path)" class="preview-base-avatar">{{ activePose.path }}</span>
+                    </template>
+                    <!-- ポーズがなければ服装 -->
+                    <template v-else-if="activeOutfit">
+                        <span v-if="!isImage(activeOutfit.path)" class="preview-base-avatar">{{ activeOutfit.path }}</span>
+                    </template>
+                    <!-- 何もなければベースアバター -->
+                    <template v-else-if="activeMascot">
+                        <span v-if="(!defaultFrontAvatar || !isImage(defaultFrontAvatar.path)) && !isImage(activeMascot.avatar)" class="preview-base-avatar">
+                            {{ defaultFrontAvatar?.path || activeMascot.avatar }}
+                        </span>
+                    </template>
+                    <span v-else class="preview-base-avatar">🤖</span>
+                    
+                    <!-- 表情レイヤー (画像以外はフォールバックの絵文字表示、画像はPixiJSで描画) -->
+                    <span v-if="!isImage(activeExpressionEmoji)" class="preview-layer expression" :style="activeExpressionStyle">{{ activeExpressionEmoji }}</span>
                 </template>
-                <!-- ポーズがなければ服装 -->
-                <template v-else-if="activeOutfit">
-                    <span v-if="!isImage(activeOutfit.path)" class="preview-base-avatar">{{ activeOutfit.path }}</span>
-                </template>
-                <!-- 何もなければベースアバター -->
-                <template v-else-if="activeMascot">
-                    <span v-if="(!defaultFrontAvatar || !isImage(defaultFrontAvatar.path)) && !isImage(activeMascot.avatar)" class="preview-base-avatar">
-                        {{ defaultFrontAvatar?.path || activeMascot.avatar }}
-                    </span>
-                </template>
-                <span v-else class="preview-base-avatar">🤖</span>
-                
-                <!-- 表情レイヤー (画像以外はフォールバックの絵文字表示、画像はPixiJSで描画) -->
-                <span v-if="!isImage(activeExpressionEmoji)" class="preview-layer expression" :style="activeExpressionStyle">{{ activeExpressionEmoji }}</span>
             </div>
         </div>
     </div>
