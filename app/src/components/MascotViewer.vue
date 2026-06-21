@@ -43,6 +43,7 @@ const resolveImageUrl = (path: string | undefined | null): string => {
 const isChatVisible = ref(false);
 const emotionClass = ref('');
 const isReady = ref(false); // 初期ロード完了フラグ
+const isAssetsLoading = ref(false); // アセットロード中フラグ
 
 // ---- Stores ----
 const configStore = useConfigStore();
@@ -443,6 +444,9 @@ let expressionTalkTexture: Texture | null = null;
 const loadMascotAssets = async (bodyPath: string, expressionPath: string) => {
     if (!pixiApp || !bodySprite || !expressionSprite) return;
 
+    isAssetsLoading.value = true;
+    try {
+
     const promises: Promise<any>[] = [];
 
     // 体画像のロードプロミス
@@ -543,6 +547,9 @@ const loadMascotAssets = async (bodyPath: string, expressionPath: string) => {
         expressionTalkTexture = null;
         expressionSprite.texture = Texture.EMPTY;
         stopBlinkLoop();
+    }
+    } finally {
+        isAssetsLoading.value = false;
     }
 };
 
@@ -1090,9 +1097,13 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="mascot-wrapper app-dark" :class="{ 'is-compact': windowMode === 'compact', 'is-ready': isReady }">
+    <div class="mascot-wrapper app-dark" :class="{ 'is-compact': windowMode === 'compact', 'is-ready': isReady && !isAssetsLoading }">
         <!-- 背景レイヤー -->
         <div class="mascot-background" :style="mascotBackgroundStyle"></div>
+        <!-- ローディングインジケーター -->
+        <div v-if="isAssetsLoading || !isReady" class="mascot-loading-overlay">
+            <i class="pi pi-spin pi-spinner text-4xl text-purple-500"></i>
+        </div>
         <!-- マスコットのキャラクター描画部分 (トータルスケールで拡大縮小。元のコンパイル済みで動作確認済みの拡大縮小ロジック) -->
         <div 
             class="mascot-character" 
@@ -1402,6 +1413,18 @@ onUnmounted(() => {
     pointer-events: none;
     z-index: 10;
     background-color: transparent !important;
+}
+
+.mascot-loading-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
 }
 
 </style>
