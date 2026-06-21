@@ -143,7 +143,7 @@ export const useConfigStore = defineStore('config', () => {
     const integratedBackgroundImageFit = ref<'cover' | 'contain' | 'fill' | 'tile'>('cover');
 
     // サーバー接続設定
-    const useServer = ref(false);
+    const useServer = ref(true);
     const serverHost = ref('localhost');
     const serverPort = ref(3000);
 
@@ -270,7 +270,7 @@ export const useConfigStore = defineStore('config', () => {
             integratedBackgroundImageOpacity.value = configData.integratedBackgroundImageOpacity !== undefined ? Number(configData.integratedBackgroundImageOpacity) : 1.0;
             integratedBackgroundImageFit.value = configData.integratedBackgroundImageFit || 'cover';
             
-            useServer.value = configData.useServer !== undefined ? !!configData.useServer : false;
+            useServer.value = true;
             serverHost.value = configData.serverHost || 'localhost';
             serverPort.value = configData.serverPort !== undefined ? Number(configData.serverPort) : 3000;
             
@@ -369,7 +369,7 @@ export const useConfigStore = defineStore('config', () => {
             integratedBackgroundImageOpacity.value = iBgImgOpacity ? parseFloat(iBgImgOpacity) : 1.0;
             integratedBackgroundImageFit.value = (localStorage.getItem('integratedBackgroundImageFit') as any) || 'cover';
             
-            useServer.value = localStorage.getItem('useServer') === 'true';
+            useServer.value = true;
             serverHost.value = localStorage.getItem('serverHost') || 'localhost';
             const savedServerPort = localStorage.getItem('serverPort');
             serverPort.value = savedServerPort ? parseInt(savedServerPort) : 3000;
@@ -621,7 +621,7 @@ export const useConfigStore = defineStore('config', () => {
         if (newConfig.integratedBackgroundImage !== undefined) integratedBackgroundImage.value = newConfig.integratedBackgroundImage;
         if (newConfig.integratedBackgroundImageOpacity !== undefined) integratedBackgroundImageOpacity.value = Number(newConfig.integratedBackgroundImageOpacity);
         if (newConfig.integratedBackgroundImageFit !== undefined) integratedBackgroundImageFit.value = newConfig.integratedBackgroundImageFit as any;
-        if (newConfig.useServer !== undefined) useServer.value = !!newConfig.useServer;
+        useServer.value = true;
         if (newConfig.serverHost !== undefined) serverHost.value = newConfig.serverHost;
         if (newConfig.serverPort !== undefined) serverPort.value = Number(newConfig.serverPort);
         if (newConfig.useTts !== undefined) useTts.value = !!newConfig.useTts;

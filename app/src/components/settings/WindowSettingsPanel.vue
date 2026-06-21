@@ -212,7 +212,7 @@ const resolveMascotImageUrl = (path: string | undefined | null): string => {
         return path;
     }
     let resolved = path;
-    if (path.startsWith('/mascots/') && useServer.value) {
+    if (path.startsWith('/mascots/')) {
         resolved = `http://${serverHost.value}:${serverPort.value}${path}`;
     }
     if (/^[a-zA-Z]:\\/.test(resolved)) {
@@ -444,9 +444,7 @@ const chatPreviewBackgroundStyle = computed(() => {
 
 onMounted(async () => {
     initialWindowMode = windowMode.value;
-    if (useServer.value) {
-        authStore.checkAuthStatus();
-    }
+    authStore.checkAuthStatus();
 });
 </script>
 
@@ -927,15 +925,10 @@ onMounted(async () => {
                 <!-- サーバー連携設定 -->
                 <div class="form-field-header font-bold text-base border-bottom pb-2 mt-4 mb-2 text-purple-600 flex align-items-center gap-2">
                     <i class="pi pi-server text-purple-500"></i>
-                    <span>サーバー連携設定 (マルチデバイス・軽量化)</span>
+                    <span>サーバー連携設定 (マルチデバイス)</span>
                 </div>
 
-                <div class="form-field mt-2 flex align-items-center gap-2">
-                    <input type="checkbox" id="useServer" v-model="useServer" class="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500" />
-                    <label for="useServer" class="font-medium cursor-pointer ml-2">外部サーバーと連携する (クライアント＆サーバ構成を有効化)</label>
-                </div>
-
-                <div v-if="useServer" class="form-field mt-3 flex flex-column gap-3">
+                <div class="form-field mt-3 flex flex-column gap-3">
                     <div class="flex gap-3">
                         <div class="flex-1">
                             <label class="font-medium">サーバーホスト (IPアドレス / ドメイン)</label>

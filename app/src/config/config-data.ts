@@ -136,7 +136,7 @@ export const defaultData: ConfigData = {
     integratedBackgroundImage: '',
     integratedBackgroundImageOpacity: 1.0,
     integratedBackgroundImageFit: 'cover',
-    useServer: false,
+    useServer: true,
     serverHost: 'localhost',
     serverPort: 3000,
     windowMode: 'split',

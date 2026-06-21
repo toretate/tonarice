@@ -29,7 +29,7 @@ const resolveImageUrl = (path: string | undefined | null): string => {
         return path;
     }
     let resolved = path;
-    if (path.startsWith('/mascots/') && configStore.useServer) {
+    if (path.startsWith('/mascots/')) {
         resolved = `http://${configStore.serverHost}:${configStore.serverPort}${path}`;
     }
     if (/^[a-zA-Z]:\\/.test(resolved)) {

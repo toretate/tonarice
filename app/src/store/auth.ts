@@ -27,13 +27,6 @@ export const useAuthStore = defineStore('auth', () => {
     // ---- Actions ----
     // ログインステータスをサーバーに問い合わせる
     const checkAuthStatus = async (): Promise<boolean> => {
-        if (!configStore.useServer) {
-            // サーバー連携が無効な場合は認証スルー
-            user.value = null;
-            isInitialized.value = true;
-            return false;
-        }
-
         try {
             const url = `${serverBaseUrl.value}/api/auth/status`;
             const response = await fetch(url, {
