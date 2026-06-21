@@ -3,8 +3,6 @@ import fs from 'fs';
 
 export function getProjectRoot(): string {
     const cwd = process.cwd();
-    // 開発時は cwd が /ui なので、親をプロジェクトルートにする
-    // ただし、もし cwd に config.json があるなら cwd 自体をプロジェクトルートにする
     if (fs.existsSync(path.join(cwd, 'config.json'))) {
         return cwd;
     }
@@ -12,15 +10,49 @@ export function getProjectRoot(): string {
     if (fs.existsSync(path.join(parent, 'config.json'))) {
         return parent;
     }
-    // デフォルトは cwd
     return cwd;
 }
 
 export const PROJECT_ROOT = getProjectRoot();
-export const MASCOTS_DIR = path.join(PROJECT_ROOT, 'mascots');
+
+// ユーザーデータの保存先
+export const USERS_DIR = path.join(PROJECT_ROOT, 'storage/users');
+export const USERS_FILE_PATH = path.join(PROJECT_ROOT, 'storage/users.json');
+
+// Python関連
+export const VISION_DIR = path.join(PROJECT_ROOT, 'python-services/vision');
+export const PYTHON_DIR = path.join(PROJECT_ROOT, 'python-services/python');
+
+// 設定・履歴テンプレート
 export const CONFIG_TEMPLATE_PATH = path.join(PROJECT_ROOT, 'config.json');
 export const HISTORY_TEMPLATE_PATH = path.join(PROJECT_ROOT, 'chat_history.json');
-export const USERS_DIR = path.join(PROJECT_ROOT, 'server/users');
-export const USERS_FILE_PATH = path.join(PROJECT_ROOT, 'server/users.json');
-export const VISION_DIR = path.join(PROJECT_ROOT, 'server/vision');
-export const PYTHON_DIR = path.join(PROJECT_ROOT, 'server/python');
+
+/**
+ * リクエストされた /mascots/... パスからローカルファイルシステム上の絶対パスを解決する。
+ * @param requestPath "/mascots/users/xxx/image.png" や "/mascots/mascot_xxx/image.png"
+ */
+export function resolveMascotPath(requestPath: string): string {
+    const subpath = requestPath.startsWith('/mascots/')
+        ? requestPath.substring('/mascots/'.length)
+        : requestPath;
+
+    const decodedSubpath = decodeURIComponent(subpath);
+
+    // 1. ユーザー固有のプライベートデータの場合 ("users/{userId}/...")
+    if (decodedSubpath.startsWith('users/')) {
+        const parts = decodedSubpath.split('/');
+        const userId = parts[1];
+        if (userId) {
+            const mascotSubpath = parts.slice(2).join('/');
+            return path.resolve(USERS_DIR, userId, 'mascots', mascotSubpath);
+        }
+    }
+
+    // 2. プリセット（共通）アセットの場合
+    const isDev = process.env.NODE_ENV !== 'production';
+    const publicMascotsBase = isDev
+        ? path.resolve(PROJECT_ROOT, 'ui/src/public/mascots')
+        : path.resolve(PROJECT_ROOT, 'ui/.output/public/mascots');
+
+    return path.resolve(publicMascotsBase, decodedSubpath);
+}

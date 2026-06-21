@@ -1,7 +1,7 @@
 import { defineEventHandler, readBody, createError } from 'h3';
 import fs from 'fs';
 import path from 'path';
-import { CONFIG_TEMPLATE_PATH, USERS_DIR, MASCOTS_DIR } from '../utils/paths';
+import { CONFIG_TEMPLATE_PATH, USERS_DIR } from '../utils/paths';
 
 function getUserConfigPath(userId: string): string {
     return path.join(USERS_DIR, userId, 'config.json');
@@ -16,8 +16,8 @@ function saveBase64Image(base64Data: string, userId: string, mascotId: string, a
     const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
     const dataBuffer = Buffer.from(matches[2], 'base64');
 
-    // ユーザー別のディレクトリパスを作成
-    const targetDir = path.join(MASCOTS_DIR, 'users', userId, mascotId, assetType);
+    // ユーザー別のディレクトリパスを作成 (storage/users/<userId>/mascots/<mascotId>/<assetType>)
+    const targetDir = path.join(USERS_DIR, userId, 'mascots', mascotId, assetType);
     if (!fs.existsSync(targetDir)) {
         fs.mkdirSync(targetDir, { recursive: true });
     }

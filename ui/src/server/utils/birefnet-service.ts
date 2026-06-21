@@ -33,8 +33,8 @@ function modelPath(variant: BiRefNetVariant): string {
 
 function setupHint(): string {
     return process.platform === 'win32'
-        ? 'cd server\\vision && powershell -ExecutionPolicy Bypass -File .\\setup.ps1'
-        : 'cd server/vision && ./setup.sh';
+        ? 'cd python-services\\vision && powershell -ExecutionPolicy Bypass -File .\\setup.ps1'
+        : 'cd python-services/vision && ./setup.sh';
 }
 
 /** OS によって配置・拡張子が異なる vision-cli を解決する。 */

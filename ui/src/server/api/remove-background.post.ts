@@ -2,7 +2,7 @@ import { defineEventHandler, readBody, createError } from 'h3';
 import fs from 'fs';
 import path from 'path';
 import { removeBackground } from '../utils/remove-bg-service';
-import { MASCOTS_DIR } from '../utils/paths';
+import { resolveMascotPath } from '../utils/paths';
 
 export default defineEventHandler(async (event) => {
     try {
@@ -33,7 +33,7 @@ export default defineEventHandler(async (event) => {
             inputBuffer = Buffer.from(base64Data, 'base64');
             console.log(`[Server] DataURL converted to Buffer (mimeType: ${mimeType}, size: ${inputBuffer.length} bytes)`);
         } else if (imagePath.startsWith('/mascots/')) {
-            const filePath = path.join(MASCOTS_DIR, imagePath.replace('/mascots/', ''));
+            const filePath = resolveMascotPath(imagePath);
             if (!fs.existsSync(filePath)) {
                 throw createError({
                     statusCode: 404,

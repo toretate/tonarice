@@ -6,7 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import fs from 'node:fs';
-import { PYTHON_DIR, MASCOTS_DIR } from './paths';
+import { PYTHON_DIR, resolveMascotPath } from './paths';
 
 const execFileAsync = promisify(execFile);
 
@@ -70,7 +70,7 @@ export async function cropExpression(imagePath: string): Promise<CropExpressionR
 
 function resolveImagePath(imagePath: string): string {
     if (imagePath.startsWith('/mascots/')) {
-        return path.join(MASCOTS_DIR, imagePath.slice('/mascots/'.length));
+        return resolveMascotPath(imagePath);
     }
     return imagePath;
 }

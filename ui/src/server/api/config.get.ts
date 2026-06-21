@@ -1,7 +1,7 @@
 import { defineEventHandler, createError } from 'h3';
 import fs from 'fs';
 import path from 'path';
-import { CONFIG_TEMPLATE_PATH, USERS_DIR, MASCOTS_DIR } from '../utils/paths';
+import { CONFIG_TEMPLATE_PATH, USERS_DIR, PROJECT_ROOT } from '../utils/paths';
 
 function getUserConfigPath(userId: string): string {
     return path.join(USERS_DIR, userId, 'config.json');
@@ -19,10 +19,10 @@ function migrateUserAssets(userId: string, config: any): { migrated: boolean; co
         const mascotId = mascot.id;
         if (!mascotId) continue;
 
-        // 古いアセットの物理ディレクトリ: mascots/<mascotId>
-        const oldMascotDir = path.join(MASCOTS_DIR, mascotId);
-        // 新しいアセットの物理ディレクトリ: mascots/users/<userId>/<mascotId>
-        const newMascotDir = path.join(MASCOTS_DIR, 'users', userId, mascotId);
+        // 古いアセットの物理ディレクトリ: ui/src/public/mascots/<mascotId>
+        const oldMascotDir = path.join(PROJECT_ROOT, 'ui/src/public/mascots', mascotId);
+        // 新しいアセットの物理ディレクトリ: storage/users/<userId>/mascots/<mascotId>
+        const newMascotDir = path.join(USERS_DIR, userId, 'mascots', mascotId);
 
         // コピー処理
         if (fs.existsSync(oldMascotDir) && !fs.existsSync(newMascotDir)) {

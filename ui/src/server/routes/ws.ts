@@ -6,7 +6,7 @@ import { VoiceAiService } from '../utils/voice-ai-service';
 import { splitSentences } from '../utils/sentence-splitter';
 import { sanitizeForIrodoriTTS } from '../utils/irodori-sanitizer';
 import { authenticateUserToken } from '../middleware/auth';
-import { PROJECT_ROOT } from '../utils/paths';
+import { PROJECT_ROOT, USERS_DIR } from '../utils/paths';
 
 // ユーザーごとの接続管理（crosswsのPeerオブジェクトをSetに保存）
 const userConnections = new Map<string, Set<any>>();
@@ -248,7 +248,7 @@ export default defineWebSocketHandler({
                                             const dateStr = `${yyyy}${mm}${dd}`;
 
                                             const mascotId = data.activeMascotId || 'default';
-                                            const dirPath = path.join(PROJECT_ROOT, 'mascots', 'users', userId, mascotId, 'voices', dateStr);
+                                            const dirPath = path.join(USERS_DIR, userId, 'mascots', mascotId, 'voices', dateStr);
                                             
                                             if (!fs.existsSync(dirPath)) {
                                                 fs.mkdirSync(dirPath, { recursive: true });
