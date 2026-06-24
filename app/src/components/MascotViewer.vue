@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted, watch } from 'vue';
+import { ref, onMounted, computed, onUnmounted, watch, nextTick } from 'vue';
 import { MascotImageSetBuilder } from '../mascots/MascotImageSetBuilder';
 import { useConfigStore } from '../store/config';
 import { useMascotStore } from '../store/mascot';
@@ -1035,10 +1035,25 @@ watch(() => mascotStore.currentEmotion, () => {
     }, 600);
 });
 
+// ウィンドウモードが変更された場合の透過状態リセット
+watch(windowMode, (newMode) => {
+    if (newMode !== 'split' && window.electronAPI && window.electronAPI.setIgnoreMouseEvents) {
+        window.electronAPI.setIgnoreMouseEvents(false);
+    }
+});
+
 // --- マウス透過の動的制御 ---
 const handleWindowMouseMove = (e: MouseEvent) => {
-    // 統合・コンパクトモードなど、分割モード以外ではマウスイベントの透過制御は行わない
-    if (windowMode.value && windowMode.value !== 'split') return;
+    // 統合・コンパクトモードなど、分割モード以外ではマウスイベントの透過制御は行わない（透過を解除する）
+    if (windowMode.value && windowMode.value !== 'split') {
+        if (window.electronAPI && window.electronAPI.setIgnoreMouseEvents) {
+            window.electronAPI.setIgnoreMouseEvents(false);
+        }
+        return;
+    }
+
+    // 初期ロードが完了していない、またはアセットロード中、あるいはトランジション中は判定をスキップする
+    if (!isReady.value || isAssetsLoading.value || isTransitioning.value) return;
 
     // ドラッグ中は透過処理をスキップしてドラッグ操作の追従を維持する
     if (isDragging.value) return;
@@ -1048,7 +1063,7 @@ const handleWindowMouseMove = (e: MouseEvent) => {
     const target = e.target as HTMLElement;
     if (!target) return;
     
-    // キャラクターのコンテナまたはその内部の要素であるか判定
+    // キャラクターのコンテナまたはその内部 of要素であるか判定
     const isOnInteractiveElement = 
         target.closest('.mascot-character') !== null;
     
@@ -1056,6 +1071,11 @@ const handleWindowMouseMove = (e: MouseEvent) => {
 };
 
 onMounted(async () => {
+    // 起動直後はマウスクリックを受け付ける（透過しない）ようにリセット
+    if (window.electronAPI && window.electronAPI.setIgnoreMouseEvents) {
+        window.electronAPI.setIgnoreMouseEvents(false);
+    }
+
     // PixiJS Application の初期化
     if (pixiCanvas.value) {
         try {
