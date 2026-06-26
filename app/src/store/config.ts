@@ -212,19 +212,29 @@ export const useConfigStore = defineStore('config', () => {
 
         // Nitro API から設定の取得を試みる
         try {
-            console.log('[Config] Loading config from local Nitro API...');
-            const response = await fetch('/api/config', {
-                credentials: 'include'
-            });
-            if (response.ok) {
-                const resJson = await response.json();
+            console.log('[Config] Loading config and mascots from local Nitro API...');
+            const [configRes, mascotsRes] = await Promise.all([
+                fetch('/api/config', { credentials: 'include' }),
+                fetch('/api/mascots', { credentials: 'include' })
+            ]);
+
+            if (configRes.ok) {
+                const resJson = await configRes.json();
                 if (resJson.success && resJson.config && Object.keys(resJson.config).length > 0) {
                     configData = resJson.config;
                     console.log('[Config] Config loaded from local Nitro API');
                 }
             }
+
+            if (mascotsRes.ok) {
+                const mascotsJson = await mascotsRes.json();
+                if (mascotsJson.success && Array.isArray(mascotsJson.mascots)) {
+                    mascots.value = mascotsJson.mascots;
+                    console.log('[Config] Mascots list loaded from local Nitro API');
+                }
+            }
         } catch (e: any) {
-            console.warn('[Config] Failed to fetch config from local Nitro API:', e.message);
+            console.warn('[Config] Failed to fetch config or mascots from local Nitro API:', e.message);
         }
 
         // サーバーから取得できなかった場合は Electron API から試みる
@@ -307,7 +317,9 @@ export const useConfigStore = defineStore('config', () => {
             chatWidth.value = configData.chatWidth !== undefined ? Number(configData.chatWidth) : 350;
             chatHeight.value = configData.chatHeight !== undefined ? Number(configData.chatHeight) : 400;
 
-            mascots.value = configData.mascots || [];
+            if (mascots.value.length === 0 && configData.mascots) {
+                mascots.value = configData.mascots;
+            }
             activeMascotId.value = configData.activeMascotId || '';
 
             toolsCurrentTime.value = configData.toolsCurrentTime !== undefined ? !!configData.toolsCurrentTime : true;
@@ -534,28 +546,42 @@ export const useConfigStore = defineStore('config', () => {
             forgeLorasList: JSON.parse(JSON.stringify(forgeLorasList.value))
         };
 
+        // mascots を含まない payload を作成
+        const payloadWithoutMascots = { ...payload };
+        delete (payloadWithoutMascots as any).mascots;
+
         // ローカルサーバー（Nitro）に設定データを送信して一元保存
-        let savedPayload = payload;
+        let savedPayload = payloadWithoutMascots;
         try {
-            console.log('[Config] Saving config to local Nitro API...');
-            const response = await fetch('/api/config', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload),
-                credentials: 'include'
-            });
-            if (response.ok) {
-                const resJson = await response.json();
-                if (resJson.success && resJson.config) {
+            console.log('[Config] Saving config and mascots to local Nitro API...');
+            const [configRes, mascotsRes] = await Promise.all([
+                fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payloadWithoutMascots),
+                    credentials: 'include'
+                }),
+                fetch('/api/mascots', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mascots: mascots.value }),
+                    credentials: 'include'
+                })
+            ]);
+
+            if (configRes.ok) {
+                const resJson = await configRes.json();
+                if (resJson && resJson.success && resJson.config) {
                     console.log('[Config] Config successfully saved to local Nitro API');
                     updateConfig(resJson.config);
                     savedPayload = resJson.config;
                 }
             }
+            if (mascotsRes.ok) {
+                console.log('[Config] Mascots list successfully saved to local Nitro API');
+            }
         } catch (e: any) {
-            console.warn('[Config] Failed to save config to local Nitro API:', e.message);
+            console.warn('[Config] Failed to save config or mascots to local Nitro API:', e.message);
         }
 
         if (window.electronAPI) {
@@ -640,6 +666,29 @@ export const useConfigStore = defineStore('config', () => {
         localStorage.setItem('forgeHeight', forgeHeight.value.toString());
         localStorage.setItem('forgeModelsList', JSON.stringify(forgeModelsList.value));
         localStorage.setItem('forgeLorasList', JSON.stringify(forgeLorasList.value));
+    };
+
+    // 特定のマスコットのみを個別保存するアクション
+    const saveMascot = async (mascotId: string) => {
+        const mascot = mascots.value.find(m => m.id === mascotId);
+        if (!mascot) return;
+
+        try {
+            console.log(`[Config] Saving mascot ${mascotId} to Nitro API...`);
+            const response = await fetch(`/api/mascots/${mascotId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(mascot),
+                credentials: 'include'
+            });
+            if (response.ok) {
+                console.log(`[Config] Mascot ${mascotId} successfully saved to Nitro API`);
+            }
+        } catch (e: any) {
+            console.warn(`[Config] Failed to save mascot ${mascotId} to Nitro API:`, e.message);
+        }
     };
 
     // 一部の設定を一括で更新する
@@ -809,6 +858,7 @@ export const useConfigStore = defineStore('config', () => {
         configVersion,
         loadConfig,
         saveConfig,
+        saveMascot,
         updateConfig
     };
 });

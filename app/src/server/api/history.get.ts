@@ -2,10 +2,7 @@ import { defineEventHandler, createError } from 'h3';
 import fs from 'fs';
 import path from 'path';
 import { HISTORY_TEMPLATE_PATH, USERS_DIR } from '../utils/paths';
-
-function getUserHistoryPath(userId: string): string {
-    return path.join(USERS_DIR, userId, 'chat_history.json');
-}
+import { loadHistoryFromDB } from '../utils/history-db';
 
 export default defineEventHandler(async (event) => {
     try {
@@ -18,27 +15,25 @@ export default defineEventHandler(async (event) => {
         }
 
         const userId = event.context.user.id;
-        const userHistoryPath = getUserHistoryPath(userId);
-        const userDir = path.dirname(userHistoryPath);
+        const userJsonPath = path.join(USERS_DIR, userId, 'chat_history.json');
+        const userDbPath = path.join(USERS_DIR, userId, 'chat_histories.db');
+        const userDir = path.dirname(userJsonPath);
 
         // ユーザーディレクトリの自動生成
         if (!fs.existsSync(userDir)) {
             fs.mkdirSync(userDir, { recursive: true });
         }
 
-        // 履歴ファイルが存在しない場合のマイグレーション／初期化処理
-        if (!fs.existsSync(userHistoryPath)) {
+        // 新規ユーザーでJsonもSQLiteも存在しない場合、テンプレートからJsonをコピー
+        if (!fs.existsSync(userDbPath) && !fs.existsSync(userJsonPath)) {
             if (fs.existsSync(HISTORY_TEMPLATE_PATH)) {
-                fs.copyFileSync(HISTORY_TEMPLATE_PATH, userHistoryPath);
+                fs.copyFileSync(HISTORY_TEMPLATE_PATH, userJsonPath);
                 console.log(`[Server] ルートの chat_history.json をユーザー用履歴として初期化コピーしました: ${userId}`);
-            } else {
-                fs.writeFileSync(userHistoryPath, JSON.stringify({}, null, 4), 'utf8');
-                console.log(`[Server] 空の chat_history.json を作成しました: ${userId}`);
             }
         }
 
-        const data = fs.readFileSync(userHistoryPath, 'utf8');
-        return { success: true, history: JSON.parse(data) };
+        const history = loadHistoryFromDB(userId);
+        return { success: true, history };
     } catch (error: any) {
         console.error('[Server] Failed to load chat history:', error.message);
         throw createError({

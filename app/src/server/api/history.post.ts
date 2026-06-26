@@ -2,10 +2,7 @@ import { defineEventHandler, readBody, createError } from 'h3';
 import fs from 'fs';
 import path from 'path';
 import { USERS_DIR } from '../utils/paths';
-
-function getUserHistoryPath(userId: string): string {
-    return path.join(USERS_DIR, userId, 'chat_history.json');
-}
+import { saveHistoryToDB } from '../utils/history-db';
 
 export default defineEventHandler(async (event) => {
     try {
@@ -18,8 +15,7 @@ export default defineEventHandler(async (event) => {
         }
 
         const userId = event.context.user.id;
-        const userHistoryPath = getUserHistoryPath(userId);
-        const userDir = path.dirname(userHistoryPath);
+        const userDir = path.join(USERS_DIR, userId);
 
         // ユーザーディレクトリの自動生成
         if (!fs.existsSync(userDir)) {
@@ -27,8 +23,8 @@ export default defineEventHandler(async (event) => {
         }
 
         const history = await readBody(event);
-        fs.writeFileSync(userHistoryPath, JSON.stringify(history, null, 4), 'utf8');
-        console.log(`[Server] chat_history.json saved successfully for user: ${userId}`);
+        saveHistoryToDB(userId, history);
+        console.log(`[Server] Chat history saved successfully to database for user: ${userId}`);
         return { success: true };
     } catch (error: any) {
         console.error('[Server] Failed to save chat history:', error.message);

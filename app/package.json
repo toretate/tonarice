@@ -19,6 +19,7 @@
         "@primevue/themes": "^4.0.0",
         "@types/js-yaml": "^4.0.9",
         "ai": "^6.0.208",
+        "better-sqlite3": "^11.3.0",
         "esbuild": "^0.28.1",
         "express": "^4.19.2",
         "js-yaml": "^4.2.0",

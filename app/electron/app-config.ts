@@ -10,7 +10,9 @@ app.setName('desktop-ai-mascot');
 
 export class AppConfig {
     private configPath: string;
+    private backupPath: string;
     private data: ConfigData;
+    private isReadOnlyMode: boolean = false;
 
     constructor() {
         if (!app.isPackaged) {
@@ -19,6 +21,7 @@ export class AppConfig {
         } else {
             this.configPath = path.join(app.getPath('userData'), 'config.json');
         }
+        this.backupPath = this.configPath + '.bak';
         console.log(`[Config] Persistent configuration path: ${this.configPath}`);
         this.data = this.load();
     }
@@ -27,31 +30,83 @@ export class AppConfig {
         try {
             if (fs.existsSync(this.configPath)) {
                 const fileData = fs.readFileSync(this.configPath, 'utf8');
-                return { ...defaultData, ...JSON.parse(fileData) };
+                const parsed = JSON.parse(fileData);
+                // 正常にパースできたらバックアップを作成しておく
+                this.createBackup(fileData);
+                return { ...defaultData, ...parsed };
             }
         } catch (error) {
-            console.error('[Config] Failed to load config file:', error);
+            console.error('[Config] Failed to load config file. Attempting backup restore:', error);
+            const backupData = this.loadBackup();
+            if (backupData) {
+                console.log('[Config] Successfully restored config from backup.');
+                // メインの config.json を復元保存する
+                this.writeConfig(backupData);
+                return backupData;
+            }
+            
+            // バックアップも破損している、または存在しない場合
+            console.error('[Config] Backup is also missing or corrupted. Starting with default settings in ReadOnly mode to protect corrupted config.');
+            this.isReadOnlyMode = true;
         }
         return defaultData;
     }
 
+    private createBackup(dataStr: string) {
+        try {
+            const tmpBackup = this.backupPath + '.tmp';
+            fs.writeFileSync(tmpBackup, dataStr, 'utf8');
+            fs.renameSync(tmpBackup, this.backupPath);
+        } catch (err) {
+            console.error('[Config] Failed to create backup file:', err);
+        }
+    }
+
+    private loadBackup(): ConfigData | null {
+        try {
+            if (fs.existsSync(this.backupPath)) {
+                const fileData = fs.readFileSync(this.backupPath, 'utf8');
+                return { ...defaultData, ...JSON.parse(fileData) };
+            }
+        } catch (error) {
+            console.error('[Config] Failed to load backup config file:', error);
+        }
+        return null;
+    }
+
+    private writeConfig(config: ConfigData): boolean {
+        try {
+            const tmpPath = this.configPath + '.tmp';
+            fs.writeFileSync(tmpPath, JSON.stringify(config, null, 4), 'utf8');
+            fs.renameSync(tmpPath, this.configPath);
+            return true;
+        } catch (error) {
+            console.error('[Config] Failed to write config file:', error);
+            return false;
+        }
+    }
 
     public get(): ConfigData {
         return this.data;
     }
 
     public update(newData: Partial<ConfigData>) {
+        if (this.isReadOnlyMode) {
+            console.warn('[Config] Update ignored because config is in ReadOnly mode due to file corruption.');
+            return;
+        }
+
         const mergedData = { ...this.data };
         for (const key of Object.keys(newData) as Array<keyof ConfigData>) {
             if (newData[key] !== undefined) {
                 (mergedData as any)[key] = newData[key];
             }
         }
+        
+        // ローカルの設定ファイルには mascots の重いデータを含めないように除去
+        delete (mergedData as any).mascots;
+
         this.data = mergedData;
-        try {
-            fs.writeFileSync(this.configPath, JSON.stringify(this.data, null, 4), 'utf8');
-        } catch (error) {
-            console.error('[Config] Failed to save config file:', error);
-        }
+        this.writeConfig(this.data);
     }
 }
