@@ -200,7 +200,27 @@ export function useChatHistory(scrollToBottom: () => void) {
 
         console.log(`[Compaction] Running compaction for session ${sessionId}. Messages to summarize: ${messagesToSummarize.length}`);
 
-        const chatText = messagesToSummarize.map(m => `${m.sender === 'user' ? 'ユーザー' : 'マスコット'}: ${m.text}`).join('\n');
+        // トークン上限や特殊制御文字によるエラーを防ぐため、要約対象の会話履歴全体の総文字数を制限します（UIから設定可能、デフォルト 2500文字）。
+        // 最新の対話から順に遡って文字数の上限まで収集します。
+        const maxCharLimit = configStore.summaryMaxCharLimit !== undefined ? Number(configStore.summaryMaxCharLimit) : 2500;
+        let chatTextParts: string[] = [];
+        let currentLength = 0;
+
+        for (let i = messagesToSummarize.length - 1; i >= 0; i--) {
+            const m = messagesToSummarize[i];
+            const textContent = m.text || '';
+            const limitedText = textContent.length > 300 ? textContent.substring(0, 300) + '... (長文のため中略)' : textContent;
+            const line = `${m.sender === 'user' ? 'ユーザー' : 'マスコット'}: ${limitedText}`;
+
+            if (currentLength + line.length + 1 > maxCharLimit) {
+                chatTextParts.unshift('... (これより前の古い会話履歴は省略) ...');
+                break;
+            }
+
+            chatTextParts.unshift(line);
+            currentLength += line.length + 1;
+        }
+        const chatText = chatTextParts.join('\n');
         let summarizationPrompt = `以下の会話履歴を、今後の対話に必要な重要情報を残したまま、簡潔かつ日本語で1つの段落に要約してください。\n\n`;
         if (session.summary) {
             summarizationPrompt += `以前の要約:\n${session.summary}\n\n`;
@@ -209,25 +229,71 @@ export function useChatHistory(scrollToBottom: () => void) {
         summarizationPrompt += `要約には、決定事項、重要な話題、マスターとの約束事などを含め、語尾などの不要な会話表現は取り除いてください。`;
 
         const mascot = activeMascot.value;
-        const engine = configStore.selectedEngine || mascot?.aiConfig?.chat?.engine || 'gemini';
+        let engine = configStore.summaryEngine || 'chat-sync';
+        if (engine === 'chat-sync') {
+            engine = configStore.selectedEngine || mascot?.aiConfig?.chat?.engine || 'gemini';
+        }
+
+        let model = '';
+        if (configStore.summaryEngine === 'chat-sync') {
+            if (engine === 'lmstudio') {
+                model = configStore.lmstudioModel || mascot?.aiConfig?.chat?.model || '';
+            } else if (engine === 'gemini') {
+                model = configStore.geminiModel || mascot?.aiConfig?.chat?.model || 'gemini-1.5-flash';
+            } else if (engine === 'openai') {
+                model = configStore.openaiModel || mascot?.aiConfig?.chat?.model || 'gpt-4o';
+            } else if (engine === 'anthropic') {
+                model = configStore.anthropicModel || mascot?.aiConfig?.chat?.model || 'claude-3-5-sonnet-latest';
+            }
+        } else {
+            if (engine === 'lmstudio') {
+                model = configStore.summaryLmstudioModel || configStore.lmstudioModel || mascot?.aiConfig?.chat?.model || '';
+            } else if (engine === 'gemini') {
+                model = configStore.summaryGeminiModel || configStore.geminiModel || mascot?.aiConfig?.chat?.model || 'gemini-1.5-flash';
+            } else if (engine === 'openai') {
+                model = configStore.summaryOpenaiModel || configStore.openaiModel || mascot?.aiConfig?.chat?.model || 'gpt-4o-mini';
+            } else if (engine === 'anthropic') {
+                model = configStore.summaryAnthropicModel || configStore.anthropicModel || mascot?.aiConfig?.chat?.model || 'claude-3-5-haiku-latest';
+            }
+        }
+
         let apiKey = '';
         if (engine === 'gemini') {
             apiKey = configStore.googleAiStudioApiKey || '';
         } else if (engine === 'openai') {
             apiKey = configStore.openaiApiKey || '';
+        } else if (engine === 'anthropic') {
+            apiKey = configStore.anthropicApiKey || '';
         }
-        const model = configStore.geminiModel || mascot?.aiConfig?.chat?.model || 'gemini-1.5-flash';
+
         const lmsEndpoint = configStore.lmstudioEndpoint || 'http://127.0.0.1:1234/v1/';
 
         let summary = '';
         try {
-            if (window.electronAPI) {
-                if (engine === 'lmstudio') {
-                    summary = await window.electronAPI.askLmStudio(summarizationPrompt, "あなたは優秀な対話要約アシスタントです。", model, lmsEndpoint);
-                } else {
-                    if (!apiKey) return;
-                    summary = await window.electronAPI.askGemini(summarizationPrompt, apiKey, "あなたは優秀な対話要約アシスタントです。", model);
-                }
+            console.log(`[Compaction] Calling /api/summarize. Engine: ${engine}, Model: ${model}`);
+            const response = await fetch('/api/summarize', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    prompt: summarizationPrompt,
+                    engine,
+                    model,
+                    apiKey,
+                    lmstudioEndpoint: lmsEndpoint
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const resJson = await response.json();
+            if (resJson && resJson.success && resJson.summary) {
+                summary = resJson.summary;
+            } else {
+                throw new Error(resJson.error || 'Failed to summarize conversation');
             }
         } catch (e) {
             console.error('[Compaction] Summarization failed:', e);

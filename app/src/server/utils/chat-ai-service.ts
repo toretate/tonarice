@@ -219,9 +219,10 @@ export class ChatAiService {
                 const lmstudio = createOpenAI({
                     baseURL: finalEndpoint,
                     apiKey: 'not-needed',
+                    compatibility: 'compatible'
                 });
                 modelProvider = lmstudio.chat(model || 'unspecified');
-            } else {
+            } else if (currentEngine === 'gemini') {
                 const targetModel = model || 'gemini-1.5-flash';
                 console.log(`[ChatAiService] Routing to Gemini via Vercel AI SDK (Model: ${targetModel})`);
                 
@@ -229,6 +230,16 @@ export class ChatAiService {
                     apiKey: apiKey,
                 });
                 modelProvider = googleInstance(targetModel);
+            } else if (currentEngine === 'openai') {
+                const targetModel = model || 'gpt-4o';
+                console.log(`[ChatAiService] Routing to OpenAI via Vercel AI SDK (Model: ${targetModel})`);
+                
+                const openaiInstance = createOpenAI({
+                    apiKey: apiKey,
+                });
+                modelProvider = openaiInstance(targetModel);
+            } else {
+                throw new Error(`Unsupported AI engine: ${currentEngine}`);
             }
 
             // デバッグログ
@@ -237,15 +248,21 @@ export class ChatAiService {
             console.log("[ChatAiService] vercelTools:", Object.keys(vercelTools));
             console.log("[ChatAiService] vercelTools schema example (getCurrentTime):", JSON.stringify(vercelTools.getCurrentTime, null, 2));
 
-            // Vercel AI SDK での生成実行 (stopWhenを指定して自動ループさせる)
-            const response = await generateText({
+            // Vercel AI SDK での生成実行 (ツールが定義されている場合のみ tools / stopWhen を指定する)
+            const hasTools = Object.keys(vercelTools).length > 0;
+            const generateOptions: any = {
                 model: modelProvider,
                 system: finalSystemPrompt,
                 messages: messages,
-                tools: vercelTools,
-                stopWhen: [isLoopFinished(), stepCountIs(5)],
                 abortSignal: controller.signal
-            });
+            };
+
+            if (hasTools) {
+                generateOptions.tools = vercelTools;
+                generateOptions.stopWhen = [isLoopFinished(), stepCountIs(5)];
+            }
+
+            const response = await generateText(generateOptions);
 
             clearTimeout(timeoutId);
 
@@ -272,6 +289,12 @@ export class ChatAiService {
         } catch (aiError: any) {
             clearTimeout(timeoutId);
             console.error(`[ChatAiService] 詳細なエラー情報:`, aiError);
+            if (aiError.responseBody) {
+                console.error(`[ChatAiService] APIレスポンス本文:`, aiError.responseBody);
+            }
+            if (aiError.statusCode) {
+                console.error(`[ChatAiService] APIステータスコード:`, aiError.statusCode);
+            }
             if (aiError.name === 'AbortError') {
                 console.warn(`[ChatAiService] ${engine || 'Gemini'}との接続エラー (タイムアウト/タスクキャンセル)`);
             } else if (aiError.name === 'TypeError' || aiError.code === 'ECONNREFUSED') {

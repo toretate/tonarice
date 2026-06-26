@@ -22,6 +22,14 @@ export interface AppConfig {
     irodoriVoice: string;
     temperature: number;
     
+    // 要約設定
+    summaryEngine: string;
+    summaryGeminiModel: string;
+    summaryOpenaiModel: string;
+    summaryAnthropicModel: string;
+    summaryLmstudioModel: string;
+    summaryMaxCharLimit: number;
+    
     // チャットウィンドウ設定
     chatOpacity: number;
     chatAlwaysOnTop: boolean | 'sync';
@@ -115,6 +123,14 @@ export const useConfigStore = defineStore('config', () => {
     const geminiModel = ref('gemini-2.0-flash-exp');
     const openaiModel = ref('gpt-4o');
     const anthropicModel = ref('claude-3-5-sonnet-latest');
+    
+    // 要約設定
+    const summaryEngine = ref('chat-sync');
+    const summaryGeminiModel = ref('gemini-1.5-flash');
+    const summaryOpenaiModel = ref('gpt-4o-mini');
+    const summaryAnthropicModel = ref('claude-3-5-haiku-latest');
+    const summaryLmstudioModel = ref('');
+    const summaryMaxCharLimit = ref(2500);
     
     const voicevoxEndpoint = ref('http://localhost:50021');
     const voicevoxSpeaker = ref(2); // デフォルト話者ID: 2 (四国めたんノーマル)
@@ -260,6 +276,13 @@ export const useConfigStore = defineStore('config', () => {
             geminiModel.value = configData.geminiModel || 'gemini-2.0-flash-exp';
             openaiModel.value = configData.openaiModel || 'gpt-4o';
             anthropicModel.value = configData.anthropicModel || 'claude-3-5-sonnet-latest';
+            
+            summaryEngine.value = configData.summaryEngine || 'chat-sync';
+            summaryGeminiModel.value = configData.summaryGeminiModel || 'gemini-1.5-flash';
+            summaryOpenaiModel.value = configData.summaryOpenaiModel || 'gpt-4o-mini';
+            summaryAnthropicModel.value = configData.summaryAnthropicModel || 'claude-3-5-haiku-latest';
+            summaryLmstudioModel.value = configData.summaryLmstudioModel || '';
+            summaryMaxCharLimit.value = configData.summaryMaxCharLimit !== undefined ? Number(configData.summaryMaxCharLimit) : 2500;
             
             voicevoxEndpoint.value = configData.voicevoxEndpoint || 'http://localhost:50021';
             voicevoxSpeaker.value = configData.voicevoxSpeaker !== undefined ? Number(configData.voicevoxSpeaker) : 2;
@@ -484,6 +507,12 @@ export const useConfigStore = defineStore('config', () => {
             geminiModel: geminiModel.value,
             openaiModel: openaiModel.value,
             anthropicModel: anthropicModel.value,
+            summaryEngine: summaryEngine.value,
+            summaryGeminiModel: summaryGeminiModel.value,
+            summaryOpenaiModel: summaryOpenaiModel.value,
+            summaryAnthropicModel: summaryAnthropicModel.value,
+            summaryLmstudioModel: summaryLmstudioModel.value,
+            summaryMaxCharLimit: Number(summaryMaxCharLimit.value),
             voicevoxEndpoint: voicevoxEndpoint.value,
             voicevoxSpeaker: Number(voicevoxSpeaker.value),
             irodoriEndpoint: irodoriEndpoint.value,
@@ -843,6 +872,12 @@ export const useConfigStore = defineStore('config', () => {
         chatWidth,
         chatHeight,
         mascots,
+        summaryEngine,
+        summaryGeminiModel,
+        summaryOpenaiModel,
+        summaryAnthropicModel,
+        summaryLmstudioModel,
+        summaryMaxCharLimit,
         activeMascotId,
         activeMascot,
         toolsCurrentTime,
