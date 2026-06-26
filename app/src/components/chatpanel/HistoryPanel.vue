@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ChatSession } from './useChatHistory';
+import { useMascotStore } from '../../store/mascot';
+import { storeToRefs } from 'pinia';
 
 defineProps<{
     sessions: ChatSession[];
@@ -10,12 +12,15 @@ const emit = defineEmits<{
     (e: 'select-session', sessionId: string): void;
     (e: 'delete-session', payload: { sessionId: string; event: Event }): void;
 }>();
+
+const mascotStore = useMascotStore();
+const { isSecretMode } = storeToRefs(mascotStore);
 </script>
 
 <template>
-    <div class="history-container">
+    <div class="history-container" :class="{ 'secret-history': isSecretMode }">
         <div class="history-list-header">
-            <h3>対話履歴スレッド一覧</h3>
+            <h3>{{ isSecretMode ? 'シークレット対話履歴一覧' : '対話履歴スレッド一覧' }}</h3>
         </div>
         <div class="history-list">
             <div 
@@ -127,5 +132,51 @@ const emit = defineEmits<{
 .delete-session-btn:hover {
     color: #ef4444;
     background: rgba(239, 68, 68, 0.1);
+}
+
+/* シークレットモード時のスタイル */
+.history-container.secret-history {
+    background: rgba(15, 12, 30, 0.65);
+    backdrop-filter: blur(10px);
+}
+
+.history-container.secret-history .history-list-header {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.history-container.secret-history .history-list-header h3 {
+    color: #cbd5e1;
+}
+
+.history-container.secret-history .history-item {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.history-container.secret-history .history-item:hover {
+    background: rgba(168, 85, 247, 0.15);
+    border-color: rgba(168, 85, 247, 0.3);
+}
+
+.history-container.secret-history .history-item.active {
+    background: rgba(168, 85, 247, 0.25);
+    border-color: rgba(168, 85, 247, 0.45);
+}
+
+.history-container.secret-history .history-item-title {
+    color: #f1f5f9;
+}
+
+.history-container.secret-history .history-item-time {
+    color: #64748b;
+}
+
+.history-container.secret-history .delete-session-btn {
+    color: #64748b;
+}
+
+.history-container.secret-history .delete-session-btn:hover {
+    color: #f87171;
+    background: rgba(239, 68, 68, 0.2);
 }
 </style>

@@ -11,6 +11,8 @@ export const useMascotStore = defineStore('mascot', () => {
     const isLoading = ref(false);
     // ラジオモード中フラグ
     const isRadioMode = ref(false);
+    // シークレットモード中フラグ
+    const isSecretMode = ref(false);
 
     // ---- Actions ----
     const setEmotion = (emotion: string) => {
@@ -29,14 +31,20 @@ export const useMascotStore = defineStore('mascot', () => {
         isRadioMode.value = radioMode;
     };
 
+    const setSecretMode = (secretMode: boolean) => {
+        isSecretMode.value = secretMode;
+    };
+
     return {
         currentEmotion,
         isSpeaking,
         isLoading,
         isRadioMode,
+        isSecretMode,
         setEmotion,
         setSpeaking,
         setLoading,
-        setRadioMode
+        setRadioMode,
+        setSecretMode
     };
 });

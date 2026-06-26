@@ -105,7 +105,8 @@ const chatBackgroundStyle = computed(() => {
 
 const {
     isLoading: isAiResponding,
-    isRadioMode
+    isRadioMode,
+    isSecretMode
 } = storeToRefs(mascotStore);
 
 const scrollToBottom = () => {
@@ -491,13 +492,21 @@ const focusWindow = () => {
 </script>
 
 <template>
-    <div class="chat-wrapper" @mousedown="focusWindow" :style="{ fontFamily: chatFontFamily, border: getBorderStyle }">
+    <div class="chat-wrapper" @mousedown="focusWindow" :style="{ fontFamily: chatFontFamily, border: getBorderStyle }" :class="{ 'secret-mode': isSecretMode }">
         <!-- 背景レイヤー -->
         <div class="chat-background" :style="chatBackgroundStyle"></div>
         <!-- グラスモーフィズム調のヘッダー -->
         <header class="chat-header" @mousedown="onHeaderMouseDown">
-            <span class="chat-title">{{ activeMascot ? `${activeMascot.name} Chat` : 'Mascot Chat' }}</span>
+            <span class="chat-title">
+                {{ activeMascot ? `${activeMascot.name} Chat` : 'Mascot Chat' }}
+                <span v-if="isSecretMode" class="secret-badge" title="シークレットモード有効中">
+                    <i class="pi pi-eye-slash"></i> Secret
+                </span>
+            </span>
             <div class="header-actions">
+                <button class="icon-btn" @click="mascotStore.setSecretMode(!isSecretMode)" :class="{ 'active-secret-btn': isSecretMode }" title="シークレットモード ON/OFF">
+                    <i :class="isSecretMode ? 'pi pi-eye-slash' : 'pi pi-eye'"></i>
+                </button>
                 <button class="icon-btn" @click="configStore.updateConfig({ useTts: !useTts }); configStore.saveConfig()" :class="{ 'active-btn': useTts }" title="音声読み上げ (TTS) ON/OFF">
                     <i :class="useTts ? 'pi pi-volume-up' : 'pi pi-volume-off'"></i>
                 </button>
@@ -1108,5 +1117,122 @@ const focusWindow = () => {
     height: 10px;
     cursor: se-resize;
     -webkit-app-region: no-drag;
+}
+
+/* シークレットモードのスタイル定義 */
+.chat-wrapper.secret-mode {
+    background: rgba(26, 21, 44, 0.75) !important; /* グラスモーフィズム調のダークパープル */
+    box-shadow: 0 8px 32px 0 rgba(168, 85, 247, 0.15) !important;
+}
+
+/* シークレットモード中の背景レイヤー調整 */
+.chat-wrapper.secret-mode .chat-background {
+    opacity: 0.15 !important;
+    background-color: #0f0b21 !important;
+}
+
+/* シークレットヘッダー */
+.chat-wrapper.secret-mode .chat-header {
+    background: rgba(30, 27, 75, 0.4);
+    border-bottom: 1px solid rgba(168, 85, 247, 0.15);
+}
+
+.chat-wrapper.secret-mode .chat-title {
+    color: #e9d5ff; /* 淡い紫 */
+    font-weight: 600;
+    text-shadow: 0 0 8px rgba(168, 85, 247, 0.3);
+}
+
+.chat-wrapper.secret-mode .secret-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(168, 85, 247, 0.2);
+    color: #e9d5ff;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 10px;
+    border: 1px solid rgba(168, 85, 247, 0.3);
+    margin-left: 8px;
+}
+
+/* シークレットモードのヘッダーボタン */
+.chat-wrapper.secret-mode .icon-btn {
+    color: #a78bfa;
+}
+
+.chat-wrapper.secret-mode .icon-btn:hover {
+    color: #c084fc;
+    background: rgba(168, 85, 247, 0.2);
+}
+
+.chat-wrapper.secret-mode .icon-btn.active-btn {
+    color: #fff;
+    background: rgba(168, 85, 247, 0.4);
+    box-shadow: 0 0 10px rgba(168, 85, 247, 0.4);
+}
+
+.chat-wrapper.secret-mode .icon-btn.active-secret-btn {
+    color: #fff;
+    background: rgba(168, 85, 247, 0.5);
+    box-shadow: 0 0 12px rgba(168, 85, 247, 0.6);
+}
+
+/* メッセージエリア */
+.chat-wrapper.secret-mode .message-container {
+    background: transparent;
+}
+
+.chat-wrapper.secret-mode .message-row.user .bubble {
+    background: linear-gradient(135deg, #7c3aed, #a855f7); /* 明るめの紫グラデーション */
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
+}
+
+.chat-wrapper.secret-mode .message-row.mascot .bubble {
+    background: rgba(46, 37, 84, 0.8);
+    color: #e9d5ff;
+    border: 1px solid rgba(168, 85, 247, 0.2);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* 入力エリア（フッター） */
+.chat-wrapper.secret-mode .chat-footer {
+    background: rgba(30, 27, 75, 0.4);
+    border-top: 1px solid rgba(168, 85, 247, 0.15);
+}
+
+.chat-wrapper.secret-mode .input-wrapper {
+    background: rgba(15, 12, 30, 0.6);
+    border: 1px solid rgba(168, 85, 247, 0.25);
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.chat-wrapper.secret-mode .chat-input {
+    color: #f3e8ff;
+}
+
+.chat-wrapper.secret-mode .chat-input::placeholder {
+    color: #7c3aed;
+    opacity: 0.6;
+}
+
+.chat-wrapper.secret-mode .send-btn {
+    color: #ffffff;
+    background: #8b5cf6;
+}
+
+.chat-wrapper.secret-mode .send-btn:hover:not(:disabled) {
+    background: #a78bfa;
+    box-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
+}
+
+.chat-wrapper.secret-mode .attach-btn {
+    color: #a78bfa;
+}
+
+.chat-wrapper.secret-mode .attach-btn:hover {
+    color: #c084fc;
+    background: rgba(168, 85, 247, 0.15);
 }
 </style>

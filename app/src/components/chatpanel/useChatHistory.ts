@@ -23,11 +23,14 @@ export interface ChatSession {
     timestamp: number;
     messages: Message[];
     summary?: string;
+    isSecret?: boolean;
 }
 
 export interface MascotHistory {
     activeSessionId?: string;
     sessions: ChatSession[];
+    activeSecretSessionId?: string;
+    secretSessions?: ChatSession[];
 }
 
 export function useChatHistory(scrollToBottom: () => void) {
@@ -35,6 +38,7 @@ export function useChatHistory(scrollToBottom: () => void) {
     const mascotStore = useMascotStore();
 
     const { activeMascot } = storeToRefs(configStore);
+    const { isSecretMode } = storeToRefs(mascotStore);
 
     const allHistories = ref<Record<string, MascotHistory>>({});
     const sessions = ref<ChatSession[]>([]);
@@ -47,12 +51,13 @@ export function useChatHistory(scrollToBottom: () => void) {
         return { id: 1, sender: 'mascot' as const, text: 'こんにちは！今日はどんなお話をしますか？' };
     };
 
-    const createNewSession = (): ChatSession => {
+    const createNewSession = (isSecret = false): ChatSession => {
         return {
             id: Date.now().toString(),
-            title: '新しい話題',
+            title: isSecret ? 'シークレットの話題' : '新しい話題',
             timestamp: Date.now(),
-            messages: [getDefaultMessage()]
+            messages: [getDefaultMessage()],
+            isSecret
         };
     };
 
@@ -61,31 +66,62 @@ export function useChatHistory(scrollToBottom: () => void) {
 
         const mascotId = activeMascot.value?.id || 'default';
         if (!allHistories.value[mascotId]) {
-            const initialSession = createNewSession();
-            allHistories.value[mascotId] = {
+            const initialSession = createNewSession(isSecretMode.value);
+            allHistories.value[mascotId] = isSecretMode.value ? {
+                activeSecretSessionId: initialSession.id,
+                secretSessions: [initialSession],
+                sessions: []
+            } : {
                 activeSessionId: initialSession.id,
                 sessions: [initialSession]
             };
         }
         
         const mascotHistory = allHistories.value[mascotId];
-        sessions.value = mascotHistory.sessions || [];
         
-        let currentSession = sessions.value.find(s => s.id === mascotHistory.activeSessionId);
-        if (!currentSession && sessions.value.length > 0) {
-            currentSession = sessions.value[0];
-        }
-        
-        if (currentSession) {
-            activeSessionId.value = currentSession.id;
-            messages.value = [...currentSession.messages];
+        if (isSecretMode.value) {
+            if (!mascotHistory.secretSessions || mascotHistory.secretSessions.length === 0) {
+                const initialSession = createNewSession(true);
+                mascotHistory.secretSessions = [initialSession];
+                mascotHistory.activeSecretSessionId = initialSession.id;
+            }
+            sessions.value = mascotHistory.secretSessions;
+            
+            let currentSession = sessions.value.find(s => s.id === mascotHistory.activeSecretSessionId);
+            if (!currentSession && sessions.value.length > 0) {
+                currentSession = sessions.value[0];
+            }
+            
+            if (currentSession) {
+                activeSessionId.value = currentSession.id;
+                messages.value = [...currentSession.messages];
+            } else {
+                const initialSession = createNewSession(true);
+                sessions.value = [initialSession];
+                mascotHistory.secretSessions = sessions.value;
+                mascotHistory.activeSecretSessionId = initialSession.id;
+                activeSessionId.value = initialSession.id;
+                messages.value = [...initialSession.messages];
+            }
         } else {
-            const initialSession = createNewSession();
-            sessions.value = [initialSession];
-            allHistories.value[mascotId].sessions = sessions.value;
-            allHistories.value[mascotId].activeSessionId = initialSession.id;
-            activeSessionId.value = initialSession.id;
-            messages.value = [...initialSession.messages];
+            sessions.value = mascotHistory.sessions || [];
+            
+            let currentSession = sessions.value.find(s => s.id === mascotHistory.activeSessionId);
+            if (!currentSession && sessions.value.length > 0) {
+                currentSession = sessions.value[0];
+            }
+            
+            if (currentSession) {
+                activeSessionId.value = currentSession.id;
+                messages.value = [...currentSession.messages];
+            } else {
+                const initialSession = createNewSession(false);
+                sessions.value = [initialSession];
+                mascotHistory.sessions = sessions.value;
+                mascotHistory.activeSessionId = initialSession.id;
+                activeSessionId.value = initialSession.id;
+                messages.value = [...initialSession.messages];
+            }
         }
         nextTick(() => scrollToBottom());
     };
@@ -112,16 +148,24 @@ export function useChatHistory(scrollToBottom: () => void) {
             if (currentSession) {
                 currentSession.messages = [...messages.value];
                 const firstUserMsg = messages.value.find(m => m.sender === 'user');
-                if (firstUserMsg && currentSession.title === '新しい話題') {
+                const defaultTitle = isSecretMode.value ? 'シークレットの話題' : '新しい話題';
+                if (firstUserMsg && currentSession.title === defaultTitle) {
                     currentSession.title = firstUserMsg.text.substring(0, 15) + (firstUserMsg.text.length > 15 ? '...' : '');
                 }
             }
         }
         
-        allHistories.value[mascotId] = {
-            activeSessionId: activeSessionId.value || undefined,
-            sessions: sessions.value
-        };
+        if (!allHistories.value[mascotId]) {
+            allHistories.value[mascotId] = { sessions: [] };
+        }
+        
+        if (isSecretMode.value) {
+            allHistories.value[mascotId].activeSecretSessionId = activeSessionId.value || undefined;
+            allHistories.value[mascotId].secretSessions = sessions.value;
+        } else {
+            allHistories.value[mascotId].activeSessionId = activeSessionId.value || undefined;
+            allHistories.value[mascotId].sessions = sessions.value;
+        }
         
         if (window.electronAPI) {
             try {
@@ -141,7 +185,7 @@ export function useChatHistory(scrollToBottom: () => void) {
 
     const clearHistory = async () => {
         if (!isHistoryLoaded.value) return;
-        const newSession = createNewSession();
+        const newSession = createNewSession(isSecretMode.value);
         sessions.value.unshift(newSession);
         activeSessionId.value = newSession.id;
         messages.value = [...newSession.messages];
@@ -158,7 +202,11 @@ export function useChatHistory(scrollToBottom: () => void) {
         showHistoryList.value = false;
         const mascotId = activeMascot.value?.id || 'default';
         if (allHistories.value[mascotId]) {
-            allHistories.value[mascotId].activeSessionId = sessionId;
+            if (isSecretMode.value) {
+                allHistories.value[mascotId].activeSecretSessionId = sessionId;
+            } else {
+                allHistories.value[mascotId].activeSessionId = sessionId;
+            }
         }
         saveHistory();
         nextTick(() => scrollToBottom());
@@ -170,7 +218,7 @@ export function useChatHistory(scrollToBottom: () => void) {
         sessions.value = sessions.value.filter(s => s.id !== sessionId);
         
         if (sessions.value.length === 0) {
-            const newSession = createNewSession();
+            const newSession = createNewSession(isSecretMode.value);
             sessions.value = [newSession];
         }
         
@@ -181,8 +229,13 @@ export function useChatHistory(scrollToBottom: () => void) {
         
         const mascotId = activeMascot.value?.id || 'default';
         if (allHistories.value[mascotId]) {
-            allHistories.value[mascotId].sessions = sessions.value;
-            allHistories.value[mascotId].activeSessionId = activeSessionId.value || undefined;
+            if (isSecretMode.value) {
+                allHistories.value[mascotId].secretSessions = sessions.value;
+                allHistories.value[mascotId].activeSecretSessionId = activeSessionId.value || undefined;
+            } else {
+                allHistories.value[mascotId].sessions = sessions.value;
+                allHistories.value[mascotId].activeSessionId = activeSessionId.value || undefined;
+            }
         }
         
         await saveHistory();
@@ -303,39 +356,45 @@ export function useChatHistory(scrollToBottom: () => void) {
         // --- 長期記憶の自動更新 (Memory Compaction) ---
         if (window.electronAPI && mascot) {
             try {
-                const mascotPrompts = await window.electronAPI.getMascotPrompts(mascot.id);
-                const currentMemory = mascotPrompts.memory || '';
-                
-                console.log(`[Compaction] Calling /api/update-memory. Engine: ${engine}, Model: ${model}`);
-                const memResponse = await fetch('/api/update-memory', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        currentMemory,
-                        chatHistory: chatText,
-                        engine,
-                        model,
-                        apiKey,
-                        lmstudioEndpoint: lmsEndpoint
-                    })
-                });
+                // シークレットセッションの場合は長期記憶の自動更新をスキップする
+                const isSecretSession = session.isSecret || isSecretMode.value;
+                if (!isSecretSession) {
+                    const mascotPrompts = await window.electronAPI.getMascotPrompts(mascot.id);
+                    const currentMemory = mascotPrompts.memory || '';
+                    
+                    console.log(`[Compaction] Calling /api/update-memory. Engine: ${engine}, Model: ${model}`);
+                    const memResponse = await fetch('/api/update-memory', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            currentMemory,
+                            chatHistory: chatText,
+                            engine,
+                            model,
+                            apiKey,
+                            lmstudioEndpoint: lmsEndpoint
+                        })
+                    });
 
-                if (memResponse.ok) {
-                    const memJson = await memResponse.json();
-                    if (memJson && memJson.success && memJson.memory) {
-                        let newMemory = memJson.memory;
-                        newMemory = newMemory.replace(/\[\w+\]/g, '').trim();
-                        
-                        mascotPrompts.memory = newMemory;
-                        await window.electronAPI.saveMascotPrompts(mascot.id, mascotPrompts);
-                        console.log('[Compaction] Memory update succeeded. New memory length:', newMemory.length);
+                    if (memResponse.ok) {
+                        const memJson = await memResponse.json();
+                        if (memJson && memJson.success && memJson.memory) {
+                            let newMemory = memJson.memory;
+                            newMemory = newMemory.replace(/\[\w+\]/g, '').trim();
+                            
+                            mascotPrompts.memory = newMemory;
+                            await window.electronAPI.saveMascotPrompts(mascot.id, mascotPrompts);
+                            console.log('[Compaction] Memory update succeeded. New memory length:', newMemory.length);
+                        } else {
+                            console.error('[Compaction] Memory update failed:', memJson.error || 'No memory returned');
+                        }
                     } else {
-                        console.error('[Compaction] Memory update failed:', memJson.error || 'No memory returned');
+                        console.error('[Compaction] Memory update HTTP error! status:', memResponse.status);
                     }
                 } else {
-                    console.error('[Compaction] Memory update HTTP error! status:', memResponse.status);
+                    console.log('[Compaction] Secret session. Skipping long-term memory update.');
                 }
             } catch (memError) {
                 console.error('[Compaction] Memory update failed with error:', memError);
@@ -367,6 +426,28 @@ export function useChatHistory(scrollToBottom: () => void) {
         if (oldId && newId && newId !== oldId) {
             saveHistoryForMascot(oldId);
         }
+        applyActiveMascotHistory();
+    });
+
+    // シークレットモード切り替え時の履歴適用
+    watch(isSecretMode, async (newVal, oldVal) => {
+        if (!isHistoryLoaded.value) return;
+        const mascotId = activeMascot.value?.id || 'default';
+        if (!allHistories.value[mascotId]) {
+            allHistories.value[mascotId] = { sessions: [] };
+        }
+        
+        // 切り替え前のデータを退避
+        const wasSecret = oldVal;
+        if (wasSecret) {
+            allHistories.value[mascotId].activeSecretSessionId = activeSessionId.value || undefined;
+            allHistories.value[mascotId].secretSessions = sessions.value;
+        } else {
+            allHistories.value[mascotId].activeSessionId = activeSessionId.value || undefined;
+            allHistories.value[mascotId].sessions = sessions.value;
+        }
+        
+        // 切り替え後のデータを適用
         applyActiveMascotHistory();
     });
 
