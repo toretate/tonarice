@@ -30,6 +30,7 @@ export function useChatConnection(params: {
 
     const configStore = useConfigStore();
     const mascotStore = useMascotStore();
+    let compactionTimer: any = null;
 
     const playlist = new AudioPlaylist((speaking) => {
         mascotStore.setSpeaking(speaking);
@@ -99,9 +100,25 @@ export function useChatConnection(params: {
                     const { text, emotion } = data;
 
                     updateLastMascotMessage(text);
-                    const mascotId = activeMascot.value?.id || 'default';
-                    await runCompaction(mascotId, activeSessionId.value!);
-                    await saveHistory();
+                    
+                    // 会話終了後、30秒間無操作が続いた場合にバックグラウンドで要約＆長期記憶マージを実行
+                    if (compactionTimer) {
+                        clearTimeout(compactionTimer);
+                    }
+                    compactionTimer = setTimeout(async () => {
+                        try {
+                            console.log('[Compaction] Idle timeout reached. Starting compaction & memory update...');
+                            const mascotId = activeMascot.value?.id || 'default';
+                            if (activeSessionId.value) {
+                                await runCompaction(mascotId, activeSessionId.value);
+                                await saveHistory();
+                            }
+                        } catch (compactionErr) {
+                            console.error('[Compaction] Deferred compaction failed:', compactionErr);
+                        } finally {
+                            compactionTimer = null;
+                        }
+                    }, 30000);
 
                     mascotStore.setEmotion(emotion);
                     if (window.electronAPI) {
@@ -185,6 +202,13 @@ export function useChatConnection(params: {
     const sendMessage = async (isActiveTalk: boolean = false) => {
         if (!isActiveTalk && !inputText.value.trim() && pendingAttachments.value.length === 0) return;
         if (isAiResponding.value) return;
+
+        // 会話継続のため、予定されていた要約処理タイマーをクリアして延期する
+        if (compactionTimer) {
+            clearTimeout(compactionTimer);
+            compactionTimer = null;
+            console.log('[Compaction] User sent a message. Compaction deferred.');
+        }
 
         playlist.stop();
 

@@ -300,6 +300,48 @@ export function useChatHistory(scrollToBottom: () => void) {
             return;
         }
 
+        // --- 長期記憶の自動更新 (Memory Compaction) ---
+        if (window.electronAPI && mascot) {
+            try {
+                const mascotPrompts = await window.electronAPI.getMascotPrompts(mascot.id);
+                const currentMemory = mascotPrompts.memory || '';
+                
+                console.log(`[Compaction] Calling /api/update-memory. Engine: ${engine}, Model: ${model}`);
+                const memResponse = await fetch('/api/update-memory', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        currentMemory,
+                        chatHistory: chatText,
+                        engine,
+                        model,
+                        apiKey,
+                        lmstudioEndpoint: lmsEndpoint
+                    })
+                });
+
+                if (memResponse.ok) {
+                    const memJson = await memResponse.json();
+                    if (memJson && memJson.success && memJson.memory) {
+                        let newMemory = memJson.memory;
+                        newMemory = newMemory.replace(/\[\w+\]/g, '').trim();
+                        
+                        mascotPrompts.memory = newMemory;
+                        await window.electronAPI.saveMascotPrompts(mascot.id, mascotPrompts);
+                        console.log('[Compaction] Memory update succeeded. New memory length:', newMemory.length);
+                    } else {
+                        console.error('[Compaction] Memory update failed:', memJson.error || 'No memory returned');
+                    }
+                } else {
+                    console.error('[Compaction] Memory update HTTP error! status:', memResponse.status);
+                }
+            } catch (memError) {
+                console.error('[Compaction] Memory update failed with error:', memError);
+            }
+        }
+
         if (summary && !summary.startsWith('Error:')) {
             summary = summary.replace(/\[\w+\]/g, '').trim();
 
