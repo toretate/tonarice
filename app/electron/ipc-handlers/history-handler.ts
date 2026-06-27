@@ -109,4 +109,15 @@ export function registerHistoryHandlers() {
             return { success: false, error: (error as Error).message };
         }
     });
+
+    // ダウンロードフォルダを開くハンドラー
+    ipcMain.on('open-downloads-folder', () => {
+        const downloadsPath = app.getPath('downloads');
+        shell.openPath(downloadsPath);
+    });
+
+    // フロントエンドからのデバッグログを受信して出力するハンドラー
+    ipcMain.on('log-debug', (event, msg: string) => {
+        console.log(`[Frontend Debug] ${msg}`);
+    });
 }

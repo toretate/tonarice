@@ -82,6 +82,12 @@ describe('outfit切り替え時のちらつき防止テスト', () => {
                 googleAiStudioApiKey: 'test-api-key'
             })
         };
+
+        // fetch のグローバルモック化
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ success: true, config: {} })
+        }));
     });
 
     describe('useMascotSettings composable', () => {

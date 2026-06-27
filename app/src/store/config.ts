@@ -101,8 +101,14 @@ export interface AppConfig {
     forgeCfgScale?: number;
     forgeWidth?: number;
     forgeHeight?: number;
+    forgeDenoisingStrength?: number;
+    forgePrompt?: string;
+    forgeNegativePrompt?: string;
+    forgeSampler?: string;
+    forgePresets?: string;
     forgeModelsList?: string[];
     forgeLorasList?: string[];
+    forgeDebugLog?: boolean;
 }
 
 export const useConfigStore = defineStore('config', () => {
@@ -213,8 +219,14 @@ export const useConfigStore = defineStore('config', () => {
     const forgeCfgScale = ref(7.0);
     const forgeWidth = ref(1024);
     const forgeHeight = ref(1024);
+    const forgeDenoisingStrength = ref(0.7);
+    const forgePrompt = ref('');
+    const forgeNegativePrompt = ref('nsfw, low quality, worst quality, deformed, bad anatomy');
+    const forgeSampler = ref('Euler a');
+    const forgePresets = ref('[]');
     const forgeModelsList = ref<string[]>([]);
     const forgeLorasList = ref<string[]>([]);
+    const forgeDebugLog = ref(false);
     const configVersion = ref(0);
 
     // ---- Getters ----
@@ -364,8 +376,14 @@ export const useConfigStore = defineStore('config', () => {
             forgeCfgScale.value = configData.forgeCfgScale !== undefined ? Number(configData.forgeCfgScale) : 7.0;
             forgeWidth.value = configData.forgeWidth !== undefined ? Number(configData.forgeWidth) : 1024;
             forgeHeight.value = configData.forgeHeight !== undefined ? Number(configData.forgeHeight) : 1024;
+            forgeDenoisingStrength.value = configData.forgeDenoisingStrength !== undefined ? Number(configData.forgeDenoisingStrength) : 0.7;
+            forgePrompt.value = configData.forgePrompt || '';
+            forgeNegativePrompt.value = configData.forgeNegativePrompt !== undefined ? configData.forgeNegativePrompt : 'nsfw, low quality, worst quality, deformed, bad anatomy';
+            forgeSampler.value = configData.forgeSampler || 'Euler a';
+            forgePresets.value = configData.forgePresets || '[]';
             forgeModelsList.value = configData.forgeModelsList || [];
             forgeLorasList.value = configData.forgeLorasList || [];
+            forgeDebugLog.value = configData.forgeDebugLog !== undefined ? !!configData.forgeDebugLog : false;
         } else {
             // Webブラウザ実行時の localStorage フォールバック
             googleAiStudioApiKey.value = localStorage.getItem('GoogleAiStudioApiKey') || '';
@@ -480,6 +498,12 @@ export const useConfigStore = defineStore('config', () => {
             forgeWidth.value = savedW ? parseInt(savedW) : 1024;
             const savedH = localStorage.getItem('forgeHeight');
             forgeHeight.value = savedH ? parseInt(savedH) : 1024;
+            const savedDenoising = localStorage.getItem('forgeDenoisingStrength');
+            forgeDenoisingStrength.value = savedDenoising ? parseFloat(savedDenoising) : 0.7;
+            forgePrompt.value = localStorage.getItem('forgePrompt') || '';
+            forgeNegativePrompt.value = localStorage.getItem('forgeNegativePrompt') || 'nsfw, low quality, worst quality, deformed, bad anatomy';
+            forgeSampler.value = localStorage.getItem('forgeSampler') || 'Euler a';
+            forgePresets.value = localStorage.getItem('forgePresets') || '[]';
             
             try {
                 forgeModelsList.value = JSON.parse(localStorage.getItem('forgeModelsList') || '[]');
@@ -488,12 +512,18 @@ export const useConfigStore = defineStore('config', () => {
                 forgeModelsList.value = [];
                 forgeLorasList.value = [];
             }
+            forgeDebugLog.value = localStorage.getItem('forgeDebugLog') === 'true';
         }
         isLoaded.value = true;
     };
 
     // 現在のストアの状態を設定ファイルおよび localStorage に保存する
     const saveConfig = async () => {
+        if (!isLoaded.value) {
+            console.warn('[Config] saveConfig skipped: store is not loaded yet');
+            return;
+        }
+
         const payload: AppConfig = {
             googleAiStudioApiKey: googleAiStudioApiKey.value,
             openaiApiKey: openaiApiKey.value,
@@ -576,8 +606,14 @@ export const useConfigStore = defineStore('config', () => {
             forgeCfgScale: Number(forgeCfgScale.value),
             forgeWidth: Number(forgeWidth.value),
             forgeHeight: Number(forgeHeight.value),
+            forgeDenoisingStrength: Number(forgeDenoisingStrength.value),
+            forgePrompt: forgePrompt.value,
+            forgeNegativePrompt: forgeNegativePrompt.value,
+            forgeSampler: forgeSampler.value,
+            forgePresets: forgePresets.value,
             forgeModelsList: JSON.parse(JSON.stringify(forgeModelsList.value)),
-            forgeLorasList: JSON.parse(JSON.stringify(forgeLorasList.value))
+            forgeLorasList: JSON.parse(JSON.stringify(forgeLorasList.value)),
+            forgeDebugLog: forgeDebugLog.value
         };
 
         // mascots を含まない payload を作成
@@ -699,8 +735,14 @@ export const useConfigStore = defineStore('config', () => {
         localStorage.setItem('forgeCfgScale', forgeCfgScale.value.toString());
         localStorage.setItem('forgeWidth', forgeWidth.value.toString());
         localStorage.setItem('forgeHeight', forgeHeight.value.toString());
+        localStorage.setItem('forgeDenoisingStrength', forgeDenoisingStrength.value.toString());
+        localStorage.setItem('forgePrompt', forgePrompt.value);
+        localStorage.setItem('forgeNegativePrompt', forgeNegativePrompt.value);
+        localStorage.setItem('forgeSampler', forgeSampler.value);
+        localStorage.setItem('forgePresets', forgePresets.value);
         localStorage.setItem('forgeModelsList', JSON.stringify(forgeModelsList.value));
         localStorage.setItem('forgeLorasList', JSON.stringify(forgeLorasList.value));
+        localStorage.setItem('forgeDebugLog', forgeDebugLog.value.toString());
     };
 
     // 特定のマスコットのみを個別保存するアクション
@@ -806,8 +848,14 @@ export const useConfigStore = defineStore('config', () => {
         if (newConfig.forgeCfgScale !== undefined) forgeCfgScale.value = Number(newConfig.forgeCfgScale);
         if (newConfig.forgeWidth !== undefined) forgeWidth.value = Number(newConfig.forgeWidth);
         if (newConfig.forgeHeight !== undefined) forgeHeight.value = Number(newConfig.forgeHeight);
+        if (newConfig.forgeDenoisingStrength !== undefined) forgeDenoisingStrength.value = Number(newConfig.forgeDenoisingStrength);
+        if (newConfig.forgePrompt !== undefined) forgePrompt.value = newConfig.forgePrompt;
+        if (newConfig.forgeNegativePrompt !== undefined) forgeNegativePrompt.value = newConfig.forgeNegativePrompt;
+        if (newConfig.forgeSampler !== undefined) forgeSampler.value = newConfig.forgeSampler;
+        if (newConfig.forgePresets !== undefined) forgePresets.value = newConfig.forgePresets;
         if (newConfig.forgeModelsList !== undefined) forgeModelsList.value = newConfig.forgeModelsList;
         if (newConfig.forgeLorasList !== undefined) forgeLorasList.value = newConfig.forgeLorasList;
+        if (newConfig.forgeDebugLog !== undefined) forgeDebugLog.value = !!newConfig.forgeDebugLog;
         
         configVersion.value++;
     };
@@ -896,8 +944,14 @@ export const useConfigStore = defineStore('config', () => {
         forgeCfgScale,
         forgeWidth,
         forgeHeight,
+        forgeDenoisingStrength,
+        forgePrompt,
+        forgeNegativePrompt,
+        forgeSampler,
+        forgePresets,
         forgeModelsList,
         forgeLorasList,
+        forgeDebugLog,
         configVersion,
         loadConfig,
         saveConfig,

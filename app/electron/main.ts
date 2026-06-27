@@ -263,7 +263,9 @@ app.whenReady().then(async () => {
         return await ForgeConnector.loras(host);
     });
     ipcMain.handle('forge:generate', async (event, params: any, host: string) => {
-        return await ForgeConnector.generateImage(params, host);
+        const appConfig = config?.get();
+        const debugLog = appConfig ? !!appConfig.forgeDebugLog : false;
+        return await ForgeConnector.generateImage(params, host, debugLog);
     });
 
 

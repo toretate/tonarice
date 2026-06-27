@@ -35,6 +35,12 @@ describe('useSettingsWindow', () => {
         // alert と confirm のモック化
         vi.stubGlobal('alert', vi.fn());
         vi.stubGlobal('confirm', vi.fn().mockReturnValue(true));
+
+        // fetch のグローバルモック化
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ success: true, config: {} })
+        }));
     });
 
     it('addMascot - 新しいマスコットを追加したときにリストにマスコットが追加され、アクティブIDが更新されること', () => {

@@ -37,7 +37,11 @@ describe('ForgeConnector', () => {
                 height: 1024,
                 batch_size: 1,
                 cfg_scale: 7.0,
-                sampler_name: 'Euler a'
+                sampler_name: 'Euler a',
+                scheduler: 'Automatic',
+                override_settings: {
+                    samples_format: 'png'
+                }
             })
         });
 
@@ -77,8 +81,12 @@ describe('ForgeConnector', () => {
                 batch_size: 1,
                 cfg_scale: 7.0,
                 sampler_name: 'Euler a',
+                scheduler: 'Automatic',
                 init_images: ['dummy_input_base64'],
-                denoising_strength: 0.6
+                denoising_strength: 0.6,
+                override_settings: {
+                    samples_format: 'png'
+                }
             })
         });
 

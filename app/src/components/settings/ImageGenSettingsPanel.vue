@@ -13,7 +13,8 @@ const {
     forgeModel,
     forgeLora,
     forgeModelsList,
-    forgeLorasList
+    forgeLorasList,
+    forgeDebugLog
 } = storeToRefs(configStore);
 
 const imageEngines = ref([
@@ -183,6 +184,19 @@ const saveSettings = async () => {
                                 @click="loadLoras"
                             />
                         </div>
+                    </div>
+
+                    <!-- デバッグログ出力設定 -->
+                    <div class="form-field flex align-items-center gap-2 mt-3 select-none">
+                        <input 
+                            v-model="forgeDebugLog" 
+                            type="checkbox" 
+                            id="forgeDebugLog"
+                            class="cursor-pointer"
+                        />
+                        <label for="forgeDebugLog" class="font-medium text-sm text-slate-700 cursor-pointer">
+                            API送信リクエストのデバッグログを出力する（ターミナルに表示）
+                        </label>
                     </div>
                 </div>
                 <div class="flex justify-content-end mt-4">

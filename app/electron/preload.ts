@@ -187,5 +187,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     forgeTestConnection: (host: string) => ipcRenderer.invoke('forge:health', host),
     forgeGetModels: (host: string) => ipcRenderer.invoke('forge:models', host),
     forgeGetLoras: (host: string) => ipcRenderer.invoke('forge:loras', host),
-    forgeGenerateImage: (params: any, host: string) => ipcRenderer.invoke('forge:generate', params, host)
+    forgeGenerateImage: (params: any, host: string) => ipcRenderer.invoke('forge:generate', params, host),
+    openDownloadsFolder: () => ipcRenderer.send('open-downloads-folder'),
+    logDebug: (msg: string) => ipcRenderer.send('log-debug', msg)
 });

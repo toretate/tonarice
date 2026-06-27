@@ -92,6 +92,12 @@ export interface ConfigData {
     forgeCfgScale: number;
     forgeWidth: number;
     forgeHeight: number;
+    forgeDenoisingStrength: number;
+    forgePrompt: string;
+    forgeNegativePrompt: string;
+    forgeSampler: string;
+    forgePresets: string;
+    forgeDebugLog: boolean;
 }
 
 export const defaultData: ConfigData = {
@@ -173,5 +179,11 @@ export const defaultData: ConfigData = {
     forgeSteps: 25,
     forgeCfgScale: 7.0,
     forgeWidth: 1024,
-    forgeHeight: 1024
+    forgeHeight: 1024,
+    forgeDenoisingStrength: 0.7,
+    forgePrompt: '',
+    forgeNegativePrompt: 'nsfw, low quality, worst quality, deformed, bad anatomy',
+    forgeSampler: 'Euler a',
+    forgePresets: '[]',
+    forgeDebugLog: false
 };

@@ -8,7 +8,9 @@ import { useChatHistory } from './chatpanel/useChatHistory';
 import { useChatConnection } from './chatpanel/useChatConnection';
 import HistoryPanel from './chatpanel/HistoryPanel.vue';
 import MascotViewer from './MascotViewer.vue';
+import ForgeImageGeneratorDialog from './ForgeImageGeneratorDialog.vue';
 import radioIcon from '../assets/radio_icon.svg';
+import { extractImagePrompt, extractImageParameters } from '../utils/png-metadata';
 
 const inputText = ref('');
 const messageContainer = ref<HTMLElement | null>(null);
@@ -159,11 +161,72 @@ const triggerFileInput = () => {
 };
 
 const activeImageUrl = ref<string | null>(null);
+const imageParametersText = ref('');
+const showInfoPanel = ref(false);
+const copied = ref(false);
+
 const openImageModal = (url: string) => {
     activeImageUrl.value = url;
+    showInfoPanel.value = false;
+    copied.value = false;
+    
+    if (window.electronAPI && window.electronAPI.logDebug) {
+        window.electronAPI.logDebug(`openImageModal URL length: ${url?.length}, startsWithData: ${url?.startsWith('data:')}`);
+        try {
+            const parts = url.split(',');
+            const base64 = (parts[1] || '').replace(/\s/g, '');
+            const bin = atob(base64.substring(0, 100));
+            const header = [];
+            for (let i = 0; i < Math.min(bin.length, 8); i++) {
+                header.push(bin.charCodeAt(i).toString(16).padStart(2, '0').toUpperCase());
+            }
+            window.electronAPI.logDebug(`Image Header: ${header.join(' ')}`);
+        } catch (e: any) {
+            window.electronAPI.logDebug(`Failed to read header: ${e.message}`);
+        }
+    }
+    
+    try {
+        const params = extractImageParameters(url);
+        imageParametersText.value = params;
+        
+        if (window.electronAPI && window.electronAPI.logDebug) {
+            window.electronAPI.logDebug(`Parsed parameters length: ${params?.length}`);
+            if (params) {
+                window.electronAPI.logDebug(`Parsed parameters text:\n${params}`);
+            }
+        }
+    } catch (e: any) {
+        if (window.electronAPI && window.electronAPI.logDebug) {
+            window.electronAPI.logDebug(`Failed to extract parameters: ${e.message}`);
+        }
+    }
 };
+
+const openDownloadsFolder = () => {
+    if (window.electronAPI && window.electronAPI.openDownloadsFolder) {
+        window.electronAPI.openDownloadsFolder();
+    }
+};
+
 const closeImageModal = () => {
     activeImageUrl.value = null;
+    imageParametersText.value = '';
+    showInfoPanel.value = false;
+    copied.value = false;
+};
+
+const copyParameters = async () => {
+    if (!imageParametersText.value) return;
+    try {
+        await navigator.clipboard.writeText(imageParametersText.value);
+        copied.value = true;
+        setTimeout(() => {
+            copied.value = false;
+        }, 2000);
+    } catch (err) {
+        console.error('Failed to copy text:', err);
+    }
 };
 
 const downloadFile = (att: any) => {
@@ -267,10 +330,13 @@ onMounted(async () => {
     if (isRadioMode.value) {
         startActiveTalkTimer();
     }
+
+    document.addEventListener('click', handleDocumentClick);
 });
 
 onUnmounted(() => {
     window.removeEventListener('mousemove', handleChatMouseMove);
+    document.removeEventListener('click', handleDocumentClick);
     disconnectWebSocket();
     if (unsubscribeConfig) {
         unsubscribeConfig();
@@ -284,13 +350,59 @@ const openSettings = () => {
     }
 };
 
-// ---- 画像生成 (t2i) モードフロー ----
-const isT2iMode = ref(false);
+const useAsI2iSource = (url: string) => {
+    pendingAttachments.value = [{
+        type: 'image',
+        name: `i2i_source_${Date.now()}.png`,
+        url: url
+    }];
+    imageGenMode.value = 'i2i';
+    
+    // 画像からメタデータプロンプトを取得して設定
+    const loadedPrompt = extractImagePrompt(url);
+    if (loadedPrompt) {
+        inputText.value = loadedPrompt;
+    }
+    
+    nextTick(() => {
+        const textarea = document.querySelector('.message-input') as HTMLTextAreaElement;
+        if (textarea) {
+            textarea.focus();
+        }
+    });
+};
 
-const generateImageFlow = async () => {
+// ---- 画像生成・編集 (t2i / i2i) モードフロー ----
+const imageGenMode = ref<'t2i' | 'i2i' | null>(null);
+const showImageMenu = ref(false);
+const imageGenDialogVisible = ref(false);
+
+const toggleImageMenu = (e: MouseEvent) => {
+    e.stopPropagation();
+    showImageMenu.value = !showImageMenu.value;
+};
+
+const handleDocumentClick = (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (!target.closest('.image-menu-wrapper')) {
+        showImageMenu.value = false;
+    }
+};
+
+const generateImageFlow = async (isI2i = false) => {
     const userPrompt = inputText.value.trim();
     if (!userPrompt) return;
     
+    let initImageBase64 = '';
+    if (isI2i) {
+        const imgAttachment = pendingAttachments.value.find(a => a.type === 'image');
+        if (!imgAttachment) {
+            alert('画像編集 (i2i) モードには元となる画像が必要です。あらかじめ画像を添付してください。');
+            return;
+        }
+        initImageBase64 = imgAttachment.url;
+    }
+
     inputText.value = '';
 
     messages.value.push({
@@ -303,7 +415,7 @@ const generateImageFlow = async () => {
     messages.value.push({
         id: aiMessageId,
         sender: 'mascot',
-        text: '画像を生成しています...'
+        text: isI2i ? '画像を編集しています...' : '画像を生成しています...'
     });
 
     mascotStore.setLoading(true);
@@ -312,15 +424,47 @@ const generateImageFlow = async () => {
 
     try {
         const host = configStore.forgeEndpoint || 'http://127.0.0.1:5555';
-        const params = {
-            prompt: userPrompt,
+        let finalPrompt = configStore.forgePrompt ? `${configStore.forgePrompt}, ${userPrompt}` : userPrompt;
+        if (configStore.forgeLora) {
+            const loraPromptParts = configStore.forgeLora
+                .split(',')
+                .map(s => s.trim())
+                .filter(Boolean)
+                .map(item => {
+                    const parts = item.split(':');
+                    let name = parts[0]?.trim();
+                    const weight = parts[1] !== undefined ? parts[1].trim() : '1.00';
+                    if (name) {
+                        // パス区切り文字（/ や \）が含まれている場合は、ファイル名部分だけを抽出
+                        const lastSlash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+                        if (lastSlash !== -1) {
+                            name = name.substring(lastSlash + 1);
+                        }
+                        return `<lora:${name}:${weight}>`;
+                    }
+                    return '';
+                })
+                .filter(Boolean)
+                .join(' ');
+            if (loraPromptParts) {
+                finalPrompt = `${finalPrompt} ${loraPromptParts}`;
+            }
+        }
+        const params: any = {
+            prompt: finalPrompt,
             steps: Number(configStore.forgeSteps) || 25,
             cfgScale: Number(configStore.forgeCfgScale) || 7.0,
             width: Number(configStore.forgeWidth) || 1024,
             height: Number(configStore.forgeHeight) || 1024,
             modelCheckpoint: configStore.forgeModel || undefined,
-            negativePrompt: 'nsfw, low quality, worst quality, deformed, bad anatomy'
+            negativePrompt: configStore.forgeNegativePrompt || undefined,
+            samplerName: configStore.forgeSampler || undefined
         };
+
+        if (isI2i && initImageBase64) {
+            params.initImage = initImageBase64;
+            params.denoisingStrength = Number(configStore.forgeDenoisingStrength) ?? 0.7;
+        }
 
         let base64Image = '';
         if (window.electronAPI && window.electronAPI.forgeGenerateImage) {
@@ -332,7 +476,7 @@ const generateImageFlow = async () => {
         const imgDataUrl = `data:image/png;base64,${base64Image}`;
         const aiMsg = messages.value.find(m => m.id === aiMessageId);
         if (aiMsg) {
-            aiMsg.text = '画像を生成しました。';
+            aiMsg.text = isI2i ? '画像を編集しました。' : '画像を生成しました。';
             aiMsg.attachments = [{
                 type: 'image',
                 name: `generated_${Date.now()}.png`,
@@ -343,9 +487,10 @@ const generateImageFlow = async () => {
         console.error('[ChatPanel] Image generation failed:', error);
         const aiMsg = messages.value.find(m => m.id === aiMessageId);
         if (aiMsg) {
-            aiMsg.text = `画像の生成に失敗しました。理由: ${error.message || error}`;
+            aiMsg.text = `${isI2i ? '画像編集' : '画像生成'}に失敗しました。理由: ${error.message || error}`;
         }
     } finally {
+        pendingAttachments.value = []; // 元画像をクリア
         mascotStore.setLoading(false);
         await saveHistory();
         await nextTick();
@@ -357,8 +502,8 @@ const handleFormSubmit = async () => {
     if (!inputText.value.trim() && pendingAttachments.value.length === 0) return;
     if (isAiResponding.value) return;
 
-    if (isT2iMode.value) {
-        await generateImageFlow();
+    if (imageGenMode.value) {
+        await generateImageFlow(imageGenMode.value === 'i2i');
     } else {
         await sendMessage();
     }
@@ -510,9 +655,26 @@ const focusWindow = () => {
                 <button class="icon-btn" @click="configStore.updateConfig({ useTts: !useTts }); configStore.saveConfig()" :class="{ 'active-btn': useTts }" title="音声読み上げ (TTS) ON/OFF">
                     <i :class="useTts ? 'pi pi-volume-up' : 'pi pi-volume-off'"></i>
                 </button>
-                <button class="icon-btn" @click="isT2iMode = !isT2iMode" :class="{ 'active-btn': isT2iMode }" title="画像生成 (t2i) モード ON/OFF">
-                    <i class="pi pi-image"></i>
-                </button>
+                <!-- 画像生成・編集メニュー -->
+                <div class="image-menu-wrapper">
+                    <button type="button" class="icon-btn" @click="toggleImageMenu" :class="{ 'active-btn': imageGenMode !== null }" title="画像生成・編集メニュー">
+                        <i class="pi pi-image"></i>
+                    </button>
+                    <div v-if="showImageMenu" class="image-dropdown-menu">
+                        <div class="menu-item" @click="imageGenMode = 't2i'; showImageMenu = false">
+                            <i class="pi pi-pencil"></i> テキストから画像生成 (t2i)
+                            <i v-if="imageGenMode === 't2i'" class="pi pi-check active-check"></i>
+                        </div>
+                        <div class="menu-item" @click="imageGenMode = 'i2i'; showImageMenu = false">
+                            <i class="pi pi-image"></i> 画像から画像生成 (i2i)
+                            <i v-if="imageGenMode === 'i2i'" class="pi pi-check active-check"></i>
+                        </div>
+                        <div class="menu-divider"></div>
+                        <div class="menu-item" @click="imageGenDialogVisible = true; showImageMenu = false">
+                            <i class="pi pi-cog"></i> 生成パラメータ設定
+                        </div>
+                    </div>
+                </div>
                 <button class="icon-btn" @click="mascotStore.setRadioMode(!isRadioMode)" :class="{ 'active-radio-btn': isRadioMode }" title="ラジオモード ON/OFF">
                     <img :src="radioIcon" class="radio-svg-icon" alt="ラジオ" />
                 </button>
@@ -543,6 +705,9 @@ const focusWindow = () => {
                             <!-- 画像の場合 -->
                             <div v-if="att.type === 'image'" class="attachment-image-box">
                                 <img :src="att.url" :alt="att.name" class="message-image" @click="openImageModal(att.url)" />
+                                <button type="button" class="use-i2i-btn" @click.stop="useAsI2iSource(att.url)" title="この画像を画像編集 (i2i) の元画像に設定">
+                                    <i class="pi pi-pencil"></i> i2i元画像に設定
+                                </button>
                             </div>
                             <!-- ファイルの場合 -->
                             <div v-else class="attachment-file-box" @click="downloadFile(att)" :title="att.name">
@@ -572,6 +737,31 @@ const focusWindow = () => {
 
         <!-- フッター（入力・送信） -->
         <footer v-if="!showHistoryList" class="chat-footer">
+            <!-- 画像生成・編集モードインジケーター -->
+            <div v-if="imageGenMode" class="image-gen-indicator" :class="{ 'i2i-indicator': imageGenMode === 'i2i' }">
+                <div class="indicator-main">
+                    <span class="indicator-text">
+                        <i class="pi" :class="imageGenMode === 't2i' ? 'pi-pencil' : 'pi-image'"></i>
+                        {{ imageGenMode === 't2i' ? '画像生成 (t2i) モード' : '画像編集 (i2i) モード' }} 有効中
+                    </span>
+                    <button type="button" class="cancel-mode-btn" @click="imageGenMode = null" title="チャットに戻る">
+                        チャットに戻る <i class="pi pi-times"></i>
+                    </button>
+                </div>
+                <!-- i2i時のみ Denoise (ノイズ強度) スライダーを表示 -->
+                <div v-if="imageGenMode === 'i2i'" class="denoise-slider-box">
+                    <span class="denoise-label">Denoise (変化度): <span class="denoise-val">{{ (configStore.forgeDenoisingStrength !== undefined ? configStore.forgeDenoisingStrength : 0.7).toFixed(2) }}</span></span>
+                    <input 
+                        type="range" 
+                        min="0.0" 
+                        max="1.0" 
+                        step="0.05" 
+                        v-model.number="configStore.forgeDenoisingStrength" 
+                        class="denoise-slider"
+                        @change="configStore.saveConfig()"
+                    />
+                </div>
+            </div>
             <!-- 送信前プレビュー一覧 -->
             <div v-if="pendingAttachments.length > 0" class="preview-panel">
                 <div v-for="(att, idx) in pendingAttachments" :key="idx" class="preview-item">
@@ -599,7 +789,7 @@ const focusWindow = () => {
                 </button>
                 <textarea 
                     v-model="inputText" 
-                    placeholder="メッセージを入力..." 
+                    :placeholder="imageGenMode ? (imageGenMode === 't2i' ? '[画像生成] プロンプトを入力...' : '[画像編集] 編集指示を入力...（元画像が必要です）') : 'メッセージを入力...'" 
                     class="message-input"
                     rows="1"
                     @keydown="onTextareaKeyDown"
@@ -612,8 +802,40 @@ const focusWindow = () => {
 
         <!-- 画像拡大モーダル -->
         <div v-if="activeImageUrl" class="image-modal" @click="closeImageModal">
-            <div class="image-modal-content">
-                <img :src="activeImageUrl" class="full-image" />
+            <div class="image-modal-content" @click.stop>
+                <img :src="activeImageUrl" class="full-image" @click="closeImageModal" />
+                
+                <div class="modal-action-bar">
+                    <button type="button" class="modal-action-btn i2i-btn" @click="useAsI2iSource(activeImageUrl); closeImageModal()" title="この画像を画像編集 (i2i) の元画像に設定">
+                        <i class="pi pi-pencil"></i> この画像を i2i 元画像に設定
+                    </button>
+                    
+                    <button v-if="imageParametersText" type="button" class="modal-action-btn info-btn" :class="{ 'active-info': showInfoPanel }" @click="showInfoPanel = !showInfoPanel" title="生成パラメータを表示">
+                        <i class="pi pi-info-circle"></i> 生成パラメータ
+                    </button>
+
+                    <button type="button" class="modal-action-btn folder-btn" @click="openDownloadsFolder" title="画像の保存先（ダウンロード）フォルダを開く">
+                        <i class="pi pi-folder-open"></i> 保存先を開く
+                    </button>
+                </div>
+
+                <!-- パラメータ詳細表示パネル -->
+                <div v-if="showInfoPanel && imageParametersText" class="info-panel-overlay">
+                    <div class="info-panel-header">
+                        <span class="info-panel-title"><i class="pi pi-info-circle"></i> 生成パラメータ詳細</span>
+                        <div class="info-panel-actions">
+                            <button type="button" class="panel-icon-btn" @click="copyParameters" title="パラメータをコピー">
+                                <i class="pi" :class="copied ? 'pi-check text-green-500' : 'pi-copy'"></i>
+                            </button>
+                            <button type="button" class="panel-icon-btn" @click="showInfoPanel = false" title="閉じる">
+                                <i class="pi pi-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="info-panel-body">
+                        <pre class="parameters-pre">{{ imageParametersText }}</pre>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -621,6 +843,9 @@ const focusWindow = () => {
         <div class="resize-handle right" @mousedown="initResize($event, 'right')"></div>
         <div class="resize-handle bottom" @mousedown="initResize($event, 'bottom')"></div>
         <div class="resize-handle corner" @mousedown="initResize($event, 'corner')"></div>
+
+        <!-- 画像生成パラメータ設定ダイアログ -->
+        <ForgeImageGeneratorDialog :visible="imageGenDialogVisible" @close="imageGenDialogVisible = false" />
     </div>
 </template>
 
@@ -698,6 +923,7 @@ const focusWindow = () => {
 
 .message-container {
     flex: 1;
+    min-height: 0;
     padding: 16px;
     overflow-y: auto;
     display: flex;
@@ -1028,11 +1254,11 @@ const focusWindow = () => {
 
 /* 画像拡大モーダル */
 .image-modal {
-    position: fixed;
+    position: absolute;
     top: 0;
     left: 0;
-    width: 100vw;
-    height: 100vh;
+    width: 100%;
+    height: 100%;
     background: rgba(0, 0, 0, 0.75);
     backdrop-filter: blur(8px);
     display: flex;
@@ -1044,6 +1270,8 @@ const focusWindow = () => {
 }
 
 .image-modal-content {
+    width: 100%;
+    height: 100%;
     max-width: 90%;
     max-height: 90%;
     display: flex;
@@ -1208,11 +1436,11 @@ const focusWindow = () => {
     box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-.chat-wrapper.secret-mode .chat-input {
+.chat-wrapper.secret-mode .message-input {
     color: #f3e8ff;
 }
 
-.chat-wrapper.secret-mode .chat-input::placeholder {
+.chat-wrapper.secret-mode .message-input::placeholder {
     color: #7c3aed;
     opacity: 0.6;
 }
@@ -1234,5 +1462,425 @@ const focusWindow = () => {
 .chat-wrapper.secret-mode .attach-btn:hover {
     color: #c084fc;
     background: rgba(168, 85, 247, 0.15);
+}
+
+/* ---- 画像生成・編集メニュー（ドロップダウン） ---- */
+.image-menu-wrapper {
+    position: relative;
+    display: inline-block;
+}
+
+.image-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    width: 200px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(168, 85, 247, 0.2);
+    border-radius: 12px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+    padding: 6px;
+    z-index: 110;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.chat-wrapper.secret-mode .image-dropdown-menu {
+    background: rgba(30, 27, 75, 0.95);
+    border-color: rgba(168, 85, 247, 0.4);
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+}
+
+.menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: #475569;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+    position: relative;
+}
+
+.chat-wrapper.secret-mode .menu-item {
+    color: #e2e8f0;
+}
+
+.menu-item:hover {
+    background: rgba(168, 85, 247, 0.08);
+    color: #8b5cf6;
+}
+
+.chat-wrapper.secret-mode .menu-item:hover {
+    background: rgba(168, 85, 247, 0.2);
+    color: #f3e8ff;
+}
+
+.menu-item i:first-child {
+    font-size: 13px;
+    width: 14px;
+    text-align: center;
+}
+
+.active-check {
+    position: absolute;
+    right: 12px;
+    color: #a855f7;
+    font-size: 12px;
+}
+
+.chat-wrapper.secret-mode .active-check {
+    color: #c084fc;
+}
+
+.menu-divider {
+    height: 1px;
+    background: rgba(0, 0, 0, 0.06);
+    margin: 4px 6px;
+}
+
+.chat-wrapper.secret-mode .menu-divider {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* ---- 画像生成・編集モードインジケーター ---- */
+.image-gen-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(168, 85, 247, 0.06);
+    border: 1px solid rgba(168, 85, 247, 0.15);
+    border-radius: 8px;
+    padding: 6px 12px;
+    margin-bottom: 8px;
+    box-sizing: border-box;
+    animation: slideDown 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.chat-wrapper.secret-mode .image-gen-indicator {
+    background: rgba(168, 85, 247, 0.12);
+    border-color: rgba(168, 85, 247, 0.3);
+}
+
+.indicator-text {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #7c3aed;
+}
+
+.chat-wrapper.secret-mode .indicator-text {
+    color: #d8b4fe;
+}
+
+.cancel-mode-btn {
+    background: transparent;
+    border: none;
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.chat-wrapper.secret-mode .cancel-mode-btn {
+    color: #cbd5e1;
+}
+
+.cancel-mode-btn:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: #0f172a;
+}
+
+.chat-wrapper.secret-mode .cancel-mode-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.image-gen-indicator.i2i-indicator {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+}
+
+.indicator-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+}
+
+.denoise-slider-box {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-top: 6px;
+    border-top: 1px dashed rgba(168, 85, 247, 0.15);
+}
+
+.chat-wrapper.secret-mode .denoise-slider-box {
+    border-top-color: rgba(168, 85, 247, 0.25);
+}
+
+.denoise-label {
+    font-size: 10px;
+    color: #64748b;
+    font-weight: 600;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.chat-wrapper.secret-mode .denoise-label {
+    color: #cbd5e1;
+}
+
+.denoise-val {
+    font-family: monospace;
+    font-weight: bold;
+    color: #7c3aed;
+}
+
+.chat-wrapper.secret-mode .denoise-val {
+    color: #d8b4fe;
+}
+
+.denoise-slider {
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(168, 85, 247, 0.15);
+    outline: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+}
+
+.denoise-slider::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 4px;
+    cursor: pointer;
+    background: transparent;
+    border-radius: 2px;
+}
+
+.denoise-slider::-webkit-slider-thumb {
+    height: 12px;
+    width: 12px;
+    border-radius: 50%;
+    background: #a855f7;
+    cursor: pointer;
+    -webkit-appearance: none;
+    margin-top: -4px;
+    transition: transform 0.1s ease;
+}
+
+.denoise-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+}
+
+.chat-wrapper.secret-mode .denoise-slider::-webkit-slider-thumb {
+    background: #c084fc;
+}
+
+/* ---- チャット画像ホバー時のi2i設定ボタン ---- */
+.use-i2i-btn {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    background: rgba(124, 58, 237, 0.85);
+    color: white;
+    border: none;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.2s ease, background 0.2s ease, transform 0.2s ease;
+    backdrop-filter: blur(4px);
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.attachment-image-box:hover .use-i2i-btn {
+    opacity: 1;
+}
+
+.use-i2i-btn:hover {
+    background: rgba(124, 58, 237, 1);
+    transform: scale(1.05);
+}
+
+/* ---- 拡大モーダル用i2iボタン・アクションバー ---- */
+.image-modal-content {
+    position: relative;
+}
+
+.modal-action-bar {
+    position: absolute;
+    bottom: 20px;
+    display: flex;
+    gap: 12px;
+    z-index: 10000;
+}
+
+.modal-action-btn {
+    border: none;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
+    color: white;
+}
+
+.modal-action-btn.i2i-btn {
+    background: #8b5cf6;
+}
+
+.modal-action-btn.i2i-btn:hover {
+    background: #7c3aed;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(124, 58, 237, 0.5);
+}
+
+.modal-action-btn.info-btn {
+    background: rgba(30, 41, 59, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(4px);
+}
+
+.modal-action-btn.info-btn:hover {
+    background: rgba(30, 41, 59, 1);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+
+.modal-action-btn.info-btn.active-info {
+    background: #0ea5e9;
+    border-color: #38bdf8;
+    box-shadow: 0 0 12px rgba(14, 165, 233, 0.5);
+}
+
+.modal-action-btn.folder-btn {
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(4px);
+}
+
+.modal-action-btn.folder-btn:hover {
+    background: rgba(15, 23, 42, 0.9);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+
+/* ---- パラメータ詳細表示パネル ---- */
+.info-panel-overlay {
+    position: absolute;
+    top: 5%;
+    left: 5%;
+    width: 90%;
+    height: 90%;
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    z-index: 10001;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    animation: fadeIn 0.15s ease;
+}
+
+.info-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.info-panel-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #f1f5f9;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.info-panel-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.panel-icon-btn {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    font-size: 14px;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.panel-icon-btn:hover {
+    color: #f1f5f9;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.info-panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.parameters-pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-family: Consolas, Monaco, monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    color: #cbd5e1;
+}
+
+.text-green-500 {
+    color: #10b981 !important;
 }
 </style>
