@@ -26,6 +26,9 @@ watch(() => props.visible, (newVal) => {
 
 watch(localVisible, (newVal) => {
     emit('update:visible', newVal);
+    if (!newVal) {
+        saveConfig();
+    }
 });
 
 // カテゴリの追加
@@ -163,7 +166,6 @@ const saveConfig = () => {
                         :max="1.0" 
                         :step="0.05"
                         class="opacity-slider"
-                        @change="saveConfig"
                     />
                 </div>
             </div>
