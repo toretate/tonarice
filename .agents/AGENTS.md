@@ -32,16 +32,17 @@
 - [x] １ファイルに機能を詰め込まない
 	<!-- 可能な限り、機能ごとにファイルを分割してください。 -->
 
-- [x] UIコンポーネントは cs, resx, Designer.cs に分割する (Windows Forms の場合)
-	<!-- Windows Forms の UI コンポーネントは、cs, resx, designer.cs に分割してください。 -->
-- [x] XAML ベースの UI コンポーネントは、xaml と code-behind に分割する (WPF の場合)
-	<!-- WPF の UI コンポーネントは、xaml と code-behind に分割してください。 --> 
-
 - [x] 仕様書は docs/specs ディレクトリに保存する
 	<!-- 仕様書や設計書などのドキュメントは、プロジェクトルートの docs/specs ディレクトリに保存してください。 -->
 
-- [x] 進捗管理や作業計画は docs/plans ディレクトリに保存する
-	<!-- 進捗管理や作業計画などのドキュメントは、プロジェクトルートの docs/plans ディレクトリに保存してください。 -->
+- [x] `docs/plans`は .gitignore に追加しておくこと 
+- [x] 進捗管理や作業計画は docs/plans/ ディレクトリ以下にフォルダを作成し、保存する
+  - 実装計画 (implementation_plan.md)  
+  - 修正内容の確認 (walkthrough.md)  
+  - タスクリスト (task.md)
+- [x] 進捗管理や作業計画の内容から、仕様書に転載すべきものは仕様書に転載してください。
+- [x] ユーザーからの指示の内、仕様書に転載すべきものは仕様書に転載してください。
+- [x] 進捗管理や作業計画が不要になったら、その作業の docs/plans 以下のディレクトリは削除してください。
 
 - [x] テストコードの作成を積極的に行う
 	<!-- 可能な限り、ユニットテストや統合テストなどのテストコードを作成してください。 -->
@@ -61,8 +62,6 @@
 - [x] 文字コードはUTF-8に統一する
 - [x] テストコードのメソッド名はテスト対象のメソッド名と、テスト内容を日本語で記述する
 - [x] マスコット固有の設定値は各マスコットの config.yaml に保存する。カバー画像やアニメーション設定、音声設定など。
-- [x] アプリケーションの設定値(ウィンドウ位置、現在の選択マスコットなど)は SystemConfig を使用して管理する
-- [x] Godot をコマンドラインから実行する際は、必ず `--headless` オプションを付与すること。
 
 # Comfy Workflow
 - [x] Comfy Workflow の ID 指定のセパレータ文字は":"です。例1) "10" 例2) "29:40" 
@@ -92,3 +91,5 @@
 * 画像生成 AI 設定画面の仕様は docs/specs/ImageGenAIConfigWindow.spec.md に記載します
 * 動画生成 AI 設定画面の仕様は docs/specs/VideoGenAIConfigWindow.spec.md に記載します
 * API KEY 設定画面の仕様は docs/specs/ApiKeyConfigWindow.spec.md に記載します
+* ウィジェット関連の仕様は docs/specs/widgets/ 以下に記載します
+* タスク管理の仕様は docs/specs/widgets/task-management 以下に記載します

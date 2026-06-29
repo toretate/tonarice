@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch, nextTick } from 'vue';
+import { useDraggable } from 'vue-draggable-plus';
 import { useTaskStore, Task, SubTask } from '../store/task';
 import { useConfigStore } from '../store/config';
 import { storeToRefs } from 'pinia';
@@ -8,6 +9,7 @@ import InputText from 'primevue/inputtext';
 import ProgressBar from 'primevue/progressbar';
 import SelectButton from 'primevue/selectbutton';
 import Slider from 'primevue/slider';
+import DatePicker from 'primevue/datepicker';
 
 const taskStore = useTaskStore();
 const configStore = useConfigStore();
@@ -23,27 +25,163 @@ const showCategorySettings = ref(false); // インライン設定パネル表示
 const newTaskTitle = ref('');
 const newSubTaskTitleMap = ref<Record<string, string>>({});
 
+// vue-draggable-plus用
+const localTasks = ref<Task[]>([...taskStore.filteredTasks]);
+const draggedNestTaskId = ref<string | null>(null);
+const draggedSubTask = ref<{ parentId: string; subTaskId: string } | null>(null);
+const dragStartX = ref<number>(0);
+const isNesting = ref(false);
+const parentRef = ref<HTMLElement | null>(null);
+
+watch(() => taskStore.filteredTasks, (newTasks) => {
+    if (!draggedNestTaskId.value && !draggedSubTask.value) {
+        localTasks.value = [...newTasks];
+    }
+}, { deep: true });
+
+const activeDropTargetTaskId = ref<string | null>(null);
+
+const canNest = (targetTask: Task) => {
+    if (!draggedNestTaskId.value) return false;
+    if (targetTask.id === draggedNestTaskId.value) return false;
+    const sourceTask = localTasks.value.find(t => t.id === draggedNestTaskId.value);
+    if (!sourceTask) return false;
+    if (sourceTask.steps && sourceTask.steps.length > 0) return false;
+    return true;
+};
+
+const onParentDragOver = (event: DragEvent, taskId: string) => {
+    if (draggedNestTaskId.value && isNesting.value) {
+        const targetTask = localTasks.value.find(t => t.id === taskId);
+        if (targetTask && canNest(targetTask)) {
+            activeDropTargetTaskId.value = taskId;
+        }
+    }
+};
+
+
+
+useDraggable(parentRef, localTasks, {
+    animation: 150,
+    handle: '.drag-handle',
+    onStart(evt) {
+        if (evt.originalEvent) {
+            dragStartX.value = evt.originalEvent.clientX;
+        }
+        draggedNestTaskId.value = localTasks.value[evt.oldIndex!].id;
+    },
+    onMove(evt, originalEvent) {
+        if (originalEvent) {
+            const deltaX = originalEvent.clientX - dragStartX.value;
+            const threshold = 24; // 2文字分 (24px)
+            if (deltaX >= threshold) {
+                isNesting.value = true;
+                return false; // 並び替えをキャンセル
+            }
+        }
+        isNesting.value = false;
+        activeDropTargetTaskId.value = null;
+    },
+    onEnd(evt) {
+        // 並び替え完了時の同期
+        taskStore.updateTasksOrder(localTasks.value);
+
+        // ネスト化の処理
+        if (isNesting.value && draggedNestTaskId.value && activeDropTargetTaskId.value) {
+            taskStore.convertToSubTask(draggedNestTaskId.value, activeDropTargetTaskId.value);
+        }
+
+        // 状態クリア
+        draggedNestTaskId.value = null;
+        dragStartX.value = 0;
+        isNesting.value = false;
+        activeDropTargetTaskId.value = null;
+    }
+});
+
 // インプレース編集用ステート
 const editingTaskId = ref<string | null>(null);
 const editingSubTaskId = ref<string | null>(null);
 const activeCalendarTaskId = ref<string | null>(null);
 
-const getDatetimeLocalString = (isoString?: string) => {
-    if (!isoString) return '';
-    const date = new Date(isoString);
-    const tzOffset = date.getTimezoneOffset() * 60000;
-    const localISOTime = (new Date(date.getTime() - tzOffset)).toISOString().slice(0, 16);
-    return localISOTime;
+// カレンダー・クロックピッカー用ステート
+const calendarYear = ref(new Date().getFullYear());
+const calendarMonth = ref(new Date().getMonth());
+const selectedDate = ref<number | null>(null);
+const timeStep = ref<'date' | 'hour' | 'minute'>('date');
+const selectedHour = ref<number>(12);
+const selectedMinute = ref<number>(0);
+
+const daysInMonth = computed(() => {
+    const year = calendarYear.value;
+    const month = calendarMonth.value;
+    const firstDayIndex = new Date(year, month, 1).getDay(); // 0 (Sun) - 6 (Sat)
+    const totalDays = new Date(year, month + 1, 0).getDate();
+    
+    const days = [];
+    for (let i = 0; i < firstDayIndex; i++) {
+        days.push(null);
+    }
+    for (let d = 1; d <= totalDays; d++) {
+        days.push(d);
+    }
+    return days;
+});
+
+const prevMonth = () => {
+    if (calendarMonth.value === 0) {
+        calendarMonth.value = 11;
+        calendarYear.value -= 1;
+    } else {
+        calendarMonth.value -= 1;
+    }
 };
 
-const handleDateChange = (taskId: string, event: Event) => {
-    const target = event.target as HTMLInputElement;
-    const val = target.value;
-    if (val) {
-        const date = new Date(val);
-        taskStore.updateTask(taskId, { scheduledAt: date.toISOString() });
+const nextMonth = () => {
+    if (calendarMonth.value === 11) {
+        calendarMonth.value = 0;
+        calendarYear.value += 1;
     } else {
-        taskStore.updateTask(taskId, { scheduledAt: undefined });
+        calendarMonth.value += 1;
+    }
+};
+
+const openCalendarPanel = (task: Task) => {
+    activeCalendarTaskId.value = task.id;
+    timeStep.value = 'date';
+    const initialDate = task.scheduledAt ? new Date(task.scheduledAt) : new Date();
+    calendarYear.value = initialDate.getFullYear();
+    calendarMonth.value = initialDate.getMonth();
+    selectedDate.value = initialDate.getDate();
+    selectedHour.value = initialDate.getHours();
+    selectedMinute.value = Math.round(initialDate.getMinutes() / 5) * 5 % 60;
+};
+
+const selectDate = (day: number) => {
+    selectedDate.value = day;
+    timeStep.value = 'hour';
+};
+
+const selectHour = (hour: number) => {
+    selectedHour.value = hour;
+    timeStep.value = 'minute';
+};
+
+const selectMinute = (minute: number) => {
+    selectedMinute.value = minute;
+    saveScheduledDateTime();
+};
+
+const saveScheduledDateTime = () => {
+    if (activeCalendarTaskId.value && selectedDate.value !== null) {
+        const date = new Date(
+            calendarYear.value,
+            calendarMonth.value,
+            selectedDate.value,
+            selectedHour.value,
+            selectedMinute.value
+        );
+        taskStore.updateTask(activeCalendarTaskId.value, { scheduledAt: date.toISOString() });
     }
     activeCalendarTaskId.value = null;
 };
@@ -183,6 +321,10 @@ const onLocalMouseUp = () => {
     isLocalDragging.value = false;
     window.removeEventListener('mousemove', onLocalMouseMove);
     window.removeEventListener('mouseup', onLocalMouseUp);
+    
+    // ウィジェット位置の保存
+    localStorage.setItem('task_widget_pos_x', posX.value.toString());
+    localStorage.setItem('task_widget_pos_y', posY.value.toString());
 };
 
 const onElectronMouseMove = (e: MouseEvent) => {
@@ -237,6 +379,12 @@ const widgetStyle = computed(() => {
 // 初期データロード
 onMounted(() => {
     taskStore.loadFromLocalStorage();
+    
+    // ウィジェット位置の復元
+    const savedX = localStorage.getItem('task_widget_pos_x');
+    const savedY = localStorage.getItem('task_widget_pos_y');
+    if (savedX !== null) posX.value = parseInt(savedX, 10);
+    if (savedY !== null) posY.value = parseInt(savedY, 10);
 });
 
 // インプレース編集メソッド
@@ -365,28 +513,36 @@ const cycleSubTaskStatus = (task: Task, step: SubTask) => {
 };
 
 // ドラッグハンドラ (HTML5 ネイティブドラッグ)
-const onDragStart = (taskId: string) => {
-    draggedTaskId.value = taskId;
+const onSortDragStart = (event: DragEvent, taskId: string) => {
+    dragStartX.value = event.clientX;
+    draggedNestTaskId.value = taskId;
 };
 
-const onDragOver = (event: DragEvent) => {
-    event.preventDefault(); // ドロップ可能にするために必要
-};
-
-const onDrop = (targetTaskId: string) => {
-    if (!draggedTaskId.value || draggedTaskId.value === targetTaskId) return;
-
-    const currentTasks = [...taskStore.filteredTasks];
-    const draggedIdx = currentTasks.findIndex(t => t.id === draggedTaskId.value);
-    const targetIdx = currentTasks.findIndex(t => t.id === targetTaskId);
-
-    if (draggedIdx !== -1 && targetIdx !== -1) {
-        // 並び替え処理
-        const [removed] = currentTasks.splice(draggedIdx, 1);
-        currentTasks.splice(targetIdx, 0, removed);
-        taskStore.updateTasksOrder(currentTasks);
+const onParentDrop = (event: DragEvent, targetTaskId: string) => {
+    // 1. サブタスク（子タスク）のドラッグの場合 (昇格)
+    if (draggedSubTask.value) {
+        const sub = draggedSubTask.value;
+        draggedSubTask.value = null; // watchがブロックされるのを防ぐため先にクリア
+        taskStore.promoteSubTaskToParent(sub.parentId, sub.subTaskId);
+        localTasks.value = [...taskStore.filteredTasks]; // 強制同期
     }
-    draggedTaskId.value = null;
+};
+
+const onSubTaskDragStart = (parentId: string, subTaskId: string) => {
+    draggedSubTask.value = { parentId, subTaskId };
+};
+
+const onSubTaskDragEnd = () => {
+    draggedSubTask.value = null;
+};
+
+const onContainerDrop = (event: DragEvent) => {
+    if (draggedSubTask.value) {
+        const sub = draggedSubTask.value;
+        draggedSubTask.value = null; // watchがブロックされるのを防ぐため先にクリア
+        taskStore.promoteSubTaskToParent(sub.parentId, sub.subTaskId);
+        localTasks.value = [...taskStore.filteredTasks]; // 強制同期
+    }
 };
 
 // カテゴリ名の取得（タイムライン表示用）
@@ -405,6 +561,64 @@ const formatTime = (isoString: string) => {
     }
 };
 
+const getScheduledDisplay = (scheduledAtIso: string) => {
+    if (!scheduledAtIso) return '';
+    const now = new Date();
+    const scheduled = new Date(scheduledAtIso);
+    const diffMs = scheduled.getTime() - now.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    const diffHour = Math.floor(diffMs / 3600000);
+    const diffDay = Math.floor(diffMs / 86400000);
+
+    // 過去の予定の場合のフォールバック
+    if (diffMs < 0) {
+        const isSameYear = now.getFullYear() === scheduled.getFullYear();
+        const isSameMonth = isSameYear && now.getMonth() === scheduled.getMonth();
+        if (isSameMonth) {
+            return `${scheduled.getDate()}日`;
+        } else if (isSameYear) {
+            return `${scheduled.getMonth() + 1}/${scheduled.getDate()}`;
+        } else {
+            const yy = String(scheduled.getFullYear()).slice(-2);
+            return `${yy}/${scheduled.getMonth() + 1}/${scheduled.getDate()}`;
+        }
+    }
+
+    // 1. 60分以内
+    if (diffMin <= 60) {
+        return `後${diffMin}分[${scheduled.getMinutes()}分]`;
+    }
+
+    // 2. 24時間以内
+    if (diffHour <= 24) {
+        return `後${diffHour}時[${scheduled.getHours()}時]`;
+    }
+
+    // 3. 6日以内
+    if (diffDay <= 6) {
+        if (diffDay === 1 || (scheduled.getDate() - now.getDate() === 1 && diffDay <= 1.5)) {
+            return '明日';
+        }
+        return `後${diffDay}日[${scheduled.getDate()}日]`;
+    }
+
+    // 4. 同月の場合
+    const isSameYear = now.getFullYear() === scheduled.getFullYear();
+    const isSameMonth = isSameYear && now.getMonth() === scheduled.getMonth();
+    if (isSameMonth) {
+        return `${scheduled.getDate()}日`;
+    }
+
+    // 5. 別月の場合
+    if (isSameYear) {
+        return `${scheduled.getMonth() + 1}/${scheduled.getDate()}`;
+    }
+
+    // 6. 別年の場合
+    const yy = String(scheduled.getFullYear()).slice(-2);
+    return `${yy}/${scheduled.getMonth() + 1}/${scheduled.getDate()}`;
+};
+
 const formatScheduledDate = (isoString?: string) => {
     if (!isoString) return '';
     try {
@@ -413,6 +627,46 @@ const formatScheduledDate = (isoString?: string) => {
     } catch {
         return '';
     }
+};
+
+const cycleTaskStatus = (task: Task) => {
+    console.log('cycleTaskStatus clicked. task:', { id: task.id, title: task.title, completed: task.completed, status: task.status });
+    if (task.completed || task.status === 'done') {
+        taskStore.resetTask(task.id);
+    } else if (task.status === 'todo' || !task.status) {
+        taskStore.startTask(task.id);
+    } else if (task.status === 'doing' || task.status === 'paused') {
+        taskStore.completeTask(task.id);
+    }
+};
+
+const tempCalendarDate = ref<Date | null>(null);
+
+const openDatePicker = (taskId: string) => {
+    activeCalendarTaskId.value = taskId;
+    const task = taskStore.tasks.find(t => t.id === taskId);
+    if (task && task.scheduledAt) {
+        tempCalendarDate.value = new Date(task.scheduledAt);
+    } else {
+        tempCalendarDate.value = new Date();
+    }
+};
+
+const getActiveCalendarTaskTitle = () => {
+    if (!activeCalendarTaskId.value) return '';
+    const task = taskStore.tasks.find(t => t.id === activeCalendarTaskId.value);
+    return task ? task.title : '';
+};
+
+const saveFullscreenCalendarDate = () => {
+    if (activeCalendarTaskId.value) {
+        if (tempCalendarDate.value) {
+            taskStore.updateTask(activeCalendarTaskId.value, { scheduledAt: tempCalendarDate.value.toISOString() });
+        } else {
+            taskStore.updateTask(activeCalendarTaskId.value, { scheduledAt: undefined });
+        }
+    }
+    activeCalendarTaskId.value = null;
 };
 </script>
 
@@ -462,37 +716,45 @@ const formatScheduledDate = (isoString?: string) => {
         <main class="main-scroll-area">
             <div v-if="!showCategorySettings" style="height: 100%; display: flex; flex-direction: column;">
             <!-- (A) TODOビュー (タスクツリー) -->
-            <div class="todo-view" v-if="taskStore.currentView === 'todo'">
+            <div class="todo-view" v-if="taskStore.currentView === 'todo'" ref="parentRef" @dragover.prevent @drop="onContainerDrop">
                 <div 
-                    v-for="task in taskStore.filteredTasks" 
+                    v-for="task in localTasks" 
                     :key="task.id"
                     class="task-card"
-                    :class="{ 'status-doing': task.status === 'doing', 'status-done': task.completed }"
-                    draggable="true"
-                    @dragstart="onDragStart(task.id)"
-                    @dragover="onDragOver"
-                    @drop="onDrop(task.id)"
+                    :class="{ 'status-doing': task.status === 'doing', 'status-done': task.completed, 'drop-target-active': activeDropTargetTaskId === task.id && isNesting }"
+                    @dragover.prevent="onParentDragOver($event, task.id)"
+                    @drop="onParentDrop($event, task.id)"
                 >
+                    <!-- ネスト化「子に追加」オーバーレイ -->
+                    <div v-if="activeDropTargetTaskId === task.id && isNesting && canNest(task)" class="nest-overlay">
+                        <span class="nest-overlay-text">子に追加</span>
+                    </div>
+
                     <!-- 親タスク行 -->
                     <div class="parent-task-row">
                         <!-- ドラッグハンドル -->
-                        <div class="drag-handle" title="ドラッグして並べ替え">
+                        <div class="drag-handle" title="ドラッグして並べ替え / 右にずらしてネスト" @dragstart="onSortDragStart($event, task.id)">
                             <i class="pi pi-bars"></i>
                         </div>
 
-                        <!-- 完了チェックボックス -->
-                        <div class="checkbox-wrapper" @click="taskStore.toggleTask(task.id)">
-                            <i :class="task.completed ? 'pi pi-check-circle checked' : 'pi pi-circle-off unchecked'"></i>
-                        </div>
+                        <!-- 状態サイクルボタン -->
+                        <button class="status-badge"
+                                :class="task.completed || task.status === 'done' ? 'done' : (task.status === 'doing' ? 'doing' : (task.status === 'paused' ? 'doing' : 'todo'))"
+                                @click.stop="cycleTaskStatus(task)"
+                                :title="'ステータスをサイクル: ' + (task.status || 'todo')"
+                                style="border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; height: 18px; line-height: 18px; padding: 0 6px;">
+                            <span v-if="task.completed || task.status === 'done'">DONE</span>
+                            <span v-else-if="task.status === 'doing'">DOING</span>
+                            <span v-else-if="task.status === 'paused'">PAUSED</span>
+                            <span v-else>TODO</span>
+                        </button>
 
-                        <!-- タイトル ＆ 進行中バッジ -->
+                        <!-- タイトル -->
                         <div class="task-title-container flex-grow-1" style="display: flex; align-items: center; overflow: hidden; min-width: 0; gap: 6px;">
-                            <span v-if="task.status === 'doing'" class="doing-badge-pill">進行中</span>
                             <span 
                                 v-if="editingTaskId !== task.id || editingSubTaskId !== null"
                                 class="task-title" 
                                 :class="{ completed: task.completed }"
-                                @click="taskStore.updateTask(task.id, { expanded: !task.expanded })"
                                 @dblclick="startEditTask(task)"
                                 @mousedown="handlePressStart('task', task)"
                                 @mouseup="handlePressEnd"
@@ -514,98 +776,68 @@ const formatScheduledDate = (isoString?: string) => {
                             />
                         </div>
 
-                        <!-- サブタスク完了カウント/展開ボタン -->
-                        <div 
-                            class="steps-badge"
-                            @click="taskStore.updateTask(task.id, { expanded: !task.expanded })"
-                            v-if="task.steps.length > 0"
-                        >
-                            {{ task.steps.filter(s => s.completed).length }}/{{ task.steps.length }} Steps
+                        <!-- 一時中断 / 再生 ボタン -->
+                        <div class="pause-resume-buttons" style="display: flex; align-items: center; justify-content: center; width: 28px;">
+                            <button v-if="task.status === 'doing'"
+                                    class="action-icon-btn pause-task-btn"
+                                    @click.stop="taskStore.pauseTask(task.id)"
+                                    title="一時中断"
+                                    style="font-size: 14px; padding: 0;">
+                                <span>⏸️</span>
+                            </button>
+                            <button v-else-if="task.status === 'paused'"
+                                    class="action-icon-btn resume-task-btn"
+                                    @click.stop="taskStore.resumeTask(task.id)"
+                                    title="タスクを再開"
+                                    style="font-size: 14px; padding: 0;">
+                                <span>▶️</span>
+                            </button>
                         </div>
 
-                        <!-- 開始・終了ボタン -->
-                        <button 
-                            v-if="task.status === 'todo' && !task.completed"
-                            class="action-icon-btn start-task-btn" 
-                            @click="taskStore.startTask(task.id)"
-                            title="タスクを開始（着手）"
-                        >
-                            <i class="pi pi-play"></i>
-                        </button>
-                        <button 
-                            v-else-if="task.status === 'doing'"
-                            class="action-icon-btn complete-task-btn" 
-                            @click="taskStore.completeTask(task.id)"
-                            title="タスクを終了（完了）"
-                        >
-                            <i class="pi pi-stop"></i>
-                        </button>
+                        <!-- カレンダー設定ボタン / 予定日時表示 -->
+                        <div style="display: flex; align-items: center; gap: 2px;">
+                            <button 
+                                class="action-icon-btn calendar-set-btn" 
+                                @click.stop="openDatePicker(task.id)"
+                                :title="task.scheduledAt ? '予定日時を変更' : '予定日時を設定'"
+                                style="width: auto; padding: 0 4px;"
+                            >
+                                <span v-if="task.scheduledAt" style="font-size: 11px; font-weight: 600; color: #3b82f6; white-space: nowrap;">
+                                    {{ getScheduledDisplay(task.scheduledAt) }}
+                                </span>
+                                <i v-else class="pi pi-calendar"></i>
+                            </button>
+                            <Button 
+                                v-if="task.scheduledAt"
+                                icon="pi pi-times" 
+                                class="p-button-text p-button-danger p-button-xs date-clear-btn" 
+                                @click.stop="taskStore.updateTask(task.id, { scheduledAt: undefined })" 
+                                title="予定をクリア" 
+                                style="width: 14px; height: 14px; padding: 0; font-size: 8px;"
+                            />
+                        </div>
 
-                        <!-- カレンダー設定ボタン (未設定時のみ) -->
-                        <button 
-                            v-if="!task.scheduledAt"
-                            class="action-icon-btn calendar-set-btn" 
-                            @click="activeCalendarTaskId = task.id"
-                            title="実施予定日時を設定"
+                        <!-- サブタスク完了カウント -->
+                        <div 
+                            class="steps-badge"
+                            v-if="task.steps.length > 0"
                         >
-                            <i class="pi pi-calendar"></i>
-                        </button>
-
-                        <!-- 優先度切り替え -->
-                        <button 
-                            class="priority-btn" 
-                            :class="task.priority"
-                            @click="cyclePriority(task)"
-                            title="優先度を切り替え"
-                        >
-                            <i v-if="task.priority === 'thunder'" class="pi pi-bolt"></i>
-                            <i v-else-if="task.priority === 'star'" class="pi pi-star-fill"></i>
-                            <i v-else class="pi pi-minus"></i>
-                        </button>
-
-                        <!-- アコーディオン開閉矢印 -->
-                        <button 
-                            class="expand-btn"
-                            @click="taskStore.updateTask(task.id, { expanded: !task.expanded })"
-                        >
-                            <i :class="task.expanded ? 'pi pi-chevron-down' : 'pi pi-chevron-right'"></i>
-                        </button>
+                            {{ task.steps.filter(s => s.completed).length }}/{{ task.steps.length }}
+                        </div>
 
                         <!-- 削除ボタン -->
                         <Button 
                             icon="pi pi-trash" 
                             class="p-button-text p-button-danger p-button-sm task-delete-btn"
-                            @click="taskStore.deleteTask(task.id)"
+                            @click.stop="taskStore.deleteTask(task.id)"
                             title="タスクを削除"
                         />
                     </div>
 
-                    <!-- 予定日時 & カレンダー設定用サブ行 -->
-                    <div class="task-schedule-row" v-if="task.scheduledAt || activeCalendarTaskId === task.id">
-                        <div v-if="activeCalendarTaskId !== task.id" class="scheduled-display" @click="activeCalendarTaskId = task.id" title="クリックして予定を変更">
-                            <i class="pi pi-calendar-times icon-cal"></i>
-                            <span class="scheduled-time">{{ formatScheduledDate(task.scheduledAt) }}</span>
-                            <Button 
-                                icon="pi pi-times" 
-                                class="p-button-text p-button-danger p-button-xs date-clear-btn" 
-                                @click.stop="taskStore.updateTask(task.id, { scheduledAt: undefined })" 
-                                title="予定をクリア" 
-                            />
-                        </div>
-                        <div v-else class="scheduled-picker-wrapper">
-                            <input 
-                                type="datetime-local" 
-                                :value="getDatetimeLocalString(task.scheduledAt)" 
-                                class="datetime-picker-input"
-                                @change="handleDateChange(task.id, $event)"
-                                @blur="activeCalendarTaskId = null"
-                                v-focus
-                            />
-                        </div>
-                    </div>
 
-                    <!-- サブタスク（Step）展開エリア -->
-                    <div class="subtasks-container" v-if="task.expanded">
+
+                    <!-- サブタスク（Step）展開エリア (子供がいれば常に表示) -->
+                    <div class="subtasks-container" v-if="task.steps.length > 0">
                         <div class="subtask-list">
                             <!-- 接続線 -->
                             <div class="guide-line"></div>
@@ -615,10 +847,13 @@ const formatScheduledDate = (isoString?: string) => {
                                 v-for="step in task.steps" 
                                 :key="step.id"
                                 class="subtask-item"
+                                draggable="true"
+                                @dragstart="onSubTaskDragStart(task.id, step.id)"
+                                @dragend="onSubTaskDragEnd"
                             >
-                                <!-- 完了トグル -->
-                                <div class="checkbox-wrapper" @click="taskStore.toggleSubTask(task.id, step.id)">
-                                    <i :class="step.completed ? 'pi pi-check-circle checked' : 'pi pi-circle-off unchecked'"></i>
+                                <!-- 子タスク用ドラッグハンドル (〇から変更、戻すため) -->
+                                <div class="drag-handle subtask-drag-handle" title="ドラッグして親タスクに戻す / 移動" style="cursor: grab; color: #94a3b8; padding: 4px; display: flex; align-items: center;">
+                                    <i class="pi pi-bars"></i>
                                 </div>
 
                                 <!-- ステータスバッジ（todo, doing, done をクリックで切り替え） -->
@@ -837,6 +1072,46 @@ const formatScheduledDate = (isoString?: string) => {
                 :disabled="!newTaskTitle.trim()"
             />
         </footer>
+
+        <!-- 全面カレンダー設定パネル -->
+        <div v-if="activeCalendarTaskId" class="fullscreen-calendar-panel">
+            <div class="calendar-panel-header">
+                <span class="panel-title">予定日時の設定</span>
+                <Button 
+                    icon="pi pi-times" 
+                    class="p-button-text p-button-secondary close-btn" 
+                    @click="activeCalendarTaskId = null" 
+                />
+            </div>
+            <div class="calendar-panel-content">
+                <div class="task-title-summary">
+                    <span class="label">タスク: </span>
+                    <span class="task-name">{{ getActiveCalendarTaskTitle() }}</span>
+                </div>
+                <div class="datepicker-container">
+                    <DatePicker 
+                        v-model="tempCalendarDate"
+                        showTime 
+                        hourFormat="24"
+                        :stepMinute="30"
+                        inline
+                        style="width: 100%; border: none;"
+                    />
+                </div>
+            </div>
+            <div class="calendar-panel-footer">
+                <Button 
+                    label="キャンセル" 
+                    class="p-button-outlined p-button-secondary p-button-sm" 
+                    @click="activeCalendarTaskId = null" 
+                />
+                <Button 
+                    label="決定" 
+                    class="p-button-primary p-button-sm" 
+                    @click="saveFullscreenCalendarDate" 
+                />
+            </div>
+        </div>
 
         <!-- リサイズ用ハンドル -->
         <div class="resize-handle right" @mousedown="initResize($event, 'right')"></div>
@@ -1589,6 +1864,53 @@ const formatScheduledDate = (isoString?: string) => {
     width: 100%;
 }
 
+.scheduled-picker-wrapper :deep(.p-datepicker) {
+    font-size: 11px;
+    padding: 4px;
+}
+
+.scheduled-picker-wrapper :deep(.p-datepicker-header) {
+    padding: 4px;
+}
+
+.scheduled-picker-wrapper :deep(.p-datepicker-title) {
+    font-size: 11px;
+    line-height: 1.2;
+}
+
+.scheduled-picker-wrapper :deep(.p-datepicker-calendar-container) {
+    padding: 0;
+}
+
+.scheduled-picker-wrapper :deep(.p-datepicker-calendar) {
+    font-size: 10px;
+}
+
+.scheduled-picker-wrapper :deep(.p-datepicker-day) {
+    width: 22px;
+    height: 22px;
+    font-size: 10px;
+    padding: 0;
+}
+
+.scheduled-picker-wrapper :deep(.p-datepicker-time-picker) {
+    padding: 4px 0 0 0;
+    gap: 2px;
+    border-top: 1px solid #e2e8f0;
+}
+
+.scheduled-picker-wrapper :deep(.p-datepicker-time-picker button) {
+    width: 14px;
+    height: 14px;
+    font-size: 8px;
+    padding: 0;
+}
+
+.scheduled-picker-wrapper :deep(.p-datepicker-time-picker span) {
+    font-size: 10px;
+    font-weight: 600;
+}
+
 .datetime-picker-input {
     border: 1px solid #cbd5e1;
     border-radius: 4px;
@@ -1604,5 +1926,136 @@ const formatScheduledDate = (isoString?: string) => {
 .datetime-picker-input:focus {
     border-color: #3b82f6;
     outline: none;
+}
+/* ネスト「子に追加」オーバーレイ */
+.task-card {
+    position: relative;
+}
+.nest-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(59, 130, 246, 0.9); /* PrimeVue ブルー */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    border-radius: 8px;
+    animation: fadeInNest 0.15s ease-out;
+    pointer-events: none;
+}
+.nest-overlay-text {
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.05em;
+}
+/* 全面カレンダー設定パネル */
+.fullscreen-calendar-panel {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #ffffff;
+    z-index: 150;
+    display: flex;
+    flex-direction: column;
+    animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.calendar-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.calendar-panel-header .panel-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #1e293b;
+}
+
+.calendar-panel-header .close-btn {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+}
+
+.calendar-panel-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.task-title-summary {
+    background: #f8fafc;
+    border-left: 3px solid #3b82f6;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1.4;
+    max-height: 60px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.task-title-summary .label {
+    color: #64748b;
+    font-weight: 600;
+    margin-right: 6px;
+}
+
+.task-title-summary .task-name {
+    color: #1e293b;
+    font-weight: 500;
+}
+
+.datepicker-container {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #ffffff;
+}
+
+/* 全面時もコンパクトに収まるようにスタイリング */
+.datepicker-container :deep(.p-datepicker) {
+    border: none;
+    width: 100%;
+}
+
+.datepicker-container :deep(.p-datepicker-calendar-container) {
+    padding: 0;
+}
+
+.datepicker-container :deep(.p-datepicker-time-picker) {
+    border-top: 1px solid #f1f5f9;
+    padding: 8px 0 0 0;
+}
+
+.calendar-panel-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 16px;
+    border-top: 1px solid #f1f5f9;
+    background: #f8fafc;
 }
 </style>

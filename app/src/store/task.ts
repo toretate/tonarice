@@ -27,7 +27,7 @@ export interface Task {
     expanded?: boolean;
     order: number;
     createdAt: string;
-    status?: 'todo' | 'doing' | 'done';
+    status?: 'todo' | 'doing' | 'paused' | 'done';
     startedAt?: string;
     endedAt?: string;
     scheduledAt?: string;
@@ -213,15 +213,34 @@ export const useTaskStore = defineStore('task', () => {
     };
 
     const startTask = (id: string) => {
+        console.log('startTask called for:', id);
         const task = tasks.value.find(t => t.id === id);
         if (task) {
             task.status = 'doing';
             task.startedAt = new Date().toISOString();
             task.completed = false;
+            tasks.value = [...tasks.value];
+        }
+    };
+
+    const pauseTask = (id: string) => {
+        const task = tasks.value.find(t => t.id === id);
+        if (task) {
+            task.status = 'paused';
+            tasks.value = [...tasks.value];
+        }
+    };
+
+    const resumeTask = (id: string) => {
+        const task = tasks.value.find(t => t.id === id);
+        if (task) {
+            task.status = 'doing';
+            tasks.value = [...tasks.value];
         }
     };
 
     const completeTask = (id: string) => {
+        console.log('completeTask called for:', id);
         const task = tasks.value.find(t => t.id === id);
         if (task) {
             task.status = 'done';
@@ -231,7 +250,83 @@ export const useTaskStore = defineStore('task', () => {
                 step.completed = true;
                 step.status = 'done';
             });
+            tasks.value = [...tasks.value];
         }
+    };
+    const resetTask = (id: string) => {
+        console.log('resetTask called for:', id);
+        const task = tasks.value.find(t => t.id === id);
+        if (task) {
+            task.status = 'todo';
+            task.completed = false;
+            task.startedAt = undefined;
+            task.endedAt = undefined;
+            // Reset subtask statuses as well
+            task.steps.forEach(step => {
+                step.completed = false;
+                step.status = 'todo';
+            });
+            tasks.value = [...tasks.value];
+        }
+    };
+    const convertToSubTask = (sourceTaskId: string, targetTaskId: string) => {
+        const sourceTask = tasks.value.find(t => t.id === sourceTaskId);
+        const targetTask = tasks.value.find(t => t.id === targetTaskId);
+        if (!sourceTask || !targetTask) return false;
+        
+        // 制限：ドラッグ元が既にサブタスクを持っている場合はネスト不可
+        if (sourceTask.steps && sourceTask.steps.length > 0) return false;
+
+        const newStep: SubTask = {
+            id: 'step_' + Math.random().toString(36).substring(2, 11),
+            title: sourceTask.title,
+            completed: sourceTask.completed,
+            status: sourceTask.status === 'done' ? 'done' : (sourceTask.status === 'doing' ? 'doing' : 'todo')
+        };
+        targetTask.steps.push(newStep);
+        recalculateTaskCompletion(targetTask);
+        
+        tasks.value = tasks.value.filter(t => t.id !== sourceTaskId);
+        return true;
+    };
+
+    const promoteSubTaskToParent = (parentTaskId: string, subTaskId: string) => {
+        const parentTask = tasks.value.find(t => t.id === parentTaskId);
+        if (!parentTask) return;
+        
+        const stepIdx = parentTask.steps.findIndex(s => s.id === subTaskId);
+        if (stepIdx === -1) return;
+        
+        const [step] = parentTask.steps.splice(stepIdx, 1);
+        
+        // 親タスクの完了状態を再計算
+        recalculateTaskCompletion(parentTask);
+        
+        // 親タスク（Quest）として新規追加
+        const id = 'task_' + Math.random().toString(36).substring(2, 11);
+        const order = parentTask.order + 1;
+        
+        // 既存の他のタスクのorderをずらす
+        tasks.value.forEach(t => {
+            if (t.categoryId === parentTask.categoryId && t.order >= order) {
+                t.order += 1;
+            }
+        });
+
+        tasks.value.push({
+            id,
+            categoryId: parentTask.categoryId,
+            title: step.title,
+            completed: step.completed,
+            priority: 'normal',
+            steps: [],
+            expanded: false,
+            order,
+            createdAt: new Date().toISOString(),
+            status: step.status === 'done' ? 'done' : (step.status === 'doing' ? 'doing' : 'todo')
+        });
+
+        tasks.value = [...tasks.value];
     };
 
     const updateTasksOrder = (orderedTasks: Task[]) => {
@@ -329,7 +424,12 @@ export const useTaskStore = defineStore('task', () => {
         deleteTask,
         toggleTask,
         startTask,
+        pauseTask,
+        resumeTask,
         completeTask,
+        resetTask,
+        convertToSubTask,
+        promoteSubTaskToParent,
         updateTasksOrder,
         addSubTask,
         deleteSubTask,
