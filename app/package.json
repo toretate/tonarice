@@ -6,7 +6,7 @@
     "scripts": {
         "dev": "nuxt dev",
         "dev:electron": "node scripts/dev-electron.js",
-        "build": "nuxt build && tsup",
+        "build": "tsup && nuxt build",
         "preview": "nuxt preview",
         "test": "vitest run",
         "kill": "taskkill /f /im node.exe /im electron.exe"
@@ -14,6 +14,7 @@
     "dependencies": {
         "@ai-sdk/google": "^3.0.83",
         "@ai-sdk/openai": "^3.0.73",
+        "@formkit/drag-and-drop": "^0.6.1",
         "@imgly/background-removal-node": "^1.4.3",
         "@lmstudio/sdk": "^1.5.0",
         "@primevue/themes": "^4.0.0",
@@ -29,6 +30,7 @@
         "primeicons": "^7.0.0",
         "primevue": "^4.0.0",
         "vue": "^3.4.0",
+        "vue-draggable-plus": "^0.6.1",
         "ws": "^8.16.0",
         "zod": "^3.25.76",
         "zod-to-json-schema": "^3.25.2"
