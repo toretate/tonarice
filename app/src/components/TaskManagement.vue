@@ -7,16 +7,29 @@ import Button from 'primevue/button';
 import InputText from 'primevue/inputtext';
 import ProgressBar from 'primevue/progressbar';
 import SelectButton from 'primevue/selectbutton';
-import CategorySettingsDialog from './settings/CategorySettingsDialog.vue';
+import Slider from 'primevue/slider';
 
 const taskStore = useTaskStore();
 const configStore = useConfigStore();
 const { windowMode } = storeToRefs(configStore);
 
+// 自動フォーカス用ディレクティブ
+const vFocus = {
+    mounted: (el: HTMLElement) => el.focus()
+};
+
 // 表示制御
-const showCategorySettings = ref(false);
+const showCategorySettings = ref(false); // インライン設定パネル表示トグル
 const newTaskTitle = ref('');
 const newSubTaskTitleMap = ref<Record<string, string>>({});
+
+// インプレース編集用ステート
+const editingTaskId = ref<string | null>(null);
+const editingSubTaskId = ref<string | null>(null);
+const editingTitle = ref('');
+
+// 新規カテゴリ名
+const newCategoryName = ref('');
 
 // ドラッグ＆ドロップ用ステート (リスト内並び替え用)
 const draggedTaskId = ref<string | null>(null);
@@ -205,6 +218,93 @@ onMounted(() => {
     taskStore.loadFromLocalStorage();
 });
 
+// インプレース編集メソッド
+let pressTimer: any = null;
+const handlePressStart = (type: 'task' | 'subtask', item: any, parentId?: string) => {
+    pressTimer = setTimeout(() => {
+        if (type === 'task') {
+            startEditTask(item);
+        } else {
+            startEditSubTask(parentId!, item);
+        }
+    }, 700);
+};
+
+const handlePressEnd = () => {
+    if (pressTimer) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+    }
+};
+
+const startEditTask = (task: Task) => {
+    editingTaskId.value = task.id;
+    editingSubTaskId.value = null;
+    editingTitle.value = task.title;
+};
+
+const startEditSubTask = (taskId: string, subTask: SubTask) => {
+    editingTaskId.value = taskId;
+    editingSubTaskId.value = subTask.id;
+    editingTitle.value = subTask.title;
+};
+
+const saveTitleEdit = () => {
+    if (!editingTaskId.value) return;
+    const title = editingTitle.value.trim();
+    if (title) {
+        if (editingSubTaskId.value) {
+            taskStore.updateSubTask(editingTaskId.value, editingSubTaskId.value, { title });
+        } else {
+            taskStore.updateTask(editingTaskId.value, { title });
+        }
+    }
+    cancelTitleEdit();
+};
+
+const cancelTitleEdit = () => {
+    editingTaskId.value = null;
+    editingSubTaskId.value = null;
+    editingTitle.value = '';
+};
+
+// カテゴリ編集インラインメソッド
+const handleAddCategory = () => {
+    const name = newCategoryName.value.trim();
+    if (!name) return;
+    taskStore.addCategory(name);
+    newCategoryName.value = '';
+};
+
+const handleDeleteCategory = (id: string) => {
+    if (confirm('このカテゴリを削除しますか？配下のタスクもすべて削除されます。')) {
+        taskStore.deleteCategory(id);
+    }
+};
+
+const moveUp = (index: number) => {
+    if (index === 0) return;
+    const cats = [...taskStore.categories];
+    const temp = cats[index];
+    cats[index] = cats[index - 1];
+    cats[index - 1] = temp;
+    taskStore.updateCategoriesOrder(cats);
+};
+
+const moveDown = (index: number) => {
+    if (index === taskStore.categories.length - 1) return;
+    const cats = [...taskStore.categories];
+    const temp = cats[index];
+    cats[index] = cats[index + 1];
+    cats[index + 1] = temp;
+    taskStore.updateCategoriesOrder(cats);
+};
+
+const closeSettingsPanel = () => {
+    showCategorySettings.value = false;
+    configStore.saveConfig();
+};
+
 // ビュー切り替えオプション
 const viewOptions = [
     { label: 'TODO', value: 'todo' },
@@ -307,7 +407,7 @@ const formatTime = (isoString: string) => {
         </header>
 
         <!-- 2. カスタムタブ列 ＋ タブ管理ボタン (TODO ビュー選択時のみ表示) -->
-        <div class="tab-navigation-bar" v-if="taskStore.currentView === 'todo'">
+        <div class="tab-navigation-bar" v-if="taskStore.currentView === 'todo' && !showCategorySettings">
             <div class="category-tabs">
                 <button
                     v-for="cat in taskStore.categories"
@@ -329,6 +429,7 @@ const formatTime = (isoString: string) => {
 
         <!-- 3. メインスクロールエリア -->
         <main class="main-scroll-area">
+            <div v-if="!showCategorySettings" style="height: 100%; display: flex; flex-direction: column;">
             <!-- (A) TODOビュー (タスクツリー) -->
             <div class="todo-view" v-if="taskStore.currentView === 'todo'">
                 <div 
@@ -353,13 +454,32 @@ const formatTime = (isoString: string) => {
                         </div>
 
                         <!-- タイトル -->
-                        <span 
-                            class="task-title" 
-                            :class="{ completed: task.completed }"
-                            @click="taskStore.updateTask(task.id, { expanded: !task.expanded })"
-                        >
-                            {{ task.title }}
-                        </span>
+                        <div class="task-title-container flex-grow-1" style="display: flex; align-items: center; overflow: hidden; min-width: 0;">
+                            <span 
+                                v-if="editingTaskId !== task.id || editingSubTaskId !== null"
+                                class="task-title" 
+                                :class="{ completed: task.completed }"
+                                @click="taskStore.updateTask(task.id, { expanded: !task.expanded })"
+                                @dblclick="startEditTask(task)"
+                                @mousedown="handlePressStart('task', task)"
+                                @mouseup="handlePressEnd"
+                                @mouseleave="handlePressEnd"
+                                @touchstart="handlePressStart('task', task)"
+                                @touchend="handlePressEnd"
+                                style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap;"
+                            >
+                                {{ task.title }}
+                            </span>
+                            <InputText
+                                v-else
+                                v-model="editingTitle"
+                                class="p-inputtext-sm edit-title-input w-full"
+                                @blur="saveTitleEdit"
+                                @keyup.enter="saveTitleEdit"
+                                @keyup.esc="cancelTitleEdit"
+                                v-focus
+                            />
+                        </div>
 
                         <!-- サブタスク完了カウント/展開ボタン -->
                         <div 
@@ -426,9 +546,31 @@ const formatTime = (isoString: string) => {
                                     {{ step.status.toUpperCase() }}
                                 </button>
 
-                                <span class="subtask-title" :class="{ completed: step.completed }">
-                                    {{ step.title }}
-                                </span>
+                                <div class="subtask-title-container flex-grow-1" style="display: flex; align-items: center; overflow: hidden; min-width: 0; margin-right: 8px;">
+                                    <span 
+                                        v-if="editingTaskId !== task.id || editingSubTaskId !== step.id"
+                                        class="subtask-title" 
+                                        :class="{ completed: step.completed }"
+                                        @dblclick="startEditSubTask(task.id, step)"
+                                        @mousedown="handlePressStart('subtask', step, task.id)"
+                                        @mouseup="handlePressEnd"
+                                        @mouseleave="handlePressEnd"
+                                        @touchstart="handlePressStart('subtask', step, task.id)"
+                                        @touchend="handlePressEnd"
+                                        style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap;"
+                                    >
+                                        {{ step.title }}
+                                    </span>
+                                    <InputText
+                                        v-else
+                                        v-model="editingTitle"
+                                        class="p-inputtext-sm edit-title-input w-full"
+                                        @blur="saveTitleEdit"
+                                        @keyup.enter="saveTitleEdit"
+                                        @keyup.esc="cancelTitleEdit"
+                                        v-focus
+                                    />
+                                </div>
 
                                 <Button 
                                     icon="pi pi-times" 
@@ -488,10 +630,104 @@ const formatTime = (isoString: string) => {
                     タスクがありません。
                 </div>
             </div>
+            </div>
+
+            <!-- (C) インライン設定パネル -->
+            <div v-else class="inline-settings-panel">
+                <div class="settings-header">
+                    <Button 
+                        icon="pi pi-arrow-left" 
+                        class="p-button-text p-button-secondary p-button-sm back-btn" 
+                        @click="closeSettingsPanel" 
+                        label="戻る" 
+                    />
+                </div>
+
+                <div class="settings-content">
+                    <!-- カテゴリ管理 -->
+                    <div class="settings-section">
+                        <span class="section-title">カテゴリの管理</span>
+                        <div class="category-list">
+                            <div 
+                                v-for="(cat, idx) in taskStore.categories" 
+                                :key="cat.id" 
+                                class="category-item"
+                            >
+                                <div class="cat-left">
+                                    <div class="order-buttons">
+                                        <Button 
+                                            icon="pi pi-chevron-up" 
+                                            class="p-button-text p-button-sm p-button-secondary move-btn" 
+                                            :disabled="idx === 0"
+                                            @click="moveUp(idx)"
+                                            title="上へ移動"
+                                        />
+                                        <Button 
+                                            icon="pi pi-chevron-down" 
+                                            class="p-button-text p-button-sm p-button-secondary move-btn" 
+                                            :disabled="idx === taskStore.categories.length - 1"
+                                            @click="moveDown(idx)"
+                                            title="下へ移動"
+                                        />
+                                    </div>
+                                    <InputText 
+                                        v-model="cat.name" 
+                                        class="p-inputtext-sm cat-name-input"
+                                        @blur="taskStore.updateCategory(cat.id, cat.name)"
+                                        placeholder="カテゴリ名"
+                                    />
+                                </div>
+                                <Button 
+                                    icon="pi pi-trash" 
+                                    class="p-button-text p-button-danger p-button-sm delete-btn" 
+                                    @click="handleDeleteCategory(cat.id)"
+                                    title="削除"
+                                />
+                            </div>
+                            <div v-if="taskStore.categories.length === 0" class="empty-message">
+                                カテゴリが登録されていません。
+                            </div>
+                        </div>
+
+                        <!-- カテゴリ追加 -->
+                        <div class="add-category-form">
+                            <InputText 
+                                v-model="newCategoryName" 
+                                placeholder="カテゴリを追加..."
+                                class="p-inputtext-sm flex-grow-1"
+                                @keyup.enter="handleAddCategory"
+                            />
+                            <Button 
+                                icon="pi pi-plus" 
+                                class="p-button-sm add-btn"
+                                @click="handleAddCategory"
+                                :disabled="!newCategoryName.trim()"
+                            />
+                        </div>
+                    </div>
+
+                    <div class="divider"></div>
+
+                    <!-- 不透明度設定 -->
+                    <div class="settings-section">
+                        <span class="section-title">不透明度 (透明度)</span>
+                        <div class="opacity-control">
+                            <span class="opacity-value">{{ Math.round(configStore.taskOpacity * 100) }}%</span>
+                            <Slider 
+                                v-model="configStore.taskOpacity" 
+                                :min="0.1" 
+                                :max="1.0" 
+                                :step="0.05"
+                                class="opacity-slider"
+                            />
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
 
         <!-- 4. ビュー切り替えタブ (TODO / TIMELINE) -->
-        <div class="view-toggle-bar">
+        <div class="view-toggle-bar" v-if="!showCategorySettings">
             <SelectButton 
                 v-model="taskStore.currentView" 
                 :options="viewOptions" 
@@ -502,7 +738,7 @@ const formatTime = (isoString: string) => {
         </div>
 
         <!-- 5. 最下部固定フォーム -->
-        <footer class="widget-footer-form">
+        <footer class="widget-footer-form" v-if="!showCategorySettings">
             <InputText 
                 v-model="newTaskTitle" 
                 placeholder="新しいタスクを追加..." 
@@ -521,11 +757,6 @@ const formatTime = (isoString: string) => {
         <div class="resize-handle right" @mousedown="initResize($event, 'right')"></div>
         <div class="resize-handle bottom" @mousedown="initResize($event, 'bottom')"></div>
         <div class="resize-handle corner" @mousedown="initResize($event, 'corner')"></div>
-
-        <!-- カテゴリ管理ダイアログ -->
-        <CategorySettingsDialog 
-            v-model:visible="showCategorySettings"
-        />
     </div>
 </template>
 
@@ -1009,5 +1240,164 @@ const formatTime = (isoString: string) => {
     width: 10px;
     height: 10px;
     cursor: se-resize;
+}
+
+/* インプレース編集インプット */
+.edit-title-input {
+    padding: 2px 6px !important;
+    font-size: 13px !important;
+    height: 24px !important;
+    border-color: #3b82f6 !important;
+}
+
+/* インライン設定パネル */
+.inline-settings-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 8px;
+}
+
+.settings-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 12px;
+    border-bottom: 1px solid #f1f5f9;
+    padding-bottom: 8px;
+}
+
+.settings-header .back-btn {
+    padding: 4px 8px !important;
+    font-size: 12px !important;
+    height: 28px !important;
+}
+
+.settings-content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+    flex-grow: 1;
+}
+
+.settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.section-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #475569;
+}
+
+.category-list {
+    max-height: 180px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-right: 4px;
+}
+
+.category-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 6px 8px;
+    gap: 12px;
+}
+
+.cat-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-grow: 1;
+}
+
+.order-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.move-btn {
+    width: 18px !important;
+    height: 18px !important;
+    padding: 0 !important;
+}
+
+.cat-name-input {
+    flex-grow: 1;
+    border-color: #cbd5e1;
+    background: #ffffff;
+    padding: 4px 8px !important;
+    font-size: 12px !important;
+    height: 28px !important;
+}
+
+.cat-name-input:focus {
+    border-color: #3b82f6;
+}
+
+.delete-btn {
+    width: 28px !important;
+    height: 28px !important;
+    padding: 0 !important;
+}
+
+.empty-message {
+    text-align: center;
+    color: #64748b;
+    padding: 12px 0;
+    font-size: 12px;
+}
+
+.add-category-form {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.add-btn {
+    background: #3b82f6;
+    border-color: #3b82f6;
+    color: #ffffff;
+    padding: 4px 12px !important;
+    height: 28px !important;
+}
+
+.add-btn:hover {
+    background: #2563eb;
+    border-color: #2563eb;
+}
+
+.divider {
+    height: 1px;
+    background: #f1f5f9;
+    margin: 4px 0;
+}
+
+.opacity-control {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 0;
+}
+
+.opacity-value {
+    font-size: 12px;
+    font-weight: 600;
+    color: #334155;
+    width: 36px;
+    text-align: right;
+}
+
+.opacity-slider {
+    flex-grow: 1;
 }
 </style>

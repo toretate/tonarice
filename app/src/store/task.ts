@@ -259,6 +259,16 @@ export const useTaskStore = defineStore('task', () => {
         }
     };
 
+    const updateSubTask = (taskId: string, subTaskId: string, updates: Partial<SubTask>) => {
+        const task = tasks.value.find(t => t.id === taskId);
+        if (task) {
+            const step = task.steps.find(s => s.id === subTaskId);
+            if (step) {
+                Object.assign(step, updates);
+            }
+        }
+    };
+
     // サブタスク状態から親タスクの完了を再計算
     const recalculateTaskCompletion = (task: Task) => {
         if (task.steps.length === 0) return;
@@ -289,6 +299,7 @@ export const useTaskStore = defineStore('task', () => {
         addSubTask,
         deleteSubTask,
         toggleSubTask,
-        updateSubTaskStatus
+        updateSubTaskStatus,
+        updateSubTask
     };
 });
