@@ -422,8 +422,49 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
                 return { success: false, voices: [], error: e.message || '接続に失敗しました' };
             }
         },
-        generateMascotExpressions: async () => {
-            return { success: false, error: 'AI表情自動生成機能はWeb版ではサポートされていません。' };
+        generateMascotExpressions: async (
+            base64Image: string,
+            apiKey: string,
+            emotions: { name: string, label: string }[],
+            userPromptTemplate: string,
+            engine?: string,
+            model?: string,
+            history?: any[]
+        ) => {
+            try {
+                const response = await fetch('/api/mascots/generate-expressions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        base64Image,
+                        apiKey,
+                        emotions,
+                        userPromptTemplate,
+                        engine,
+                        model,
+                        history
+                    })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return await response.json();
+            } catch (e: any) {
+                console.error('[Polyfill] generateMascotExpressions failed:', e);
+                return { success: false, error: e.message || '表情生成に失敗しました' };
+            }
+        },
+        analyzeSpriteSheet: async (imagePath: string, apiKey: string) => {
+            try {
+                const response = await fetch('/api/mascots/analyze-sprite-sheet', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ imagePath, apiKey })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return await response.json();
+            } catch (e: any) {
+                console.error('[Polyfill] analyzeSpriteSheet failed:', e);
+                return { success: false, error: e.message || 'スプライトシートの解析に失敗しました' };
+            }
         },
         getImagenModels: async () => {
             return [];
@@ -448,9 +489,6 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
                 clearTimeout(timeoutId);
                 return { success: false, models: [], error: e.message || '接続確認に失敗しました。' };
             }
-        },
-        analyzeSpriteSheet: async () => {
-            return null;
         },
         selectLocalImage: async () => {
             // ブラウザの画像ファイル選択ダイアログを開き、Base64（DataURL）として返す
@@ -481,11 +519,18 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
             });
         },
         saveMascotImage: async (mascotId: string, filename: string, base64Data: string) => {
-            console.log(`[Polyfill] saveMascotImage called for mascot: ${mascotId}, file: ${filename}`);
-            return {
-                success: true,
-                path: base64Data
-            };
+            try {
+                const response = await fetch('/api/mascots/save-image', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mascotId, filename, base64Data })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return await response.json();
+            } catch (e: any) {
+                console.error('[Polyfill] saveMascotImage failed:', e);
+                return { success: false, error: e.message || '画像の保存に失敗しました' };
+            }
         },
         saveMascotVoice: async (mascotId: string, base64Data: string, extension: string) => {
             console.log(`[Polyfill] saveMascotVoice called for mascot: ${mascotId}, extension: ${extension}`);

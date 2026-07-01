@@ -512,6 +512,7 @@ watch(() => props.mascots, () => {
     <!-- AIスプライトインポートモーダル -->
     <SpriteImportModal
         :visible="isSpriteImportModalActive"
+        :mascot-id="editingMascot?.id"
         @close="isSpriteImportModalActive = false"
         @import="importFromSpriteSheet"
     />
