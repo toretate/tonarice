@@ -80,3 +80,58 @@ export async function applyRetouch(
 
     return outputPath;
 }
+
+const ALIGN_SCRIPT = path.join(PYTHON_DIR, 'align_expression.py');
+
+/**
+ * のっぺらぼう画像と表情パーツ自動位置合わせを行う。
+ */
+export async function alignExpression(
+    basePath: string,
+    expressionPath: string,
+    detectMode = 'ai'
+): Promise<{ success: boolean; offsetX: number; offsetY: number; scale: number; exprMidX: number; exprMidY: number; exprOvalCX: number; exprOvalCY: number; exprEyeDist: number; exprOvalW: number; baseWidth?: number; baseHeight?: number; exprWidth?: number; exprHeight?: number; error?: string }> {
+    const absBase = resolveImagePath(basePath);
+    const absExpr = resolveImagePath(expressionPath);
+
+    if (!fs.existsSync(absBase)) {
+        throw new Error(`Base image not found: ${absBase}`);
+    }
+    if (!fs.existsSync(absExpr)) {
+        throw new Error(`Expression image not found: ${absExpr}`);
+    }
+
+    const { stdout } = await execFileAsync(
+        PYTHON_BIN,
+        [ALIGN_SCRIPT, '--base', absBase, '--expression', absExpr, '--mode', detectMode],
+        { timeout: 30_000 }
+    );
+
+    const result = JSON.parse(stdout.trim());
+    return result;
+}
+
+const DETECT_FACE_SCRIPT = path.join(PYTHON_DIR, 'detect_base_face.py');
+
+/**
+ * 元の立ち絵画像から顔領域を自動検出する。
+ */
+export async function detectBaseFace(
+    imagePath: string,
+    detectMode = 'ai'
+): Promise<{ success: boolean; fallback: boolean; faceX: number; faceY: number; faceWidth: number; faceHeight: number; baseWidth: number; baseHeight: number; error?: string }> {
+    const absPath = resolveImagePath(imagePath);
+
+    if (!fs.existsSync(absPath)) {
+        throw new Error(`Target image not found: ${absPath}`);
+    }
+
+    const { stdout } = await execFileAsync(
+        PYTHON_BIN,
+        [DETECT_FACE_SCRIPT, '--image', absPath, '--mode', detectMode],
+        { timeout: 30_000 }
+    );
+
+    const result = JSON.parse(stdout.trim());
+    return result;
+}

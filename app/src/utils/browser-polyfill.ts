@@ -466,6 +466,34 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
                 return { success: false, error: e.message || 'スプライトシートの解析に失敗しました' };
             }
         },
+        alignExpression: async (basePath: string, expressionPath: string) => {
+            try {
+                const response = await fetch('/api/mascots/align-expression', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ basePath, expressionPath, detectMode })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return await response.json();
+            } catch (e: any) {
+                console.error('[Polyfill] alignExpression failed:', e);
+                return { success: false, error: e.message || '自動位置合わせに失敗しました' };
+            }
+        },
+        detectBaseFace: async (imagePath: string, detectMode?: string) => {
+            try {
+                const response = await fetch('/api/mascots/detect-base-face', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ imagePath, detectMode })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return await response.json();
+            } catch (e: any) {
+                console.error('[Polyfill] detectBaseFace failed:', e);
+                return { success: false, error: e.message || '顔領域の自動検出に失敗しました' };
+            }
+        },
         getImagenModels: async () => {
             return [];
         },

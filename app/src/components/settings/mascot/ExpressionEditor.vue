@@ -3,6 +3,7 @@ import { ref, computed } from 'vue';
 import { useConfigStore } from '../../../store/config';
 import Button from 'primevue/button';
 import Slider from 'primevue/slider';
+import Dropdown from 'primevue/dropdown';
 
 const configStore = useConfigStore();
 
@@ -67,8 +68,12 @@ const baseMascotImageUrl = computed(() => {
     return props.editingMascot?.avatar || '';
 });
 
+// ベース画像の要素参照
+const baseImageRef = ref<HTMLImageElement | null>(null);
+
 // 生成されたのっぺらぼう画像のパス (Step 1 で生成・更新される)
 const nofaceImagePath = ref<string | null>(null);
+const originalImagePath = ref<string | null>(null); // 顔検出が確実に成功するオリジナル画像のパス
 const isGeneratingNoface = ref(false);
 const nofaceCacheQuery = ref(0);
 
@@ -80,8 +85,50 @@ const canvasRef = ref<HTMLCanvasElement | null>(null);
 let ctx: CanvasRenderingContext2D | null = null;
 const isDrawing = ref(false);
 
-// のっぺらぼう自動生成APIの呼び出し
-const triggerGenerateNoface = async () => {
+const isDetectingFace = ref(false);
+
+// 元画像から顔領域を自動検出して初期ガイド枠を設定
+const initFaceGuide = async () => {
+    if (!baseMascotImageUrl.value) return;
+    isDetectingFace.value = true;
+    try {
+        if (window.electronAPI?.detectBaseFace) {
+            const faceRes = await window.electronAPI.detectBaseFace(baseMascotImageUrl.value, detectMode.value);
+            if (faceRes && faceRes.success) {
+                faceGuide.value = {
+                    x: faceRes.faceX,
+                    y: faceRes.faceY,
+                    width: faceRes.faceWidth,
+                    height: faceRes.faceHeight,
+                    baseWidth: faceRes.baseWidth,
+                    baseHeight: faceRes.baseHeight
+                };
+                baseNaturalWidth.value = faceRes.baseWidth;
+                baseNaturalHeight.value = faceRes.baseHeight;
+
+                // 複数顔候補の保存
+                if (faceRes.candidates && faceRes.candidates.length > 0) {
+                    faceCandidates.value = faceRes.candidates;
+                    selectedCandidateIndex.value = 0;
+                } else {
+                    faceCandidates.value = [];
+                    selectedCandidateIndex.value = null;
+                }
+
+                console.log('[FaceDetect] 顔領域自動検出成功:', faceGuide.value, 'Candidates:', faceCandidates.value);
+                await nextTick();
+                updateDisplayScale();
+            }
+        }
+    } catch (err) {
+        console.error('[FaceDetect] 顔検出中にエラー:', err);
+    } finally {
+        isDetectingFace.value = false;
+    }
+};
+
+// のっぺらぼう自動生成を実行してステップ2へ進む
+const generateAndNext = async () => {
     if (isGeneratingNoface.value) return;
     isGeneratingNoface.value = true;
     try {
@@ -96,23 +143,91 @@ const triggerGenerateNoface = async () => {
         const data = await response.json();
         if (data.success && data.path) {
             nofaceImagePath.value = data.path;
+            originalImagePath.value = baseMascotImageUrl.value;
             nofaceCacheQuery.value = Date.now();
+            
+            // ステップ2 (ベース確認) へ進む
+            currentStep.value = 2;
+            
             // 画像ロード後に Canvas を初期化する
+            await nextTick();
             await initCanvas(data.path);
         } else {
             console.error('Failed to generate noface:', data.error);
+            alert('のっぺらぼう画像の生成に失敗しました: ' + (data.error || '不明なエラー'));
         }
     } catch (e) {
         console.error('Error generating noface:', e);
+        alert('のっぺらぼう画像生成中にエラーが発生しました。');
     } finally {
         isGeneratingNoface.value = false;
     }
 };
 
 // 画面表示時に自動でのっぺらぼう生成を実行
-import { onMounted, watch } from 'vue';
+import { onMounted, onUnmounted, watch } from 'vue';
+
+const handleKeyDown = (event: KeyboardEvent) => {
+    if (currentStep.value !== 3 || !selectedExpression.value) return;
+    
+    // 入力フォームにフォーカスがある場合は処理をスキップ
+    const activeEl = document.activeElement;
+    if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.getAttribute('contenteditable') === 'true')) {
+        return;
+    }
+
+    let handled = false;
+    
+    if (event.key === 'ArrowUp') {
+        if (event.shiftKey) {
+            // Shift + ↑ : 拡大率の微調整 (0.01 増加)
+            selectedExpression.value.scale = Math.min(2.5, Number(((selectedExpression.value.scale || 1.0) + 0.01).toFixed(2)));
+        } else {
+            // ↑ : 縦方向(Y)を 1px 上へ (物理ピクセル上で -1px)
+            selectedExpression.value.offsetY = (selectedExpression.value.offsetY || 0) - 1;
+        }
+        handled = true;
+    } else if (event.key === 'ArrowDown') {
+        if (event.shiftKey) {
+            // Shift + ↓ : 拡大率の微調整 (0.01 減少)
+            selectedExpression.value.scale = Math.max(0.3, Number(((selectedExpression.value.scale || 1.0) - 0.01).toFixed(2)));
+        } else {
+            // ↓ : 縦方向(Y)を 1px 下へ (物理ピクセル上で +1px)
+            selectedExpression.value.offsetY = (selectedExpression.value.offsetY || 0) + 1;
+        }
+        handled = true;
+    } else if (event.key === 'ArrowLeft') {
+        if (event.shiftKey) {
+            // Shift + ← : 回転率の微調整 (1度減少)
+            selectedExpression.value.rotation = (selectedExpression.value.rotation || 0) - 1;
+        } else {
+            // ← : 横方向(X)を 1px 左へ (物理ピクセル上で -1px)
+            selectedExpression.value.offsetX = (selectedExpression.value.offsetX || 0) - 1;
+        }
+        handled = true;
+    } else if (event.key === 'ArrowRight') {
+        if (event.shiftKey) {
+            // Shift + → : 回転率の微調整 (1度増加)
+            selectedExpression.value.rotation = (selectedExpression.value.rotation || 0) + 1;
+        } else {
+            // → : 横方向(X)を 1px 右へ (物理ピクセル上で +1px)
+            selectedExpression.value.offsetX = (selectedExpression.value.offsetX || 0) + 1;
+        }
+        handled = true;
+    }
+    
+    if (handled) {
+        event.preventDefault();
+    }
+};
+
 onMounted(() => {
-    triggerGenerateNoface();
+    initFaceGuide();
+    window.addEventListener('keydown', handleKeyDown);
+});
+
+onUnmounted(() => {
+    window.removeEventListener('keydown', handleKeyDown);
 });
 
 // 表示するのっぺらぼう画像URL (キャッシュ回避クエリ付き)
@@ -138,11 +253,15 @@ const initCanvas = async (imagePath: string) => {
     canvas.width = img.naturalWidth || 768;
     canvas.height = img.naturalHeight || 1280;
     
+    baseNaturalWidth.value = img.naturalWidth || 768;
+    baseNaturalHeight.value = img.naturalHeight || 1280;
+    
     ctx = canvas.getContext('2d');
     if (!ctx) return;
     
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0);
+    updateDisplayScale();
 };
 
 // 編集されたのっぺらぼう画像をサーバーへ保存
@@ -195,12 +314,12 @@ const handleBack = () => {
 };
 
 const handleNext = async () => {
-    if (currentStep.value === 1) {
-        // Step 1 から遷移する直前に、手動レタッチの結果をサーバーへ保存
+    if (currentStep.value === 2) {
+        // Step 2 から遷移する直前に、手動レタッチの結果をサーバーへ保存
         await saveEditedNoface();
     }
     
-    if (currentStep.value < 4) {
+    if (currentStep.value < 5) {
         currentStep.value++;
     } else {
         saveAtlas();
@@ -311,6 +430,260 @@ const saveAtlas = () => {
     alert('テクスチャアトラスを生成して保存しました。');
     emit('back-to-settings');
 };
+
+const isAligning = ref(false);
+
+const triggerAutoAlign = async () => {
+    if (!selectedExpression.value || isAligning.value) return;
+    
+    // のっぺらぼう画像 (noface.png) ではなく、確実に顔・目検出ができるオリジナル衣装画像を優先して渡す
+    const baseImg = originalImagePath.value || baseMascotImageUrl.value;
+    const exprImg = selectedExpression.value.path;
+    
+    if (!baseImg || !exprImg) {
+        alert('位置合わせを行う画像アセットが見つかりません。');
+        return;
+    }
+    
+    if (!window.electronAPI?.alignExpression) {
+        alert('自動位置合わせ機能は現在利用できません。');
+        return;
+    }
+    
+    isAligning.value = true;
+    try {
+        const result = await window.electronAPI.alignExpression(baseImg, exprImg, detectMode.value);
+        if (result && result.success) {
+            // 元の画像サイズを API レスポンスから直接セット（キャッシュ対策）
+            if (result.baseWidth) baseNaturalWidth.value = result.baseWidth;
+            if (result.baseHeight) baseNaturalHeight.value = result.baseHeight;
+            if (result.exprWidth) exprNaturalWidth.value = result.exprWidth;
+            if (result.exprHeight) exprNaturalHeight.value = result.exprHeight;
+
+            await nextTick();
+            updateDisplayScale();
+
+            const baseW = result.baseWidth || 1536;
+            const baseH = result.baseHeight || 1920;
+            const exprW = result.exprWidth || 414;
+            const exprH = result.exprHeight || 444;
+
+            // 表情パーツ側の顔の輪郭幅 (なければ目の距離から逆算、それもなければ画像全体の90%)
+            const exprOvalW = result.exprOvalW || (result.exprEyeDist ? result.exprEyeDist / 0.46 : exprW * 0.9);
+            // ユーザーがステップ1で調整したベース顔のガイド幅
+            const baseOvalW = faceGuide.value.width;
+
+            // 正確なスケール比率を算出 (ベース側顔ガイド幅 / 表情パーツ顔幅)
+            const scale = Number(Math.max(0.4, Math.min(2.5, baseOvalW / exprOvalW)).toFixed(3));
+
+            // 表情パーツ側の中心点 (輪郭重心、なければ目の中心、それもなければ画像中心)
+            const exprCx = result.exprOvalCX !== undefined ? result.exprOvalCX : (result.exprMidX !== undefined ? result.exprMidX : (exprW / 2.0));
+            const exprCy = result.exprOvalCY !== undefined ? result.exprOvalCY : (result.exprMidY !== undefined ? result.exprMidY : (exprH * 0.48));
+
+            // ユーザーが調整したベース顔のガイド中心
+            const baseCx = faceGuide.value.x;
+            const baseCy = faceGuide.value.y;
+
+            // ガイド中心をベースにした物理的な平行移動量 (offsetX, offsetY) の算出
+            const offsetX = (baseCx - baseW / 2.0) - (exprCx - exprW / 2.0) * scale;
+            const offsetY = (baseCy - baseH / 2.0) - (exprCy - exprH / 2.0) * scale;
+
+            selectedExpression.value.offsetX = Math.round(offsetX);
+            selectedExpression.value.offsetY = Math.round(offsetY);
+            selectedExpression.value.scale = scale;
+            if (result.fallback) {
+                console.log('[AutoAlign] 顔が自動検出されなかったため、標準的な顔の位置（上部中央）に初期配置しました。手動で微調整を行ってください。');
+            } else {
+                console.log(`[AutoAlign] 自動アライメント成功 (${result.method}): x=${result.offsetX}, y=${result.offsetY}, scale=${result.scale}`);
+            }
+        } else {
+            console.error('Auto alignment failed:', result?.error);
+            alert('自動位置合わせの処理に失敗しました。');
+        }
+    } catch (e) {
+        console.error('Error in triggerAutoAlign:', e);
+        alert('自動位置合わせ処理中にエラーが発生しました。');
+    } finally {
+        isAligning.value = false;
+    }
+};
+
+const detectMode = ref<'ai' | 'anime'>('ai');
+const faceCandidates = ref<{ faceX: number; faceY: number; faceWidth: number; faceHeight: number }[]>([]);
+const selectedCandidateIndex = ref<number | null>(null);
+
+const selectCandidate = (index: number) => {
+    selectedCandidateIndex.value = index;
+    const cand = faceCandidates.value[index];
+    if (cand) {
+        faceGuide.value = {
+            ...faceGuide.value,
+            x: cand.faceX,
+            y: cand.faceY,
+            width: cand.faceWidth,
+            height: cand.faceHeight
+        };
+        nextTick(() => {
+            updateDisplayScale();
+        });
+    }
+};
+
+const showFaceGuide = ref(true);
+const faceGuide = ref({
+    x: 768,       // 物理ピクセルの中央X
+    y: 500,       // 物理ピクセルの顔がありそうな高さY
+    width: 250,   // 顔幅
+    height: 250,  // 顔高さ
+    baseWidth: 1536,
+    baseHeight: 1920
+});
+
+const isDraggingFaceGuide = ref(false);
+const isResizingFaceGuide = ref(false);
+let dragStartMouseX = 0;
+let dragStartMouseY = 0;
+let dragStartFaceX = 0;
+let dragStartFaceY = 0;
+let dragStartFaceW = 0;
+let dragStartFaceH = 0;
+
+const startDragFaceGuide = (event: MouseEvent) => {
+    isDraggingFaceGuide.value = true;
+    dragStartMouseX = event.clientX;
+    dragStartMouseY = event.clientY;
+    dragStartFaceX = faceGuide.value.x;
+    dragStartFaceY = faceGuide.value.y;
+    
+    window.addEventListener('mousemove', dragFaceGuide);
+    window.addEventListener('mouseup', stopDragFaceGuide);
+};
+
+const dragFaceGuide = (event: MouseEvent) => {
+    if (!isDraggingFaceGuide.value) return;
+    const dx = (event.clientX - dragStartMouseX) / displayScale.value;
+    const dy = (event.clientY - dragStartMouseY) / displayScale.value;
+    
+    faceGuide.value.x = Math.round(dragStartFaceX + dx);
+    faceGuide.value.y = Math.round(dragStartFaceY + dy);
+};
+
+const stopDragFaceGuide = () => {
+    isDraggingFaceGuide.value = false;
+    window.removeEventListener('mousemove', dragFaceGuide);
+    window.removeEventListener('mouseup', stopDragFaceGuide);
+};
+
+const startResizeFaceGuide = (event: MouseEvent) => {
+    isResizingFaceGuide.value = true;
+    dragStartMouseX = event.clientX;
+    dragStartMouseY = event.clientY;
+    dragStartFaceW = faceGuide.value.width;
+    dragStartFaceH = faceGuide.value.height;
+    
+    window.addEventListener('mousemove', resizeFaceGuide);
+    window.addEventListener('mouseup', stopResizeFaceGuide);
+};
+
+const resizeFaceGuide = (event: MouseEvent) => {
+    if (!isResizingFaceGuide.value) return;
+    const dx = (event.clientX - dragStartMouseX) / displayScale.value;
+    const dy = (event.clientY - dragStartMouseY) / displayScale.value;
+    
+    // 正方形比率を維持しながらリサイズ
+    const change = Math.max(dx * 2, dy * 2);
+    faceGuide.value.width = Math.max(50, Math.round(dragStartFaceW + change));
+    faceGuide.value.height = Math.max(50, Math.round(dragStartFaceH + change));
+};
+
+const stopResizeFaceGuide = () => {
+    isResizingFaceGuide.value = false;
+    window.removeEventListener('mousemove', resizeFaceGuide);
+    window.removeEventListener('mouseup', stopResizeFaceGuide);
+};
+const isDraggingExpression = ref(false);
+let exprDragStartMouseX = 0;
+let exprDragStartMouseY = 0;
+let exprDragStartOffsetX = 0;
+let exprDragStartOffsetY = 0;
+
+const startDragExpression = (event: MouseEvent) => {
+    if (!selectedExpression.value) return;
+    isDraggingExpression.value = true;
+    exprDragStartMouseX = event.clientX;
+    exprDragStartMouseY = event.clientY;
+    exprDragStartOffsetX = selectedExpression.value.offsetX || 0;
+    exprDragStartOffsetY = selectedExpression.value.offsetY || 0;
+    
+    window.addEventListener('mousemove', dragExpression);
+    window.addEventListener('mouseup', stopDragExpression);
+};
+
+const dragExpression = (event: MouseEvent) => {
+    if (!isDraggingExpression.value || !selectedExpression.value) return;
+    const dx = (event.clientX - exprDragStartMouseX) / displayScale.value;
+    const dy = (event.clientY - exprDragStartMouseY) / displayScale.value;
+    
+    selectedExpression.value.offsetX = Math.round(exprDragStartOffsetX + dx);
+    selectedExpression.value.offsetY = Math.round(exprDragStartOffsetY + dy);
+};
+
+const stopDragExpression = () => {
+    isDraggingExpression.value = false;
+    window.removeEventListener('mousemove', dragExpression);
+    window.removeEventListener('mouseup', stopDragExpression);
+};
+
+const originalImageRef = ref<HTMLImageElement | null>(null);
+const baseNaturalWidth = ref(1);
+const baseNaturalHeight = ref(1);
+const exprNaturalWidth = ref(414); // デフォルト値を一般的なサイズに設定
+const exprNaturalHeight = ref(444);
+const displayScale = ref(1.0);
+
+const updateDisplayScale = async () => {
+    await nextTick();
+    let displayedWidth = 0;
+    if (currentStep.value === 1 && originalImageRef.value) {
+        displayedWidth = originalImageRef.value.clientWidth;
+    } else if (currentStep.value === 2 && canvasRef.value) {
+        displayedWidth = canvasRef.value.clientWidth;
+    } else if (baseImageRef.value) {
+        displayedWidth = baseImageRef.value.clientWidth;
+    }
+    if (displayedWidth > 0 && baseNaturalWidth.value > 0) {
+        displayScale.value = displayedWidth / baseNaturalWidth.value;
+        console.log(`[DisplayScale] step=${currentStep.value}, displayedWidth=${displayedWidth}, naturalWidth=${baseNaturalWidth.value}, scale=${displayScale.value}`);
+    }
+};
+
+const onBaseImageLoad = (event: Event) => {
+    const img = event.target as HTMLImageElement;
+    baseNaturalWidth.value = img.naturalWidth;
+    baseNaturalHeight.value = img.naturalHeight;
+    updateDisplayScale();
+};
+
+const onExprImageLoad = (event: Event) => {
+    const img = event.target as HTMLImageElement;
+    exprNaturalWidth.value = img.naturalWidth;
+    exprNaturalHeight.value = img.naturalHeight;
+    updateDisplayScale();
+};
+
+// 感情切り替え時はサイズを維持したまま画像ロードを待ち、値の強制リセットによる表示崩れを防止します。
+
+const resetAlign = () => {
+    if (!selectedExpression.value) return;
+    selectedExpression.value.offsetX = 0;
+    selectedExpression.value.offsetY = 0;
+    selectedExpression.value.scale = 1.0;
+    selectedExpression.value.rotation = 0;
+};
+
+watch(currentStep, () => {
+    updateDisplayScale();
+});
 </script>
 
 <template>
@@ -324,21 +697,152 @@ const saveAtlas = () => {
             
             <!-- ステップバー -->
             <div class="mt-4 md:mt-0 flex items-center space-x-2 text-sm font-medium">
-                <span :class="['px-3 py-1.5 rounded-full border', currentStep === 1 ? 'bg-primary-500 text-white border-primary-500' : 'bg-white text-slate-600 border-slate-300']">1. ベース確認</span>
+                <span :class="['px-3 py-1.5 rounded-full border', currentStep === 1 ? 'bg-primary-500 text-white border-primary-500' : 'bg-white text-slate-600 border-slate-300']">1. 顔領域確認</span>
                 <span class="text-slate-400">➔</span>
-                <span :class="['px-3 py-1.5 rounded-full border', currentStep === 2 ? 'bg-primary-500 text-white border-primary-500' : 'bg-white text-slate-600 border-slate-300']">2. 位置調整</span>
+                <span :class="['px-3 py-1.5 rounded-full border', currentStep === 2 ? 'bg-primary-500 text-white border-primary-500' : 'bg-white text-slate-600 border-slate-300']">2. ベース確認</span>
                 <span class="text-slate-400">➔</span>
-                <span :class="['px-3 py-1.5 rounded-full border', currentStep === 3 ? 'bg-primary-500 text-white border-primary-500' : 'bg-white text-slate-600 border-slate-300']">3. アニメ確認</span>
+                <span :class="['px-3 py-1.5 rounded-full border', currentStep === 3 ? 'bg-primary-500 text-white border-primary-500' : 'bg-white text-slate-600 border-slate-300']">3. 位置調整</span>
                 <span class="text-slate-400">➔</span>
-                <span :class="['px-3 py-1.5 rounded-full border', currentStep === 4 ? 'bg-primary-500 text-white border-primary-500' : 'bg-white text-slate-600 border-slate-300']">4. 保存</span>
+                <span :class="['px-3 py-1.5 rounded-full border', currentStep === 4 ? 'bg-primary-500 text-white border-primary-500' : 'bg-white text-slate-600 border-slate-300']">4. アニメ確認</span>
+                <span class="text-slate-400">➔</span>
+                <span :class="['px-3 py-1.5 rounded-full border', currentStep === 5 ? 'bg-primary-500 text-white border-primary-500' : 'bg-white text-slate-600 border-slate-300']">5. 保存</span>
             </div>
         </header>
 
         <!-- メイン領域 -->
         <main class="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-row">
             
-            <!-- STEP 1: のっぺらぼう確認 -->
+            <!-- STEP 1: 顔領域確認 -->
             <div v-if="currentStep === 1" class="flex-1 flex flex-row">
+                <!-- 左側プレビュー -->
+                <div class="flex-1 bg-slate-100 p-6 flex items-center justify-center min-h-[400px] overflow-auto relative">
+                    <!-- 顔検出ローディング表示 -->
+                    <div v-if="isDetectingFace" class="absolute inset-0 bg-white/60 backdrop-blur-xs flex flex-col items-center justify-center z-10 select-none">
+                        <i class="pi pi-spin pi-spinner text-3xl text-primary-500 mb-2"></i>
+                        <span class="text-sm font-medium text-slate-600">顔領域を自動検出中...</span>
+                    </div>
+
+                    <div class="relative max-w-full max-h-[600px] border border-slate-300 rounded shadow-md overflow-hidden bg-white">
+                        <img 
+                            ref="originalImageRef"
+                            v-if="baseMascotImageUrl"
+                            :src="resolveImageUrl(baseMascotImageUrl)"
+                            alt="オリジナルベース画像"
+                            class="max-h-[500px] w-auto block"
+                            @load="updateDisplayScale"
+                        />
+
+                        <!-- 顔領域ガイド枠オーバーレイ -->
+                        <div 
+                            v-if="showFaceGuide" 
+                            class="absolute border-2 border-dashed border-sky-400 bg-sky-200/10 cursor-move flex items-center justify-center select-none"
+                            :style="{
+                                width: `${faceGuide.width * displayScale}px`,
+                                height: `${faceGuide.height * displayScale}px`,
+                                left: `${(faceGuide.x - faceGuide.width / 2.0) * displayScale}px`,
+                                top: `${(faceGuide.y - faceGuide.height / 2.0) * displayScale}px`,
+                            }"
+                            title="ドラッグで顔の位置を合わせます"
+                            @mousedown.prevent="startDragFaceGuide"
+                        >
+                            <!-- 中心十字線 -->
+                            <div class="absolute w-4 h-4 flex items-center justify-center pointer-events-none">
+                                <div class="absolute w-full h-[2px] bg-sky-500"></div>
+                                <div class="absolute h-full w-[2px] bg-sky-500"></div>
+                            </div>
+                            <!-- 拡縮ハンドル (右下) -->
+                            <div 
+                                class="absolute right-0 bottom-0 w-3 h-3 bg-sky-500 cursor-se-resize border border-white"
+                                title="ドラッグで顔のサイズを合わせます"
+                                @mousedown.stop.prevent="startResizeFaceGuide"
+                            ></div>
+                        </div>
+
+                        <!-- 非アクティブな顔検出候補枠オーバーレイ -->
+                        <div 
+                            v-if="showFaceGuide"
+                            v-for="(cand, idx) in faceCandidates"
+                            :key="`cand-${idx}`"
+                            v-show="selectedCandidateIndex !== idx"
+                            class="absolute border border-dashed border-amber-400 bg-amber-100/5 cursor-pointer flex items-center justify-center select-none hover:bg-amber-100/25 transition-all duration-150 rounded"
+                            :style="{
+                                width: `${cand.faceWidth * displayScale}px`,
+                                height: `${cand.faceHeight * displayScale}px`,
+                                left: `${(cand.faceX - cand.faceWidth / 2.0) * displayScale}px`,
+                                top: `${(cand.faceY - cand.faceHeight / 2.0) * displayScale}px`,
+                                zIndex: 5
+                            }"
+                            title="クリックしてこの顔検出候補を選択します"
+                            @click.stop="selectCandidate(idx)"
+                        >
+                            <span class="text-[9px] font-bold text-amber-700 bg-amber-50 px-1 py-0.5 rounded border border-amber-200 pointer-events-none shadow-xs">候補 {{ idx + 1 }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 右側設定パネル -->
+                <div class="w-80 border-l border-slate-200 p-6 flex flex-col justify-between bg-white overflow-y-auto">
+                    <div>
+                        <h2 class="text-lg font-semibold text-slate-900 mb-4">ベース顔領域の確認・調整</h2>
+                        <p class="text-sm text-slate-600 mb-4">
+                            青い点線枠がキャラクターの顔（輪郭と大きさ）にぴったり合うようにドラッグで移動・リサイズして微調整してください。
+                        </p>
+                        <p class="text-sm text-slate-600 mb-4">
+                            この調整結果が、目・口を消した「のっぺらぼう画像」の自動生成や、ステップ3での表情パーツ位置合わせの正確な基準位置として使用されます。
+                        </p>
+
+                        <!-- 顔領域の検出方式 -->
+                        <div class="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
+                            <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider block">顔の検出方式</span>
+                            <Dropdown 
+                                v-model="detectMode" 
+                                :options="[
+                                    { label: '汎用AIモデル (MediaPipe)', value: 'ai' },
+                                    { label: '二次元特化モデル (AnimeFace)', value: 'anime' }
+                                ]" 
+                                optionLabel="label" 
+                                optionValue="value" 
+                                class="w-full text-sm"
+                                @change="initFaceGuide"
+                            />
+                        </div>
+
+                        <!-- 顔領域ガイドトグル -->
+                        <div class="mt-6 p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm font-medium text-slate-700 font-semibold text-slate-500 uppercase tracking-wider">顔領域のガイド枠</span>
+                                <InputSwitch v-model="showFaceGuide" />
+                            </div>
+                        </div>
+
+                        <!-- 検出候補リスト（複数候補時） -->
+                        <div v-if="faceCandidates.length > 1" class="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg space-y-3">
+                            <span class="text-xs font-semibold text-amber-800 uppercase tracking-wider block">顔の検出候補 ({{ faceCandidates.length }}件)</span>
+                            <div class="flex flex-col space-y-2">
+                                <button 
+                                    v-for="(cand, idx) in faceCandidates" 
+                                    :key="`btn-cand-${idx}`"
+                                    class="text-left text-xs px-3 py-2 rounded-lg border transition-all duration-150 flex items-center justify-between shadow-xs"
+                                    :class="selectedCandidateIndex === idx ? 'bg-amber-500 border-amber-600 text-white font-semibold' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'"
+                                    @click="selectCandidate(idx)"
+                                >
+                                    <span>候補 {{ idx + 1 }} (Y: {{ Math.round(cand.faceY) }}px)</span>
+                                    <i v-if="selectedCandidateIndex === idx" class="pi pi-check-circle text-xs"></i>
+                                </button>
+                            </div>
+                            <span class="text-[10px] text-slate-500 leading-normal block">※誤検出（胸のマークなど）が発生した場合は、画像上の枠または上記リストから正しい候補を選択してください。</span>
+                        </div>
+                    </div>
+                    
+                    <div class="pt-6 border-t border-slate-100 flex flex-col space-y-2">
+                        <Button severity="secondary" class="w-full py-2 font-medium text-sm border-slate-300" label="顔の自動検出を再実行" icon="pi pi-refresh" @click="initFaceGuide" :loading="isDetectingFace" />
+                        <Button severity="primary" class="w-full py-2.5 font-medium text-sm" label="のっぺらぼう生成して次へ" icon="pi pi-arrow-right" iconPos="right" @click="generateAndNext" :loading="isGeneratingNoface" />
+                    </div>
+                </div>
+            </div>
+
+            <!-- STEP 2: のっぺらぼう確認 -->
+            <div v-if="currentStep === 2" class="flex-1 flex flex-row">
                 <!-- 左側プレビュー -->
                 <div class="flex-1 bg-slate-100 p-6 flex items-center justify-center min-h-[400px] overflow-auto relative">
                     <!-- ローディング表示 -->
@@ -369,11 +873,6 @@ const saveAtlas = () => {
                         <p class="text-sm text-slate-600 mb-4">
                             AIにより目・鼻・口を消去した顔の仕上がりを確認してください。消し残しがある場合は、画像の上を直接クリック（またはドラッグ）して手動で補正できます。
                         </p>
-                        
-                        <div class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 mb-6">
-                            <i class="pi pi-exclamation-triangle mr-1"></i>
-                            <strong>事前確認:</strong> 表情スプライトの切り出しや位置合わせを行うため、あらかじめマスコット設定画面にて<strong>「表情のAI生成」または画像アセットの登録</strong>を完了させておいてください。
-                        </div>
 
                         <!-- レタッチツールボックス -->
                         <div class="space-y-4">
@@ -392,14 +891,15 @@ const saveAtlas = () => {
                         </div>
                     </div>
                     
-                    <div class="pt-6 border-t border-slate-100">
-                        <Button severity="secondary" class="w-full py-2 font-medium mb-2 text-sm" label="自動修復を再実行" @click="triggerGenerateNoface" :loading="isGeneratingNoface" />
+                    <div class="pt-6 border-t border-slate-100 flex space-x-2">
+                        <Button severity="secondary" class="flex-1 py-2 text-sm border-slate-300" label="戻る" @click="handleBack" />
+                        <Button severity="primary" class="flex-1 py-2 text-sm" label="保存して次へ" @click="handleNext" />
                     </div>
                 </div>
             </div>
 
-            <!-- STEP 2: 各感情の位置合わせ調整 -->
-            <div v-if="currentStep === 2" class="flex-1 flex flex-row">
+            <!-- STEP 3: 各感情の位置合わせ調整 -->
+            <div v-if="currentStep === 3" class="flex-1 flex flex-row">
                 <!-- 左側：感情リスト -->
                 <div class="w-64 border-r border-slate-200 flex flex-col bg-white">
                     <span class="p-4 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider block bg-slate-50">感情スロット一覧</span>
@@ -418,20 +918,25 @@ const saveAtlas = () => {
 
                 <!-- 中央：メインプレビュー -->
                 <div class="flex-1 bg-slate-100 p-6 flex items-center justify-center min-h-[400px]">
-                    <div class="relative max-w-full max-h-[600px] border border-slate-300 rounded shadow-md overflow-hidden bg-white flex items-center justify-center p-4">
+                    <div class="relative border border-slate-300 rounded shadow-md overflow-hidden bg-white">
                         <!-- のっぺらぼうベース -->
-                        <img v-if="baseMascotImageUrl" :src="resolveImageUrl(baseMascotImageUrl)" alt="のっぺらぼう" class="max-h-[500px] object-contain opacity-50" />
+                        <img ref="baseImageRef" v-if="baseMascotImageUrl" :src="resolveImageUrl(baseMascotImageUrl)" alt="のっぺらぼう" class="h-[500px] w-auto opacity-50 block" @load="onBaseImageLoad" />
                         
                         <!-- 表情パーツの重ね合わせ（シミュレーション） -->
                         <div 
                             v-if="selectedExpression" 
-                            class="absolute border border-dashed border-primary-500"
+                            class="absolute border border-dashed border-primary-500 cursor-grab active:cursor-grabbing select-none"
                             :style="{
-                                transform: `translate(${selectedExpression.offsetX || 0}px, ${selectedExpression.offsetY || 0}px) scale(${selectedExpression.scale || 1.0}) rotate(${selectedExpression.rotation || 0}deg)`,
+                                width: `${exprNaturalWidth * (selectedExpression.scale || 1.0) * displayScale}px`,
+                                height: `${exprNaturalHeight * (selectedExpression.scale || 1.0) * displayScale}px`,
+                                left: '50%',
+                                top: '50%',
+                                transform: `translate(-50%, -50%) translate(${(selectedExpression.offsetX || 0) * displayScale}px, ${(selectedExpression.offsetY || 0) * displayScale}px) rotate(${selectedExpression.rotation || 0}deg)`,
                                 transition: 'none'
                             }"
+                            @mousedown.prevent="startDragExpression"
                         >
-                            <img :src="resolveImageUrl(selectedExpression.path)" class="w-32 h-32 object-contain" alt="表情パーツ" />
+                            <img :src="resolveImageUrl(selectedExpression.path)" class="w-full h-full object-contain pointer-events-none" alt="表情パーツ" @load="onExprImageLoad" />
                         </div>
                     </div>
                 </div>
@@ -452,7 +957,7 @@ const saveAtlas = () => {
                                     <span>横方向 (X)</span>
                                     <span>{{ selectedExpression.offsetX || 0 }}px</span>
                                 </div>
-                                <Slider v-model="selectedExpression.offsetX" :min="-250" :max="250" class="w-full" />
+                                <Slider v-model="selectedExpression.offsetX" :min="-1000" :max="1000" class="w-full" />
                             </div>
 
                             <div class="space-y-2">
@@ -460,7 +965,7 @@ const saveAtlas = () => {
                                     <span>縦方向 (Y)</span>
                                     <span>{{ selectedExpression.offsetY || 0 }}px</span>
                                 </div>
-                                <Slider v-model="selectedExpression.offsetY" :min="-250" :max="250" class="w-full" />
+                                <Slider v-model="selectedExpression.offsetY" :min="-1000" :max="1000" class="w-full" />
                             </div>
 
                             <div class="space-y-2">
@@ -484,14 +989,28 @@ const saveAtlas = () => {
                         感情を選択してください。
                     </div>
 
-                    <div class="pt-6 border-t border-slate-100">
-                        <Button severity="secondary" class="w-full py-2 font-medium text-sm" label="初期状態にリセット" />
+                    <div class="pt-6 border-t border-slate-100 space-y-2">
+                        <Button 
+                            severity="primary" 
+                            class="w-full py-2 font-medium text-sm shadow-sm" 
+                            label="自動位置合わせ" 
+                            icon="pi pi-compass" 
+                            :loading="isAligning"
+                            @click="triggerAutoAlign"
+                        />
+                        <Button 
+                            severity="secondary" 
+                            class="w-full py-2 font-medium text-sm border-slate-300" 
+                            label="初期状態にリセット" 
+                            icon="pi pi-refresh"
+                            @click="resetAlign"
+                        />
                     </div>
                 </div>
             </div>
 
-            <!-- STEP 3: アニメーション動作確認 -->
-            <div v-if="currentStep === 3" class="flex-1 flex flex-row">
+            <!-- STEP 4: アニメーション動作確認 -->
+            <div v-if="currentStep === 4" class="flex-1 flex flex-row">
                 <!-- 左側プレビュー -->
                 <div class="flex-1 bg-slate-100 p-6 flex items-center justify-center min-h-[400px] overflow-auto">
                     <div class="relative max-w-full max-h-[600px] border border-slate-300 rounded shadow-md overflow-hidden bg-white flex items-center justify-center p-4">
@@ -538,8 +1057,8 @@ const saveAtlas = () => {
                 </div>
             </div>
 
-            <!-- STEP 4: アトラス化と保存 -->
-            <div v-if="currentStep === 4" class="flex-1 flex flex-row">
+            <!-- STEP 5: アトラス化と保存 -->
+            <div v-if="currentStep === 5" class="flex-1 flex flex-row">
                 <!-- 左側プレビュー -->
                 <div class="flex-1 bg-slate-100 p-6 flex items-center justify-center min-h-[400px] overflow-auto">
                     <div class="max-w-full max-h-[600px] border border-slate-300 rounded shadow-md overflow-hidden bg-white p-4 flex flex-col items-center">
@@ -585,7 +1104,7 @@ const saveAtlas = () => {
         <!-- 下部ナビゲーション -->
         <footer class="mt-6 flex justify-between">
             <Button severity="secondary" class="px-6 py-2.5 font-medium border-slate-300" @click="handleBack" :label="currentStep === 1 ? '設定に戻る' : '戻る'" />
-            <Button severity="primary" class="px-6 py-2.5 font-medium" @click="handleNext" :label="currentStep === 4 ? 'アトラス生成 & 完了' : '次へ'" />
+            <Button severity="primary" class="px-6 py-2.5 font-medium" @click="handleNext" :label="currentStep === 5 ? 'アトラス生成 & 完了' : '次へ'" />
         </footer>
     </div>
 </template>
