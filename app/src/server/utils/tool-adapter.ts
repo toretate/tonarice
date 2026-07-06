@@ -36,6 +36,9 @@ function convertLmStudioSchemaToPlainJsonSchema(parametersSchema: any): any {
             } else if (typeName === 'ZodNullable' || type === 'nullable') {
                 isOptional = true;
                 currentField = def.innerType;
+            } else if (typeName === 'ZodDefault' || type === 'default') {
+                isOptional = true; // デフォルト値が定義されている場合はオプション扱いにする
+                currentField = def.innerType;
             } else if (typeName === 'ZodEffects') {
                 currentField = def.schema;
             } else {
@@ -74,7 +77,7 @@ function convertLmStudioSchemaToPlainJsonSchema(parametersSchema: any): any {
  * LM Studio SDK のツール定義を Vercel AI SDK のツール定義に変換します。
  * @param lmTool LM Studio SDK のツールオブジェクト
  */
-export function convertLmStudioToolToVercel(lmTool: any): any {
+export function convertLmStudioToolToVercel(lmTool: any, onExecute?: (args: any, result: any) => void): any {
     const rawSchema = convertLmStudioSchemaToPlainJsonSchema(lmTool.parametersSchema);
 
     // jsonSchema() ヘルパーでラップして、parameters と inputSchema の両方に設定する
@@ -88,7 +91,10 @@ export function convertLmStudioToolToVercel(lmTool: any): any {
             // 既存の implementation は引数オブジェクトを受け取る
             console.log(`[Tool Execution] Running "${lmTool.name}" with args:`, args);
             const toolResponse = await lmTool.implementation(args, { abortSignal });
-            console.log(`[Tool Execution Result] "${toolResponse}"`)
+            console.log(`[Tool Execution Result] "${toolResponse}"`);
+            if (onExecute) {
+                onExecute(args, toolResponse);
+            }
             return toolResponse;
         }
     };

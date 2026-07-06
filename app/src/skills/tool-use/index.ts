@@ -4,6 +4,8 @@ import { weatherTool } from './weather-tool';
 import { volumeTool } from './volume-tool';
 import { appLauncherTool } from './app-launcher-tool';
 import { webSearchTool } from './web-search-tool';
+import { addTaskTool } from './add-task-tool';
+import { addScheduleTool } from './add-schedule-tool';
 
 export const lmStudioTools = [
     currentTimeTool,
@@ -11,5 +13,8 @@ export const lmStudioTools = [
     weatherTool,
     volumeTool,
     appLauncherTool,
-    webSearchTool
+    webSearchTool,
+    addTaskTool,
+    addScheduleTool
 ];
+

@@ -33,6 +33,8 @@ import { weatherTool } from '../weather-tool';
 import { volumeTool } from '../volume-tool';
 import { appLauncherTool } from '../app-launcher-tool';
 import { webSearchTool } from '../web-search-tool';
+import { addTaskTool } from '../add-task-tool';
+import { addScheduleTool } from '../add-schedule-tool';
 import { exec } from 'child_process';
 
 describe('Tool Use - 各ツールの挙動テスト', () => {
@@ -188,5 +190,28 @@ describe('Tool Use - 各ツールの挙動テスト', () => {
 
         const result = await webSearchTool.implementation({ query: 'テスト検索' }, {} as any);
         expect(result).toContain('Web検索中にエラーが発生しました');
+    });
+
+    // 7. タスク追加ツール (addTask)
+    test('addTask - タスクの追加が正常にシミュレートされ、結果がJSON形式で返ること', async () => {
+        const result = await addTaskTool.implementation({ title: '宿題をする', priority: 'star', categoryId: 'private' }, {} as any);
+        const parsed = JSON.parse(result);
+        expect(parsed.success).toBe(true);
+        expect(parsed.action).toBe('addTask');
+        expect(parsed.task.title).toBe('宿題をする');
+        expect(parsed.task.priority).toBe('star');
+        expect(parsed.task.categoryId).toBe('private');
+    });
+
+    // 8. スケジュール追加ツール (addSchedule)
+    test('addSchedule - スケジュールの追加が正常にシミュレートされ、結果がJSON形式で返ること', async () => {
+        const result = await addScheduleTool.implementation({ title: '会議', scheduledAt: '2026-07-06T18:00:00+09:00', priority: 'normal', categoryId: 'default' }, {} as any);
+        const parsed = JSON.parse(result);
+        expect(parsed.success).toBe(true);
+        expect(parsed.action).toBe('addSchedule');
+        expect(parsed.schedule.title).toBe('会議');
+        expect(parsed.schedule.scheduledAt).toBe('2026-07-06T18:00:00+09:00');
+        expect(parsed.schedule.priority).toBe('normal');
+        expect(parsed.schedule.categoryId).toBe('default');
     });
 });

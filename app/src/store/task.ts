@@ -31,6 +31,7 @@ export interface Task {
     startedAt?: string;
     endedAt?: string;
     scheduledAt?: string;
+    notified?: boolean;
 }
 
 export const useTaskStore = defineStore('task', () => {
@@ -40,53 +41,181 @@ export const useTaskStore = defineStore('task', () => {
     const activeCategoryId = ref<string>('default');
     const currentView = ref<'todo' | 'timeline'>('todo');
     const showTaskWidget = ref<boolean>(false);
+    const enableNotification = ref<boolean>(true);
+    const notificationMinutes = ref<number>(5);
     const isLoaded = ref(false);
 
-    // LocalStorage からデータをロード
-    const loadFromLocalStorage = () => {
+    let checkInterval: any = null;
+    let playlistInstance: any = null;
+
+    // 音声を合成して再生するヘルパー
+    const playNotificationVoice = async (text: string) => {
+        if (typeof window === 'undefined' || !window.electronAPI) return;
+
+        try {
+            // configStore を動的インポートして現在の音声設定を取得
+            const configStore = (await import('./config')).useConfigStore();
+            let base64Audio = '';
+
+            const engine = configStore.selectedVoiceEngine || 'voicevox';
+            if (engine === 'voicevox') {
+                const speakerId = configStore.voicevoxSpeakerId ?? 1;
+                const endpoint = configStore.voicevoxEndpoint;
+                base64Audio = await window.electronAPI.synthesizeVoicevox(text, speakerId, endpoint);
+            } else if (engine === 'irodori') {
+                const endpoint = configStore.irodoriEndpoint || 'http://localhost:5000';
+                const model = configStore.irodoriModel || 'default';
+                const voice = configStore.irodoriVoice || 'default';
+                base64Audio = await window.electronAPI.synthesizeIrodori(text, endpoint, model, voice, 'neutral');
+            }
+
+            if (base64Audio) {
+                if (!playlistInstance) {
+                    const { AudioPlaylist } = await import('../utils/AudioPlaylist');
+                    const mascotStore = (await import('./mascot')).useMascotStore();
+                    playlistInstance = new AudioPlaylist((speaking) => {
+                        mascotStore.setSpeaking(speaking);
+                    });
+                }
+                playlistInstance.push(base64Audio);
+            }
+        } catch (e) {
+            console.error('[TaskNotification] 音声合成・再生に失敗しました:', e);
+        }
+    };
+
+    // 定期監視関数
+    const startNotificationCheck = () => {
+        if (typeof window === 'undefined') return;
+        if (checkInterval) clearInterval(checkInterval);
+
+        checkInterval = setInterval(async () => {
+            if (!enableNotification.value) return;
+
+            const now = new Date();
+            const minutesBefore = notificationMinutes.value;
+
+            // 予定日時があり、まだ通知されておらず、現在時刻が「予定時刻の n 分前」を過ぎているタスクを検索
+            const tasksToNotify = tasks.value.filter(t => {
+                if (!t.scheduledAt || t.completed || t.notified) return false;
+                
+                try {
+                    const scheduledTime = new Date(t.scheduledAt);
+                    // お知らせする閾値時刻 = 予定時刻 - n分
+                    const notifyThresholdTime = new Date(scheduledTime.getTime() - minutesBefore * 60 * 1000);
+                    
+                    // 現在時刻が閾値時刻を過ぎており、且つ実際の予定時刻を超えていない（または直後10分以内）
+                    const tenMinutesAfter = new Date(scheduledTime.getTime() + 10 * 60 * 1000);
+                    
+                    return now >= notifyThresholdTime && now <= tenMinutesAfter;
+                } catch (e) {
+                    return false;
+                }
+            });
+
+            for (const task of tasksToNotify) {
+                // 即座に通知済みフラグを立てて保存 (二重通知防止)
+                task.notified = true;
+                saveToLocalStorage();
+
+                // 音声テキスト
+                const text = `予定の、${minutesBefore}分前になりました。${task.title}、の時間です。`;
+                console.log(`[TaskNotification] Notifying task: ${task.title}`);
+                
+                // OS標準/アプリUIの通知を実行
+                if (window.electronAPI) {
+                    window.electronAPI.triggerTimerNotification(text);
+                }
+
+                // 音声再生
+                await playNotificationVoice(text);
+            }
+        }, 10000); // 10秒に1回チェック
+    };
+
+    // LocalStorage および サーバーからデータをロード
+    const loadFromLocalStorage = async () => {
         if (typeof window === 'undefined') return;
 
+        // 1. まず LocalStorage の値を読み込んで初期表示を高速にする
         try {
             const savedCategories = localStorage.getItem('desktop-mascot-categories');
             if (savedCategories) {
                 categories.value = JSON.parse(savedCategories);
-            } else {
-                // デフォルト初期値
+            }
+            const savedTasks = localStorage.getItem('desktop-mascot-tasks');
+            if (savedTasks) {
+                tasks.value = JSON.parse(savedTasks);
+            }
+            const savedActiveId = localStorage.getItem('desktop-mascot-active-category');
+            if (savedActiveId) {
+                activeCategoryId.value = savedActiveId;
+            }
+            const savedView = localStorage.getItem('desktop-mascot-task-view');
+            if (savedView === 'todo' || savedView === 'timeline') {
+                currentView.value = savedView;
+            }
+            const savedShowWidget = localStorage.getItem('desktop-mascot-show-task-widget');
+            if (savedShowWidget) {
+                showTaskWidget.value = savedShowWidget === 'true';
+            }
+            const savedEnableNotif = localStorage.getItem('desktop-mascot-enable-notification');
+            if (savedEnableNotif) {
+                enableNotification.value = savedEnableNotif === 'true';
+            }
+            const savedNotifMin = localStorage.getItem('desktop-mascot-notification-minutes');
+            if (savedNotifMin) {
+                notificationMinutes.value = parseInt(savedNotifMin, 10) || 5;
+            }
+        } catch (error) {
+            console.warn('LocalStorageからの初期タスク読み込みエラー:', error);
+        }
+
+        // 2. 次にサーバー（API）から最新データをロードする
+        try {
+            const res = await fetch('/api/tasks', { credentials: 'include' });
+            if (res.ok) {
+                const resJson = await res.json();
+                if (resJson.success) {
+                    if (Array.isArray(resJson.categories)) {
+                        categories.value = resJson.categories;
+                    }
+                    if (Array.isArray(resJson.tasks)) {
+                        tasks.value = resJson.tasks;
+                    }
+                    if (resJson.enableNotification !== undefined) {
+                        enableNotification.value = resJson.enableNotification;
+                    }
+                    if (resJson.notificationMinutes !== undefined) {
+                        notificationMinutes.value = resJson.notificationMinutes;
+                    }
+                    // 同期のために LocalStorage にも書き込んでおく
+                    localStorage.setItem('desktop-mascot-categories', JSON.stringify(categories.value));
+                    localStorage.setItem('desktop-mascot-tasks', JSON.stringify(tasks.value));
+                    localStorage.setItem('desktop-mascot-enable-notification', String(enableNotification.value));
+                    localStorage.setItem('desktop-mascot-notification-minutes', String(notificationMinutes.value));
+                }
+            }
+        } catch (error) {
+            console.warn('サーバーからのタスクロードに失敗しました (LocalStorageを使用します):', error);
+        } finally {
+            // デフォルトカテゴリの初期化
+            if (categories.value.length === 0) {
                 categories.value = [
                     { id: 'default', name: 'Work', order: 0 },
                     { id: 'private', name: 'Private', order: 1 }
                 ];
             }
-
-            const savedTasks = localStorage.getItem('desktop-mascot-tasks');
-            if (savedTasks) {
-                tasks.value = JSON.parse(savedTasks);
-            }
-
-            const savedActiveId = localStorage.getItem('desktop-mascot-active-category');
-            if (savedActiveId && categories.value.some(c => c.id === savedActiveId)) {
-                activeCategoryId.value = savedActiveId;
-            } else if (categories.value.length > 0) {
+            if (!activeCategoryId.value && categories.value.length > 0) {
                 activeCategoryId.value = categories.value[0].id;
             }
-
-            const savedView = localStorage.getItem('desktop-mascot-task-view');
-            if (savedView === 'todo' || savedView === 'timeline') {
-                currentView.value = savedView;
-            }
-
-            const savedShowWidget = localStorage.getItem('desktop-mascot-show-task-widget');
-            if (savedShowWidget) {
-                showTaskWidget.value = savedShowWidget === 'true';
-            }
-        } catch (error) {
-            console.error('LocalStorageからのタスク読み込みエラー:', error);
-        } finally {
             isLoaded.value = true;
+            // 監視タイマーの開始
+            startNotificationCheck();
         }
     };
 
-    // LocalStorage へデータを保存
+    // LocalStorage および サーバーへデータを保存
     const saveToLocalStorage = () => {
         if (typeof window === 'undefined' || !isLoaded.value) return;
 
@@ -96,15 +225,46 @@ export const useTaskStore = defineStore('task', () => {
             localStorage.setItem('desktop-mascot-active-category', activeCategoryId.value);
             localStorage.setItem('desktop-mascot-task-view', currentView.value);
             localStorage.setItem('desktop-mascot-show-task-widget', String(showTaskWidget.value));
+            localStorage.setItem('desktop-mascot-enable-notification', String(enableNotification.value));
+            localStorage.setItem('desktop-mascot-notification-minutes', String(notificationMinutes.value));
+
+            // サーバーへ同期保存 (非同期実行)
+            fetch('/api/tasks', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    categories: categories.value,
+                    tasks: tasks.value,
+                    enableNotification: enableNotification.value,
+                    notificationMinutes: notificationMinutes.value
+                }),
+                credentials: 'include'
+            }).catch(err => {
+                console.warn('サーバーへのタスク保存に失敗しました:', err);
+            });
         } catch (error) {
             console.error('LocalStorageへのタスク保存エラー:', error);
         }
     };
 
     // 自動保存の設定
-    watch([categories, tasks, activeCategoryId, currentView, showTaskWidget], () => {
-        saveToLocalStorage();
-    }, { deep: true });
+    watch(
+        [
+            () => categories.value,
+            () => tasks.value,
+            () => activeCategoryId.value,
+            () => currentView.value,
+            () => showTaskWidget.value,
+            () => enableNotification.value,
+            () => notificationMinutes.value
+        ],
+        () => {
+            saveToLocalStorage();
+        },
+        { deep: true }
+    );
 
     // ゲッター：アクティブなカテゴリに属するタスクを順序順に取得
     const filteredTasks = computed(() => {
@@ -165,7 +325,7 @@ export const useTaskStore = defineStore('task', () => {
     };
 
     // --- タスク操作 ---
-    const addTask = (categoryId: string, title: string, priority: 'normal' | 'star' | 'thunder' = 'normal') => {
+    const addTask = (categoryId: string, title: string, priority: 'normal' | 'star' | 'thunder' = 'normal', scheduledAt?: string) => {
         const id = 'task_' + Math.random().toString(36).substring(2, 11);
         const order = tasks.value.filter(t => t.categoryId === categoryId).length;
         tasks.value.push({
@@ -178,7 +338,8 @@ export const useTaskStore = defineStore('task', () => {
             expanded: false,
             order,
             createdAt: new Date().toISOString(),
-            status: 'todo'
+            status: 'todo',
+            scheduledAt
         });
     };
 
@@ -404,12 +565,32 @@ export const useTaskStore = defineStore('task', () => {
         task.completed = allCompleted;
     };
 
+    // 他のウィンドウによる localStorage の変更を検知して自動で同期する
+    if (typeof window !== 'undefined') {
+        window.addEventListener('storage', (e) => {
+            if (
+                e.key === 'desktop-mascot-tasks' || 
+                e.key === 'desktop-mascot-categories' || 
+                e.key === 'desktop-mascot-active-category' ||
+                e.key === 'desktop-mascot-show-task-widget' ||
+                e.key === 'desktop-mascot-enable-notification' ||
+                e.key === 'desktop-mascot-notification-minutes'
+            ) {
+                console.log('[TaskStore] Detected storage change from another window, reloading...');
+                isLoaded.value = false;
+                loadFromLocalStorage();
+            }
+        });
+    }
+
     return {
         categories,
         tasks,
         activeCategoryId,
         currentView,
         showTaskWidget,
+        enableNotification,
+        notificationMinutes,
         isLoaded,
         filteredTasks,
         timelineTasks,

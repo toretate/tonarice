@@ -177,7 +177,20 @@ export default defineWebSocketHandler({
                         lmstudioEndpoint,
                         history,
                         attachments,
-                        tools
+                        tools,
+                        onToolResult: (toolName, args, result) => {
+                            if (toolName === 'addTask' || toolName === 'addSchedule') {
+                                console.log(`[WS] Tool execution detected in ws.ts: ${toolName}`, args);
+                                peer.send(JSON.stringify({
+                                    event: 'task-action',
+                                    data: {
+                                        action: toolName,
+                                        args,
+                                        result: typeof result === 'string' ? JSON.parse(result) : result
+                                    }
+                                }));
+                            }
+                        }
                     });
                 } catch (aiError: any) {
                     console.error('[WS] AI Engine Error:', aiError.message);

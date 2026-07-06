@@ -349,46 +349,50 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
             }
         },
         synthesizeVoicevox: async (text: string, speakerId: number, endpoint?: string) => {
-            const baseEndpoint = endpoint || 'http://localhost:50021';
             try {
-                // 1. 音声クエリの作成
-                const queryRes = await fetch(`${baseEndpoint}/audio_query?text=${encodeURIComponent(text)}&speaker=${speakerId}`, {
-                    method: 'POST'
-                });
-                if (!queryRes.ok) throw new Error(`audio_query failed: ${queryRes.status}`);
-                const queryJson = await queryRes.json();
-
-                // 2. 音声合成
-                const synthRes = await fetch(`${baseEndpoint}/synthesis?speaker=${speakerId}`, {
+                const response = await fetch('/api/tts', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(queryJson)
+                    body: JSON.stringify({
+                        engine: 'voicevox',
+                        text,
+                        speakerId,
+                        endpoint
+                    })
                 });
-                if (!synthRes.ok) throw new Error(`synthesis failed: ${synthRes.status}`);
-
-                // 3. バイナリデータを Base64 に変換
-                const arrayBuffer = await synthRes.arrayBuffer();
-                const base64 = btoa(
-                    new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-                );
-                return base64;
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                return data.success ? data.audio : null;
             } catch (e) {
                 console.error('[Polyfill] VOICEVOX synthesis failed:', e);
                 return null;
             }
         },
         synthesizeIrodori: async (text: string, endpoint: string, model: string, voice: string, emotion?: string) => {
-            return IrodoriTtsConnector.synthesize(
-                {
-                    input: text,
-                    model: model,
-                    voice: voice
-                },
-                emotion,
-                endpoint
-            );
+            try {
+                const response = await fetch('/api/tts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        engine: 'irodori',
+                        text,
+                        endpoint,
+                        model,
+                        voice,
+                        emotion
+                    })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                return data.success ? data.audio : null;
+            } catch (e) {
+                console.error('[Polyfill] Irodori synthesis failed:', e);
+                return null;
+            }
         },
         getVoicevoxSpeakers: async (endpoint: string) => {
             const controller = new AbortController();

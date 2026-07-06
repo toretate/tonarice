@@ -90,8 +90,9 @@ export class ChatAiService {
         history?: any[];
         attachments?: any[];
         tools?: any;
+        onToolResult?: (toolName: string, args: any, result: any) => void;
     }): Promise<string> {
-        const { message, apiKey, systemPrompt, model, engine, lmstudioEndpoint, temperature, frequencyPenalty, repetitionPenalty, maxOutputTokens, enableThinking, history, attachments, tools } = params;
+        const { message, apiKey, systemPrompt, model, engine, lmstudioEndpoint, temperature, frequencyPenalty, repetitionPenalty, maxOutputTokens, enableThinking, history, attachments, tools, onToolResult } = params;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 60000);
 
@@ -129,10 +130,10 @@ export class ChatAiService {
             });
             const toolListStr = activeToolDescriptions.join(', ');
             const toolUseSection = activeToolDescriptions.length > 0
-                ? `- 以下のツールが使用可能です: ${toolListStr}\n- 現在の情報や天気、時間、アプリの起動、音量の調整について尋ねられたり依頼された場合は、絶対に自分で推測して回答せず、必ず定義された対応するツールを呼び出してください。`
+                ? `- 以下のツールが使用可能です: ${toolListStr}\n- 現在の情報や天気、時間、アプリの起動、音量の調整、および【タスクや予定（スケジュール）の追加・登録】について尋ねられたり依頼された場合は、絶対に自分で推測して会話だけで完了せず、必ず定義された対応するツール（addTask または addSchedule）を呼び出してください。`
                 : `- 利用可能なツールはありません。`;
 
-            const toolUseGuideline = `\n\n# ツール使用ガイドライン\n${toolUseSection}\n- 最終的な回答には、思考プロセス（Thinking Process）や、自己指示、"<|channel>thought" や "<|channel>" などの特殊なチャンネルタグ、メタコメント（"現在時刻を取得しました"、"ツールを実行します" など）を一切含めないでください。\n- 回答は日本語で、フレンドリーなマスコットキャラクターとしてユーザーに直接語りかけるように記述してください。出力するテキストは、自然なセリフ（発話内容）のみにしてください。`;
+            const toolUseGuideline = `\n\n# ツール使用ガイドライン\n${toolUseSection}\n- タスクやスケジュールの追加時には、ツールを呼び出した後に、ユーザーに「登録しました」と伝える応答を返してください。\n- 最終的な回答には、思考プロセス（Thinking Process）や、自己指示、"<|channel>thought" や "<|channel>" などの特殊なチャンネルタグ、メタコメント（"現在時刻を取得しました"、"ツールを実行します" など）を一切含めないでください。\n- 回答は日本語で、フレンドリーなマスコットキャラクターとしてユーザーに直接語りかけるように記述してください。出力するテキストは、自然なセリフ（発話内容）のみにしてください。`;
 
             const finalSystemPrompt = `${systemPrompt || ''}${timeInstruction}${toolUseGuideline}`;
 
@@ -203,10 +204,15 @@ export class ChatAiService {
                 content: userContent.length === 1 && userContent[0].type === 'text' ? userContent[0].text : userContent
             });
 
+            // ツール実行結果を確実に収集する一時配列
+            const executedTools: Array<{ toolName: string; args: any; result: any }> = [];
+
             // Vercel AI SDK 形式のツール定義に変換
             const vercelTools: Record<string, any> = {};
             filteredTools.forEach(t => {
-                vercelTools[t.name] = convertLmStudioToolToVercel(t);
+                vercelTools[t.name] = convertLmStudioToolToVercel(t, (args, result) => {
+                    executedTools.push({ toolName: t.name, args, result });
+                });
             });
 
             // プロバイダーとモデルの設定
@@ -278,7 +284,7 @@ export class ChatAiService {
 
             if (hasTools) {
                 generateOptions.tools = vercelTools;
-                generateOptions.stopWhen = [isLoopFinished(), stepCountIs(5)];
+                generateOptions.maxSteps = 5;
             }
 
             let response;
@@ -286,15 +292,14 @@ export class ChatAiService {
                 response = await generateText(generateOptions);
 
                 // ツール呼び出しの有無をログ出力
-                if (response.toolCalls && response.toolCalls.length > 0) {
-                    console.log(`[ChatAiService] Tool use detected! Total tool calls: ${response.toolCalls.length}`);
-                    response.toolCalls.forEach(call => {
-                        console.log(`  - Tool Call: ${call.toolName}`, call.args);
-                    });
-                }
-                if (response.toolResults && response.toolResults.length > 0) {
-                    response.toolResults.forEach(res => {
-                        console.log(`  - Tool Result [${res.toolName}]:`, res.result);
+                // Vercel AI SDK の toolResults の仕様不整合や undefined 化を回避するため、
+                // 実際に execute された実績である executedTools キャッシュから直接通知を送信する
+                if (executedTools.length > 0) {
+                    console.log(`[ChatAiService] Dispatching ${executedTools.length} executed tools directly from cache`);
+                    executedTools.forEach(et => {
+                        if (onToolResult) {
+                            onToolResult(et.toolName, et.args, et.result);
+                        }
                     });
                 }
             } catch (firstTryError: any) {
