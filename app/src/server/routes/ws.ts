@@ -8,6 +8,7 @@ import { sanitizeForIrodoriTTS } from '../utils/irodori-sanitizer';
 import { filterDialogue } from '../utils/dialogue-filter';
 import { authenticateUserToken } from '../middleware/auth';
 import { PROJECT_ROOT, USERS_DIR } from '../utils/paths';
+import { addTaskToDb } from '../utils/tasks-service';
 
 // ユーザーごとの接続管理（crosswsのPeerオブジェクトをSetに保存）
 const userConnections = new Map<string, Set<any>>();
@@ -181,14 +182,29 @@ export default defineWebSocketHandler({
                         onToolResult: (toolName, args, result) => {
                             if (toolName === 'addTask' || toolName === 'addSchedule') {
                                 console.log(`[WS] Tool execution detected in ws.ts: ${toolName}`, args);
-                                peer.send(JSON.stringify({
-                                    event: 'task-action',
-                                    data: {
-                                        action: toolName,
-                                        args,
-                                        result: typeof result === 'string' ? JSON.parse(result) : result
-                                    }
-                                }));
+                                const userId = ((peer as any).ctx && (peer as any).ctx.userId) || 'anonymous';
+                                try {
+                                    const parsedResult = typeof result === 'string' ? JSON.parse(result) : result;
+                                    const payload = {
+                                        title: args.title,
+                                        priority: args.priority,
+                                        categoryId: args.categoryId,
+                                        scheduledAt: toolName === 'addSchedule' ? (parsedResult?.schedule?.scheduledAt || args.scheduledAt) : undefined
+                                    };
+                                    // サーバー側DBに直接書き込み
+                                    const saved = addTaskToDb(userId, payload);
+                                    
+                                    peer.send(JSON.stringify({
+                                        event: 'task-action',
+                                        data: {
+                                            action: toolName,
+                                            categories: saved.categories,
+                                            task: saved.task
+                                        }
+                                    }));
+                                } catch (e: any) {
+                                    console.error('[WS] Failed to save tool task to DB:', e.message);
+                                }
                             }
                         }
                     });

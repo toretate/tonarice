@@ -256,6 +256,21 @@ export const useTaskStore = defineStore('task', () => {
         });
     };
 
+    const addTaskFromServer = (task: Task, updatedCategories?: Category[]) => {
+        if (updatedCategories) {
+            categories.value = updatedCategories;
+        }
+        const exists = tasks.value.some(t => t.id === task.id);
+        if (!exists) {
+            tasks.value.push(task);
+        } else {
+            const idx = tasks.value.findIndex(t => t.id === task.id);
+            if (idx !== -1) {
+                tasks.value[idx] = task;
+            }
+        }
+    };
+
     const updateTask = (id: string, updates: Partial<Task>) => {
         const task = tasks.value.find(t => t.id === id);
         if (task) {
@@ -515,6 +530,7 @@ export const useTaskStore = defineStore('task', () => {
         deleteCategory,
         updateCategoriesOrder,
         addTask,
+        addTaskFromServer,
         updateTask,
         deleteTask,
         toggleTask,

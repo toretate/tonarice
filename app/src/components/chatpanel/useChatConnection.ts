@@ -150,46 +150,11 @@ export function useChatConnection(params: {
                         window.electronAPI.triggerTimerNotification(memo);
                     }
                 } else if (wsEvent === 'task-action') {
-                    const { action, args } = data;
-                    console.log('[useChatConnection] Task action received:', action, args);
+                    const { action, task, categories } = data;
+                    console.log('[useChatConnection] Task action received:', action, task);
                     const taskStore = useTaskStore();
-                    
-                    const resolveOrCreateCategoryId = (catNameOrId?: string): string => {
-                        if (!catNameOrId) return 'default';
-                        
-                        // 1. 既存の ID に一致するかチェック (大文字小文字無視)
-                        const matchedById = taskStore.categories.find(
-                            c => c.id.toLowerCase() === catNameOrId.toLowerCase()
-                        );
-                        if (matchedById) return matchedById.id;
-                        
-                        // 2. 既存の Name に一致するかチェック (大文字小文字無視)
-                        const matchedByName = taskStore.categories.find(
-                            c => c.name.toLowerCase() === catNameOrId.toLowerCase()
-                        );
-                        if (matchedByName) return matchedByName.id;
-                        
-                        // 3. 一致するものがなければ、新規カテゴリを作成する
-                        console.log(`[useChatConnection] Creating new category: ${catNameOrId}`);
-                        taskStore.addCategory(catNameOrId);
-                        const newCat = taskStore.categories[taskStore.categories.length - 1];
-                        return newCat ? newCat.id : 'default';
-                    };
-
-                    if (action === 'addTask') {
-                        const { title, priority, categoryId } = args;
-                        const targetCategory = resolveOrCreateCategoryId(categoryId);
-                        taskStore.addTask(targetCategory, title, priority || 'normal');
-                    } else if (action === 'addSchedule') {
-                        const { title, scheduledAt, priority, categoryId } = args;
-                        const targetCategory = resolveOrCreateCategoryId(categoryId);
-                        // 拡張された4引数のaddTaskを試みる
-                        taskStore.addTask(targetCategory, title, priority || 'normal', scheduledAt);
-                        // ストアがまだ古い（4引数未対応）状態である場合のためのフォールバック処理
-                        const addedTask = taskStore.tasks.find(t => t.title === title && t.categoryId === targetCategory && !t.scheduledAt);
-                        if (addedTask) {
-                            taskStore.updateTask(addedTask.id, { scheduledAt });
-                        }
+                    if (task) {
+                        taskStore.addTaskFromServer(task, categories);
                     }
                 } else if (wsEvent === 'chat-error') {
                     updateLastMascotMessage(`接続エラー: ${data.message}`);
