@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, nextTick } from 'vue';
 
 const props = defineProps<{
     messages: Array<{
@@ -51,6 +51,108 @@ const formatFileSize = (bytes?: number) => {
     const mb = kb / 1024;
     return mb.toFixed(1) + ' MB';
 };
+
+// --- カスタムコンテキストメニューの制御 ---
+const contextMenuVisible = ref(false);
+const contextMenuX = ref(0);
+const contextMenuY = ref(0);
+const selectedMessage = ref<any>(null);
+const contextMenuRef = ref<HTMLElement | null>(null);
+let touchTimeout: any = null;
+let isTouchMoving = false;
+
+// メニューを開く
+const openMenu = (x: number, y: number, msg: any) => {
+    contextMenuX.value = x;
+    contextMenuY.value = y;
+    selectedMessage.value = msg;
+    contextMenuVisible.value = true;
+    
+    nextTick(() => {
+        adjustMenuPosition();
+    });
+
+    // グローバルイベントの購読
+    window.addEventListener('click', closeMenu);
+    window.addEventListener('contextmenu', closeMenu);
+    if (messageContainer.value) {
+        messageContainer.value.addEventListener('scroll', closeMenu);
+    }
+};
+
+// 画面外へのはみ出し調整
+const adjustMenuPosition = () => {
+    if (!contextMenuRef.value) return;
+    const menuWidth = contextMenuRef.value.offsetWidth;
+    const menuHeight = contextMenuRef.value.offsetHeight;
+    const windowWidth = window.innerWidth;
+    const windowHeight = window.innerHeight;
+
+    if (contextMenuX.value + menuWidth > windowWidth) {
+        contextMenuX.value = windowWidth - menuWidth - 8;
+    }
+    if (contextMenuY.value + menuHeight > windowHeight) {
+        contextMenuY.value = windowHeight - menuHeight - 8;
+    }
+};
+
+// メニューを閉じる
+const closeMenu = () => {
+    contextMenuVisible.value = false;
+    window.removeEventListener('click', closeMenu);
+    window.removeEventListener('contextmenu', closeMenu);
+    if (messageContainer.value) {
+        messageContainer.value.removeEventListener('scroll', closeMenu);
+    }
+};
+
+// 右クリックハンドラ
+const handleContextMenu = (event: MouseEvent, msg: any) => {
+    event.preventDefault();
+    openMenu(event.clientX, event.clientY, msg);
+};
+
+// 長押し（Touch）ハンドラ
+const handleTouchStart = (event: TouchEvent, msg: any) => {
+    isTouchMoving = false;
+    if (touchTimeout) clearTimeout(touchTimeout);
+    
+    touchTimeout = setTimeout(() => {
+        if (!isTouchMoving) {
+            event.preventDefault();
+            const touch = event.touches[0];
+            openMenu(touch.clientX, touch.clientY, msg);
+        }
+    }, 600); // 600ms の長押しでメニュー表示
+};
+
+const handleTouchEnd = () => {
+    if (touchTimeout) {
+        clearTimeout(touchTimeout);
+        touchTimeout = null;
+    }
+};
+
+const handleTouchMove = () => {
+    isTouchMoving = true;
+    if (touchTimeout) {
+        clearTimeout(touchTimeout);
+        touchTimeout = null;
+    }
+};
+
+// メッセージ本文コピー処理
+const copyMessageText = async () => {
+    if (selectedMessage.value) {
+        try {
+            await navigator.clipboard.writeText(selectedMessage.value.text);
+            console.log('[MessageList] Copied:', selectedMessage.value.text);
+        } catch (err) {
+            console.error('[MessageList] Copy failed:', err);
+        }
+    }
+    closeMenu();
+};
 </script>
 
 <template>
@@ -66,7 +168,13 @@ const formatFileSize = (bytes?: number) => {
             :class="msg.sender"
         >
             <div class="bubble-wrapper">
-                <div class="bubble">
+                <div 
+                    class="bubble"
+                    @contextmenu="handleContextMenu($event, msg)"
+                    @touchstart="handleTouchStart($event, msg)"
+                    @touchend="handleTouchEnd"
+                    @touchmove="handleTouchMove"
+                >
                     <div class="message-text">{{ msg.text }}</div>
                     
                     <!-- 添付ファイル・画像一覧 -->
@@ -96,6 +204,20 @@ const formatFileSize = (bytes?: number) => {
                     <i class="pi pi-trash"></i>
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- カスタムコンテキストメニュー -->
+    <div 
+        v-if="contextMenuVisible" 
+        ref="contextMenuRef"
+        class="custom-context-menu" 
+        :style="{ top: contextMenuY + 'px', left: contextMenuX + 'px' }"
+        @click.stop
+    >
+        <div class="menu-item" @click="copyMessageText">
+            <i class="pi pi-copy"></i>
+            <span>コピー</span>
         </div>
     </div>
 </template>
@@ -323,5 +445,54 @@ const formatFileSize = (bytes?: number) => {
     color: #e9d5ff;
     border: 1px solid rgba(168, 85, 247, 0.2);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* カスタムコンテキストメニュー */
+.custom-context-menu {
+    position: fixed;
+    z-index: 9999;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    border-radius: 8px;
+    padding: 4px 0;
+    min-width: 120px;
+    user-select: none;
+}
+
+.custom-context-menu .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: #334155;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.custom-context-menu .menu-item:hover {
+    background: #f1f5f9;
+    color: #7c3aed;
+}
+
+.custom-context-menu .menu-item i {
+    font-size: 13px;
+}
+
+/* シークレットモードでのコンテキストメニュー */
+.secret-mode .custom-context-menu {
+    background: #1e1e2f;
+    border-color: #2d2d3f;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.secret-mode .custom-context-menu .menu-item {
+    color: #cbd5e1;
+}
+
+.secret-mode .custom-context-menu .menu-item:hover {
+    background: #2d2d3f;
+    color: #a78bfa;
 }
 </style>
