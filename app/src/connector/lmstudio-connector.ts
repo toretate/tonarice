@@ -152,8 +152,7 @@ export class LmStudioConnector {
             switch (tool.name) {
                 case 'launchApp':
                     return tools.toolsAppLauncher !== false;
-                case 'getCurrentTime':
-                    return tools.toolsCurrentTime !== false;
+
                 case 'getGPSLocation':
                     return tools.toolsGpsLocation !== false;
                 case 'adjustVolume':

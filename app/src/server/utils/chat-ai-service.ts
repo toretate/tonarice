@@ -109,8 +109,7 @@ export class ChatAiService {
                 switch (tool.name) {
                     case 'launchApp':
                         return tools.toolsAppLauncher !== false;
-                    case 'getCurrentTime':
-                        return tools.toolsCurrentTime !== false;
+
                     case 'getGPSLocation':
                         return tools.toolsGpsLocation !== false;
                     case 'adjustVolume':
@@ -278,7 +277,6 @@ export class ChatAiService {
             console.log("[ChatAiService] finalSystemPrompt:", finalSystemPrompt);
             console.log("[ChatAiService] messages:", JSON.stringify(messages, null, 2));
             console.log("[ChatAiService] vercelTools:", Object.keys(vercelTools));
-            console.log("[ChatAiService] vercelTools schema example (getCurrentTime):", JSON.stringify(vercelTools.getCurrentTime, null, 2));
 
             // Vercel AI SDK での生成実行 (ツールが定義されている場合のみ tools / stopWhen を指定する)
             const hasTools = Object.keys(vercelTools).length > 0;

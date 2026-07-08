@@ -27,7 +27,7 @@ vi.mock('child_process', () => {
 });
 
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { currentTimeTool } from '../current-time-tool';
+
 import { gpsLocationTool } from '../gps-location-tool';
 import { weatherTool } from '../weather-tool';
 import { volumeTool } from '../volume-tool';
@@ -49,14 +49,6 @@ describe('Tool Use - 各ツールの挙動テスト', () => {
         globalThis.fetch = originalFetch;
     });
 
-    // 1. 現在時刻取得ツール (getCurrentTime)
-    test('getCurrentTime - 現在時刻が適切な形式で正常に取得できること', () => {
-        const result = currentTimeTool.implementation({}, {} as any);
-        expect(result).not.toBeNull();
-        expect(typeof result).toBe('string');
-        // 日付や時間に関連する文字（スラッシュ、コロン、数字など）が含まれることを簡易検証
-        expect(result).toMatch(/[\d/:\s年月日時分秒]/);
-    });
 
     // 2. 位置情報取得ツール (getGPSLocation)
     test('getGPSLocation - API接続成功時に位置情報がJSON形式で正常に取得できること', async () => {
