@@ -190,7 +190,7 @@ export const useConfigStore = defineStore('config', () => {
 
     // TTS設定
     const useTts = ref(true);
-    const ttsReadNarrative = ref(true);
+    const ttsReadNarrative = ref(false);
 
     // ウィンドウモード
     const windowMode = ref<'split' | 'integrated' | 'compact'>('split');
@@ -353,7 +353,7 @@ export const useConfigStore = defineStore('config', () => {
             serverPort.value = configData.serverPort !== undefined ? Number(configData.serverPort) : 3000;
             
             useTts.value = configData.useTts !== undefined ? !!configData.useTts : true;
-            ttsReadNarrative.value = configData.ttsReadNarrative !== undefined ? !!configData.ttsReadNarrative : true;
+            ttsReadNarrative.value = configData.ttsReadNarrative !== undefined ? !!configData.ttsReadNarrative : false;
             
             windowMode.value = (configData.windowMode as any) || 'split';
             
@@ -485,7 +485,7 @@ export const useConfigStore = defineStore('config', () => {
             serverPort.value = savedServerPort ? parseInt(savedServerPort) : 3000;
             
             useTts.value = localStorage.getItem('useTts') !== 'false';
-            ttsReadNarrative.value = localStorage.getItem('ttsReadNarrative') !== 'false';
+            ttsReadNarrative.value = localStorage.getItem('ttsReadNarrative') === 'true';
 
             windowMode.value = (localStorage.getItem('windowMode') as any) || 'split';
 
