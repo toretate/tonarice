@@ -716,16 +716,43 @@ const cycleTaskStatus = (task: Task) => {
 };
 
 const tempCalendarDate = ref<Date | null>(null);
+const calendarStep = ref<'date' | 'time'>('date');
+const clockMode = ref<'hour' | 'minute'>('hour');
+const selectedHour24 = ref(12);
+const selectedMinuteVal = ref(0);
+const isDragging = ref(false);
+
+const innerHourNumbers = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+const outerHourNumbers = [0, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23];
+const minuteNumbers = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
 
 const openDatePicker = (taskId: string) => {
     activeCalendarTaskId.value = taskId;
+    calendarStep.value = 'date';
+    clockMode.value = 'hour';
+    
     const task = taskStore.tasks.find(t => t.id === taskId);
     if (task && task.scheduledAt) {
-        tempCalendarDate.value = new Date(task.scheduledAt);
+        const d = new Date(task.scheduledAt);
+        tempCalendarDate.value = d;
+        selectedHour24.value = d.getHours();
+        selectedMinuteVal.value = d.getMinutes();
     } else {
-        tempCalendarDate.value = new Date();
+        const d = new Date();
+        d.setMinutes(d.getMinutes() >= 30 ? 30 : 0);
+        d.setSeconds(0);
+        tempCalendarDate.value = d;
+        selectedHour24.value = d.getHours();
+        selectedMinuteVal.value = d.getMinutes();
     }
 };
+
+watch(tempCalendarDate, (newVal) => {
+    if (newVal && calendarStep.value === 'date') {
+        calendarStep.value = 'time';
+        clockMode.value = 'hour';
+    }
+});
 
 const getActiveCalendarTaskTitle = () => {
     if (!activeCalendarTaskId.value) return '';
@@ -734,12 +761,12 @@ const getActiveCalendarTaskTitle = () => {
 };
 
 const saveFullscreenCalendarDate = () => {
-    if (activeCalendarTaskId.value) {
-        if (tempCalendarDate.value) {
-            taskStore.updateTask(activeCalendarTaskId.value, { scheduledAt: tempCalendarDate.value.toISOString() });
-        } else {
-            taskStore.updateTask(activeCalendarTaskId.value, { scheduledAt: undefined });
-        }
+    if (activeCalendarTaskId.value && tempCalendarDate.value) {
+        const targetDate = new Date(tempCalendarDate.value);
+        targetDate.setHours(selectedHour24.value);
+        targetDate.setMinutes(selectedMinuteVal.value);
+        targetDate.setSeconds(0);
+        taskStore.updateTask(activeCalendarTaskId.value, { scheduledAt: targetDate.toISOString() });
     }
     activeCalendarTaskId.value = null;
 };
@@ -750,6 +777,135 @@ const clearFullscreenCalendarDate = () => {
     }
     activeCalendarTaskId.value = null;
 };
+
+const getClockHandStyle = () => {
+    let angle = 0;
+    let length = 66;
+    if (clockMode.value === 'hour') {
+        const h = selectedHour24.value;
+        const isInner = h >= 1 && h <= 12;
+        length = isInner ? 42 : 66;
+        angle = (h % 12) * 30;
+    } else {
+        angle = selectedMinuteVal.value * 6;
+    }
+    return {
+        transform: `rotate(${angle}deg)`,
+        height: `${length}px`,
+        transition: isDragging.value ? 'none' : 'transform 0.2s cubic-bezier(0.25, 1, 0.5, 1), height 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
+    };
+};
+
+const getClockNumberStyle = (idx: number, isInner: boolean) => {
+    const angle = (idx * 30 - 90) * (Math.PI / 180);
+    const radius = isInner ? 42 : 66;
+    const x = Math.round(Math.cos(angle) * radius);
+    const y = Math.round(Math.sin(angle) * radius);
+    return {
+        transform: `translate(${x}px, ${y}px)`
+    };
+};
+
+const handleNumberSelect = (val: number) => {
+    if (clockMode.value === 'hour') {
+        selectedHour24.value = val;
+        clockMode.value = 'minute';
+    } else {
+        selectedMinuteVal.value = val;
+    }
+};
+
+const adjustTime = (amount: number) => {
+    if (clockMode.value === 'hour') {
+        let h = selectedHour24.value + amount;
+        if (h > 23) h = 0;
+        if (h < 0) h = 23;
+        selectedHour24.value = h;
+    } else {
+        let m = selectedMinuteVal.value + amount;
+        if (m >= 60) {
+            selectedMinuteVal.value = 0;
+            adjustTime(1);
+        } else if (m < 0) {
+            selectedMinuteVal.value = 59;
+            adjustTime(-1);
+        } else {
+            selectedMinuteVal.value = m;
+        }
+    }
+};
+
+// クロック盤ドラッグ操作ハンドラ
+const handleClockStart = (e: MouseEvent | TouchEvent) => {
+    isDragging.value = true;
+    handleClockMove(e);
+    window.addEventListener('mousemove', handleClockMove);
+    window.addEventListener('mouseup', handleClockEnd);
+    window.addEventListener('touchmove', handleClockMove, { passive: false });
+    window.addEventListener('touchend', handleClockEnd);
+};
+
+const handleClockMove = (e: MouseEvent | TouchEvent) => {
+    if (!isDragging.value) return;
+    const dial = document.querySelector('.clock-dial');
+    if (!dial) return;
+    
+    const rect = dial.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    
+    const dx = clientX - cx;
+    const dy = clientY - cy;
+    
+    let angle = Math.atan2(dy, dx) * (180 / Math.PI);
+    angle = angle + 90;
+    if (angle < 0) angle += 360;
+    
+    if (clockMode.value === 'hour') {
+        const d = Math.sqrt(dx * dx + dy * dy);
+        const isInner = d < 54;
+        let hIdx = Math.round(angle / 30);
+        if (hIdx === 12) hIdx = 0;
+        
+        if (isInner) {
+            selectedHour24.value = hIdx === 0 ? 12 : hIdx;
+        } else {
+            selectedHour24.value = hIdx === 0 ? 0 : hIdx + 12;
+        }
+    } else {
+        let m = Math.round(angle / 6);
+        if (m === 60) m = 0;
+        if (m > 59) m = 59;
+        selectedMinuteVal.value = m;
+    }
+    
+    if (e.cancelable) {
+        e.preventDefault();
+    }
+};
+
+const handleClockEnd = () => {
+    if (!isDragging.value) return;
+    isDragging.value = false;
+    window.removeEventListener('mousemove', handleClockMove);
+    window.removeEventListener('mouseup', handleClockEnd);
+    window.removeEventListener('touchmove', handleClockMove);
+    window.removeEventListener('touchend', handleClockEnd);
+    
+    if (clockMode.value === 'hour') {
+        clockMode.value = 'minute';
+    }
+};
+
+onUnmounted(() => {
+    window.removeEventListener('mousemove', handleClockMove);
+    window.removeEventListener('mouseup', handleClockEnd);
+    window.removeEventListener('touchmove', handleClockMove);
+    window.removeEventListener('touchend', handleClockEnd);
+});
 
 // --- タスク編集（ウィジェット全面パネル）---
 const editingFullTaskId = ref<string | null>(null);
@@ -1361,15 +1517,89 @@ const saveTaskEditor = () => {
                     <span class="label">タスク: </span>
                     <span class="task-name">{{ getActiveCalendarTaskTitle() }}</span>
                 </div>
-                <div class="datepicker-container">
+                
+                <!-- STEP 1: 日付選択 -->
+                <div v-if="calendarStep === 'date'" class="datepicker-container">
                     <DatePicker 
                         v-model="tempCalendarDate"
-                        showTime 
-                        hourFormat="24"
-                        :stepMinute="30"
                         inline
                         style="width: 100%; border: none;"
                     />
+                </div>
+                
+                <!-- STEP 2: 時刻選択 (クロックウィジェット) -->
+                <div v-else class="clockpicker-container">
+                    <div class="clockpicker-header">
+                        <button class="back-to-date-btn" @click="calendarStep = 'date'" title="日付選択に戻る" type="button">
+                            <i class="pi pi-angle-left"></i> 日付
+                        </button>
+                        <div class="digital-time-display">
+                            <span 
+                                class="time-part" 
+                                :class="{ active: clockMode === 'hour' }" 
+                                @click="clockMode = 'hour'"
+                            >
+                                {{ String(selectedHour24).padStart(2, '0') }}
+                            </span>
+                            <span class="colon">:</span>
+                            <span 
+                                class="time-part" 
+                                :class="{ active: clockMode === 'minute' }" 
+                                @click="clockMode = 'minute'"
+                            >
+                                {{ String(selectedMinuteVal).padStart(2, '0') }}
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <div class="clock-face-wrapper">
+                        <div 
+                            class="clock-dial"
+                            @mousedown="handleClockStart"
+                            @touchstart.prevent="handleClockStart"
+                        >
+                            <div class="clock-center-dot"></div>
+                            <div class="clock-hand-line" :style="getClockHandStyle()">
+                                <div class="clock-hand-pointer"></div>
+                            </div>
+                            
+                            <div v-if="clockMode === 'hour'">
+                                <button 
+                                    v-for="(h, idx) in innerHourNumbers" 
+                                    :key="'h-in-' + h"
+                                    class="clock-num-btn inner"
+                                    :class="{ active: selectedHour24 === h }"
+                                    :style="getClockNumberStyle(idx, true)"
+                                    type="button"
+                                >
+                                    {{ h }}
+                                </button>
+                                <button 
+                                    v-for="(h, idx) in outerHourNumbers" 
+                                    :key="'h-out-' + h"
+                                    class="clock-num-btn outer"
+                                    :class="{ active: selectedHour24 === h }"
+                                    :style="getClockNumberStyle(idx, false)"
+                                    type="button"
+                                >
+                                    {{ h }}
+                                </button>
+                            </div>
+                            <div v-else>
+                                <button 
+                                    v-for="(m, idx) in minuteNumbers" 
+                                    :key="'m-' + m"
+                                    class="clock-num-btn"
+                                    :class="{ active: selectedMinuteVal === m }"
+                                    :style="getClockNumberStyle(idx)"
+                                    @click="handleNumberSelect(m)"
+                                    type="button"
+                                >
+                                    {{ String(m).padStart(2, '0') }}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="calendar-panel-footer">
@@ -1540,6 +1770,267 @@ const saveTaskEditor = () => {
     gap: 4px;
     overflow-x: auto;
     scrollbar-width: none; /* Firefox */
+}
+
+/* クロックピッカーUI */
+.clockpicker-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    flex-shrink: 0;
+}
+
+.clockpicker-header {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    position: relative;
+    padding: 0 4px;
+}
+
+.back-to-date-btn {
+    align-self: center;
+    background: transparent;
+    border: none;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px;
+    border-radius: 4px;
+}
+
+.back-to-date-btn:hover {
+    color: #3b82f6;
+    background: rgba(59, 130, 246, 0.05);
+}
+
+.digital-time-display {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f1f5f9;
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 16px;
+    font-weight: 700;
+    color: #334155;
+    gap: 4px;
+}
+
+.digital-time-display .time-part {
+    cursor: pointer;
+    padding: 0 4px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.digital-time-display .time-part.active {
+    color: #3b82f6;
+    background: #eff6ff;
+}
+
+.digital-time-display .colon {
+    color: #94a3b8;
+    animation: blink-colon 1.5s infinite;
+}
+
+@keyframes blink-colon {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+.ampm-toggle {
+    display: flex;
+    background: #e2e8f0;
+    border-radius: 6px;
+    padding: 2px;
+}
+
+.ampm-btn {
+    border: none;
+    background: transparent;
+    font-size: 11px;
+    font-weight: 700;
+    color: #64748b;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.ampm-btn.active {
+    background: #ffffff;
+    color: #3b82f6;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+/* クロック文字盤 */
+.clock-face-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.clock-mode-label {
+    font-size: 10px;
+    color: #94a3b8;
+    font-weight: 600;
+}
+
+.clock-dial {
+    position: relative;
+    width: 170px;
+    height: 170px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
+    cursor: pointer;
+    user-select: none;
+}
+
+.clock-center-dot {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    background: #3b82f6;
+    border-radius: 50%;
+    z-index: 10;
+}
+
+.clock-hand-line {
+    position: absolute;
+    bottom: 50%;
+    left: calc(50% - 1px);
+    width: 2px;
+    height: 64px;
+    background: #3b82f6;
+    transform-origin: bottom center;
+    z-index: 5;
+}
+
+.clock-hand-pointer {
+    position: absolute;
+    top: -12px;
+    left: -11px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(59, 130, 246, 0.18);
+    border: 1px solid #3b82f6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.clock-hand-pointer::after {
+    content: '';
+    width: 6px;
+    height: 6px;
+    background: #3b82f6;
+    border-radius: 50%;
+}
+
+.clock-num-btn {
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 8;
+    transition: all 0.2s ease;
+    top: calc(50% - 12px);
+    left: calc(50% - 12px);
+    pointer-events: none; /* ドラッグ操作を妨げないようにする */
+}
+
+.clock-num-btn.inner {
+    font-size: 8px;
+    color: #64748b;
+}
+
+.clock-num-btn.outer {
+    font-size: 10px;
+    color: #334155;
+}
+
+.clock-num-btn:hover {
+    background: rgba(59, 130, 246, 0.08);
+    color: #3b82f6;
+}
+
+.clock-num-btn.active {
+    background: #3b82f6;
+    color: #ffffff !important;
+}
+
+/* カレンダーのコンパクト化（DatePicker） */
+.datepicker-container :deep(.p-datepicker) {
+    font-size: 11px !important;
+    padding: 2px !important;
+}
+
+.datepicker-container :deep(.p-datepicker-header) {
+    padding: 2px 4px !important;
+    font-size: 11px !important;
+}
+
+.datepicker-container :deep(.p-datepicker-title) {
+    line-height: 1.4 !important;
+}
+
+.datepicker-container :deep(.p-datepicker-prev-icon),
+.datepicker-container :deep(.p-datepicker-next-icon) {
+    width: 10px !important;
+    height: 10px !important;
+}
+
+.datepicker-container :deep(.p-datepicker-calendar th) {
+    padding: 2px !important;
+    font-size: 9px !important;
+}
+
+.datepicker-container :deep(.p-datepicker-calendar td) {
+    padding: 1px !important;
+}
+
+.datepicker-container :deep(.p-datepicker-calendar td > span) {
+    width: 20px !important;
+    height: 20px !important;
+    line-height: 20px !important;
+    font-size: 10px !important;
+}
+
+.time-adjust-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.time-adjust-row .adjust-label {
+    font-size: 10px;
+    color: #64748b;
+    font-weight: 600;
 }
 
 .category-tabs::-webkit-scrollbar {
@@ -2563,10 +3054,10 @@ const saveTaskEditor = () => {
 .calendar-panel-content {
     flex: 1;
     overflow-y: auto;
-    padding: 12px 16px;
+    padding: 8px 12px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 6px;
 }
 
 .task-title-summary {
@@ -2576,9 +3067,9 @@ const saveTaskEditor = () => {
     border-radius: 4px;
     font-size: 12px;
     line-height: 1.4;
-    max-height: 60px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    flex-shrink: 0;
+    word-break: break-all;
+    white-space: pre-wrap;
 }
 
 .task-title-summary .label {
@@ -2593,7 +3084,6 @@ const saveTaskEditor = () => {
 }
 
 .datepicker-container {
-    flex: 1;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -2601,6 +3091,7 @@ const saveTaskEditor = () => {
     border-radius: 8px;
     overflow: hidden;
     background: #ffffff;
+    flex-shrink: 0;
 }
 
 /* 全面時もコンパクトに収まるようにスタイリング */
