@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, nextTick } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useDraggable } from 'vue-draggable-plus';
 import { useTaskStore, Task, SubTask } from '../store/task';
 import { useConfigStore } from '../store/config';
@@ -201,8 +201,8 @@ let localDragStartX = 0;
 let localDragStartY = 0;
 
 // ウィジェットのサイズ (統合・分離リサイズ用)
-const width = ref(360);
-const height = ref(550);
+const width = ref(340);
+const height = ref(480);
 let isResizing = false;
 let resizeDirection = '';
 let startWidth = 0;
@@ -378,12 +378,25 @@ const widgetStyle = computed(() => {
 // 初期データロード
 onMounted(() => {
     taskStore.loadFromLocalStorage();
-    
+
     // ウィジェット位置の復元
     const savedX = localStorage.getItem('task_widget_pos_x');
     const savedY = localStorage.getItem('task_widget_pos_y');
     if (savedX !== null) posX.value = parseInt(savedX, 10);
     if (savedY !== null) posY.value = parseInt(savedY, 10);
+
+    // 現在時刻を30秒ごとに更新（タイムラインの期限切れ表示を追従させる）
+    nowTimer = setInterval(() => { nowTs.value = Date.now(); }, 30000);
+});
+
+onUnmounted(() => {
+    if (nowTimer) {
+        clearInterval(nowTimer);
+        nowTimer = null;
+    }
+    // 猶予タイマーの後始末
+    Object.keys(pendingTimers).forEach(id => clearPendingTimers(id));
+    Object.keys(pendingIntervals).forEach(id => clearPendingTimers(id));
 });
 
 // インプレース編集メソッド
@@ -476,7 +489,8 @@ const closeSettingsPanel = () => {
 // ビュー切り替えオプション
 const viewOptions = [
     { label: 'TODO', value: 'todo' },
-    { label: 'TIMELINE', value: 'timeline' }
+    { label: 'TIMELINE', value: 'timeline' },
+    { label: 'COMP', value: 'completed' }
 ];
 
 // タスク追加
@@ -544,6 +558,17 @@ const onContainerDrop = (event: DragEvent) => {
     }
 };
 
+// 現在時刻（一定間隔で更新し、期限切れ判定をリアクティブに保つ）
+const nowTs = ref(Date.now());
+let nowTimer: any = null;
+const showDeleteMode = ref(false);
+
+// タスクが予定時刻を過ぎている（かつ未完了）か
+const isOverdue = (task: Task) => {
+    if (!task.scheduledAt || task.completed || task.status === 'done') return false;
+    return new Date(task.scheduledAt).getTime() < nowTs.value;
+};
+
 // カテゴリ名の取得（タイムライン表示用）
 const getCategoryName = (catId: string) => {
     const cat = taskStore.categories.find(c => c.id === catId);
@@ -571,15 +596,17 @@ const getScheduledDisplay = (scheduledAtIso: string) => {
 
     // 過去の予定の場合のフォールバック
     if (diffMs < 0) {
-        const isSameYear = now.getFullYear() === scheduled.getFullYear();
-        const isSameMonth = isSameYear && now.getMonth() === scheduled.getMonth();
-        if (isSameMonth) {
-            return `${scheduled.getDate()}日`;
-        } else if (isSameYear) {
-            return `${scheduled.getMonth() + 1}/${scheduled.getDate()}`;
+        const absDiffMs = Math.abs(diffMs);
+        const absDiffMin = Math.floor(absDiffMs / 60000);
+        const absDiffHour = Math.floor(absDiffMs / 3600000);
+        const absDiffDay = Math.floor(absDiffMs / 86400000);
+
+        if (absDiffMin < 60) {
+            return `${absDiffMin}分超過`;
+        } else if (absDiffHour < 24) {
+            return `${absDiffHour}時間超過`;
         } else {
-            const yy = String(scheduled.getFullYear()).slice(-2);
-            return `${yy}/${scheduled.getMonth() + 1}/${scheduled.getDate()}`;
+            return `${absDiffDay}日超過`;
         }
     }
 
@@ -628,14 +655,63 @@ const formatScheduledDate = (isoString?: string) => {
     }
 };
 
+// --- DONE猶予（TODOでDONEにしてから実際に完了(COMPへ移動)するまでの遅延）---
+const pendingComplete = ref<Record<string, number>>({}); // taskId -> 残り秒数
+const pendingTimers: Record<string, any> = {};
+const pendingIntervals: Record<string, any> = {};
+
+const isPendingComplete = (task: Task) => pendingComplete.value[task.id] !== undefined;
+
+const clearPendingTimers = (taskId: string) => {
+    if (pendingTimers[taskId]) { clearTimeout(pendingTimers[taskId]); delete pendingTimers[taskId]; }
+    if (pendingIntervals[taskId]) { clearInterval(pendingIntervals[taskId]); delete pendingIntervals[taskId]; }
+    if (pendingComplete.value[taskId] !== undefined) {
+        const m = { ...pendingComplete.value };
+        delete m[taskId];
+        pendingComplete.value = m;
+    }
+};
+
+const startPendingComplete = (task: Task) => {
+    const graceSec = taskStore.completionGraceSeconds ?? 5;
+    // 猶予0秒なら即完了
+    if (!graceSec || graceSec <= 0) {
+        taskStore.completeTask(task.id);
+        return;
+    }
+    clearPendingTimers(task.id);
+    pendingComplete.value = { ...pendingComplete.value, [task.id]: graceSec };
+    pendingIntervals[task.id] = setInterval(() => {
+        const remaining = (pendingComplete.value[task.id] ?? 1) - 1;
+        if (remaining > 0) {
+            pendingComplete.value = { ...pendingComplete.value, [task.id]: remaining };
+        }
+    }, 1000);
+    pendingTimers[task.id] = setTimeout(() => {
+        clearPendingTimers(task.id);
+        taskStore.completeTask(task.id);
+    }, graceSec * 1000);
+};
+
+// 猶予中のクリックで取り消し、TODO状態へ戻す
+const cancelPendingComplete = (task: Task) => {
+    clearPendingTimers(task.id);
+    taskStore.resetTask(task.id);
+};
+
 const cycleTaskStatus = (task: Task) => {
-    console.log('cycleTaskStatus clicked. task:', { id: task.id, title: task.title, completed: task.completed, status: task.status });
+    // 猶予カウントダウン中のクリックは取り消し（TODOへ戻す）
+    if (isPendingComplete(task)) {
+        cancelPendingComplete(task);
+        return;
+    }
     if (task.completed || task.status === 'done') {
         taskStore.resetTask(task.id);
     } else if (task.status === 'todo' || !task.status) {
         taskStore.startTask(task.id);
     } else if (task.status === 'doing' || task.status === 'paused') {
-        taskStore.completeTask(task.id);
+        // 即完了せず、猶予期間を挟んでから完了させる
+        startPendingComplete(task);
     }
 };
 
@@ -667,6 +743,52 @@ const saveFullscreenCalendarDate = () => {
     }
     activeCalendarTaskId.value = null;
 };
+
+const clearFullscreenCalendarDate = () => {
+    if (activeCalendarTaskId.value) {
+        taskStore.updateTask(activeCalendarTaskId.value, { scheduledAt: undefined });
+    }
+    activeCalendarTaskId.value = null;
+};
+
+// --- タスク編集（ウィジェット全面パネル）---
+const editingFullTaskId = ref<string | null>(null);
+const editForm = ref<{
+    title: string;
+    memo: string;
+    categoryId: string;
+    startedAt: Date | null;
+    endedAt: Date | null;
+}>({ title: '', memo: '', categoryId: '', startedAt: null, endedAt: null });
+
+const openTaskEditor = (task: Task) => {
+    editingFullTaskId.value = task.id;
+    editForm.value = {
+        title: task.title || '',
+        memo: task.memo || '',
+        categoryId: task.categoryId || (taskStore.categories[0]?.id ?? ''),
+        startedAt: task.startedAt ? new Date(task.startedAt) : null,
+        endedAt: task.endedAt ? new Date(task.endedAt) : null
+    };
+};
+
+const closeTaskEditor = () => {
+    editingFullTaskId.value = null;
+};
+
+const saveTaskEditor = () => {
+    if (!editingFullTaskId.value) return;
+    const title = editForm.value.title.trim();
+    if (!title) return; // タイトルは必須
+    taskStore.updateTask(editingFullTaskId.value, {
+        title,
+        memo: editForm.value.memo,
+        categoryId: editForm.value.categoryId,
+        startedAt: editForm.value.startedAt ? editForm.value.startedAt.toISOString() : undefined,
+        endedAt: editForm.value.endedAt ? editForm.value.endedAt.toISOString() : undefined
+    });
+    editingFullTaskId.value = null;
+};
 </script>
 
 <template>
@@ -694,6 +816,13 @@ const saveFullscreenCalendarDate = () => {
         <div class="tab-navigation-bar" v-if="taskStore.currentView === 'todo' && !showCategorySettings">
             <div class="category-tabs">
                 <button
+                    class="tab-btn"
+                    :class="{ active: taskStore.activeCategoryId === 'all' }"
+                    @click="taskStore.activeCategoryId = 'all'"
+                >
+                    ALL
+                </button>
+                <button
                     v-for="cat in taskStore.categories"
                     :key="cat.id"
                     class="tab-btn"
@@ -703,12 +832,21 @@ const saveFullscreenCalendarDate = () => {
                     {{ cat.name }}
                 </button>
             </div>
-            <Button
-                icon="pi pi-cog"
-                class="p-button-text p-button-secondary tab-settings-btn"
-                @click="showCategorySettings = true"
-                title="カテゴリ管理を開く"
-            />
+            <div class="tab-actions" style="display: flex; align-items: center; gap: 4px;">
+                <Button
+                    icon="pi pi-trash"
+                    class="p-button-text tab-trash-btn"
+                    :class="{ 'delete-mode-active': showDeleteMode }"
+                    @click="showDeleteMode = !showDeleteMode"
+                    :title="showDeleteMode ? '削除モードをオフにする' : '削除モードをオンにする'"
+                />
+                <Button
+                    icon="pi pi-cog"
+                    class="p-button-text p-button-secondary tab-settings-btn"
+                    @click="showCategorySettings = true"
+                    title="カテゴリ管理を開く"
+                />
+            </div>
         </div>
 
         <!-- 3. メインスクロールエリア -->
@@ -720,7 +858,7 @@ const saveFullscreenCalendarDate = () => {
                     v-for="task in localTasks" 
                     :key="task.id"
                     class="task-card"
-                    :class="{ 'status-doing': task.status === 'doing', 'status-done': task.completed, 'drop-target-active': activeDropTargetTaskId === task.id && isNesting }"
+                    :class="{ 'status-doing': task.status === 'doing', 'status-done': task.completed, 'drop-target-active': activeDropTargetTaskId === task.id && isNesting, 'overdue': isOverdue(task) }"
                     @dragover.prevent="onParentDragOver($event, task.id)"
                     @drop="onParentDrop($event, task.id)"
                 >
@@ -738,11 +876,12 @@ const saveFullscreenCalendarDate = () => {
 
                         <!-- 状態サイクルボタン -->
                         <button class="status-badge"
-                                :class="task.completed || task.status === 'done' ? 'done' : (task.status === 'doing' ? 'doing' : (task.status === 'paused' ? 'doing' : 'todo'))"
+                                :class="isPendingComplete(task) ? 'pending-done' : (task.completed || task.status === 'done' ? 'done' : (task.status === 'doing' ? 'doing' : (task.status === 'paused' ? 'doing' : 'todo')))"
                                 @click.stop="cycleTaskStatus(task)"
-                                :title="'ステータスをサイクル: ' + (task.status || 'todo')"
-                                style="border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; height: 18px; line-height: 18px; padding: 0 6px;">
-                            <span v-if="task.completed || task.status === 'done'">DONE</span>
+                                :title="isPendingComplete(task) ? 'クリックでTODOに戻す' : ('ステータスをサイクル: ' + (task.status || 'todo'))"
+                                style="border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; height: 16px; line-height: 16px; padding: 0 5px;">
+                            <span v-if="isPendingComplete(task)">取消 {{ pendingComplete[task.id] }}</span>
+                            <span v-else-if="task.completed || task.status === 'done'">DONE</span>
                             <span v-else-if="task.status === 'doing'">DOING</span>
                             <span v-else-if="task.status === 'paused'">PAUSED</span>
                             <span v-else>TODO</span>
@@ -801,19 +940,11 @@ const saveFullscreenCalendarDate = () => {
                                 :title="task.scheduledAt ? '予定日時を変更' : '予定日時を設定'"
                                 style="width: auto; padding: 0 4px;"
                             >
-                                <span v-if="task.scheduledAt" style="font-size: 11px; font-weight: 600; color: #3b82f6; white-space: nowrap;">
+                                <span v-if="task.scheduledAt" :style="{ fontSize: '11px', fontWeight: '600', color: isOverdue(task) ? '#dc2626' : '#3b82f6', whiteSpace: 'nowrap' }">
                                     {{ getScheduledDisplay(task.scheduledAt) }}
                                 </span>
                                 <i v-else class="pi pi-calendar"></i>
                             </button>
-                            <Button 
-                                v-if="task.scheduledAt"
-                                icon="pi pi-times" 
-                                class="p-button-text p-button-danger p-button-xs date-clear-btn" 
-                                @click.stop="taskStore.updateTask(task.id, { scheduledAt: undefined })" 
-                                title="予定をクリア" 
-                                style="width: 14px; height: 14px; padding: 0; font-size: 8px;"
-                            />
                         </div>
 
                         <!-- サブタスク完了カウント -->
@@ -824,9 +955,18 @@ const saveFullscreenCalendarDate = () => {
                             {{ task.steps.filter(s => s.completed).length }}/{{ task.steps.length }}
                         </div>
 
-                        <!-- 削除ボタン -->
-                        <Button 
-                            icon="pi pi-trash" 
+                        <!-- 編集ボタン -->
+                        <Button
+                            icon="pi pi-pencil"
+                            class="p-button-text p-button-secondary p-button-sm task-edit-btn"
+                            @click.stop="openTaskEditor(task)"
+                            title="タスクを編集"
+                        />
+
+                        <!-- 削除ボタン (削除モード時のみ) -->
+                        <Button
+                            v-if="showDeleteMode"
+                            icon="pi pi-trash"
                             class="p-button-text p-button-danger p-button-sm task-delete-btn"
                             @click.stop="taskStore.deleteTask(task.id)"
                             title="タスクを削除"
@@ -892,6 +1032,7 @@ const saveFullscreenCalendarDate = () => {
                                 </div>
 
                                 <Button 
+                                    v-if="showDeleteMode"
                                     icon="pi pi-times" 
                                     class="p-button-text p-button-secondary p-button-sm step-delete-btn"
                                     @click="taskStore.deleteSubTask(task.id, step.id)"
@@ -923,30 +1064,117 @@ const saveFullscreenCalendarDate = () => {
                 </div>
             </div>
 
-            <!-- (B) TIMELINEビュー (時系列フラットリスト) -->
+            <!-- (B) TIMELINEビュー (予定時刻軸・下詰め: 下ほど現在に近い/期限切れ) -->
             <div class="timeline-view" v-show="taskStore.currentView === 'timeline'">
-                <div 
-                    v-for="task in taskStore.timelineTasks" 
+                <div
+                    v-for="task in taskStore.timelineTasks"
                     :key="task.id"
                     class="timeline-item"
                 >
                     <div class="timeline-marker">
-                        <i :class="task.completed ? 'pi pi-check-circle checked' : 'pi pi-circle-off unchecked'"></i>
+                        <i :class="task.completed ? 'pi pi-check-circle checked' : (isOverdue(task) ? 'pi pi-exclamation-circle overdue-icon' : 'pi pi-circle-off unchecked')"></i>
                         <div class="timeline-line"></div>
                     </div>
-                    <div class="timeline-content-card">
-                        <div class="timeline-meta">
-                            <span class="timeline-time">{{ formatTime(task.createdAt) }}</span>
+
+                    <!-- 〇とタスクの間に予定(limit)時間を表示 -->
+                    <div class="timeline-limit" :class="{ overdue: isOverdue(task) }">
+                        <span v-if="task.scheduledAt">{{ getScheduledDisplay(task.scheduledAt) }}</span>
+                        <span v-else class="unscheduled">—</span>
+                    </div>
+
+                    <div class="timeline-content-card" :class="{ completed: task.completed, overdue: isOverdue(task) }">
+                        <div class="timeline-row-main">
+                            <!-- ステータス変更コントロール (TODOビューと同様のサイクルボタン) -->
+                            <button
+                                class="status-badge"
+                                :class="isPendingComplete(task) ? 'pending-done' : (task.completed || task.status === 'done' ? 'done' : (task.status === 'doing' ? 'doing' : (task.status === 'paused' ? 'doing' : 'todo')))"
+                                @click.stop="cycleTaskStatus(task)"
+                                :title="isPendingComplete(task) ? 'クリックでTODOに戻す' : ('ステータスをサイクル: ' + (task.status || 'todo'))"
+                                style="border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; height: 16px; line-height: 16px; padding: 0 5px; flex-shrink: 0;"
+                            >
+                                <span v-if="isPendingComplete(task)">取消 {{ pendingComplete[task.id] }}</span>
+                                <span v-else-if="task.completed || task.status === 'done'">DONE</span>
+                                <span v-else-if="task.status === 'doing'">DOING</span>
+                                <span v-else-if="task.status === 'paused'">PAUSED</span>
+                                <span v-else>TODO</span>
+                            </button>
+                            <h4 class="timeline-task-title" :class="{ completed: task.completed }">
+                                {{ task.title }}
+                            </h4>
                             <span class="timeline-cat-badge">{{ getCategoryName(task.categoryId) }}</span>
+                            <Button
+                                icon="pi pi-pencil"
+                                class="p-button-text p-button-secondary p-button-sm task-edit-btn"
+                                @click.stop="openTaskEditor(task)"
+                                title="タスクを編集"
+                            />
+                            <Button
+                                v-if="showDeleteMode"
+                                icon="pi pi-trash"
+                                class="p-button-text p-button-danger p-button-sm task-delete-btn"
+                                @click.stop="taskStore.deleteTask(task.id)"
+                                title="タスクを削除"
+                            />
                         </div>
-                        <h4 class="timeline-task-title" :class="{ completed: task.completed }">
-                            {{ task.title }}
-                        </h4>
                     </div>
                 </div>
 
                 <div v-if="taskStore.tasks.length === 0" class="empty-state">
                     タスクがありません。
+                </div>
+            </div>
+
+            <!-- (B') COMPビュー (完了済みタスクを完了日ごとにブロック表示・全カテゴリ横断) -->
+            <div class="completed-view" v-show="taskStore.currentView === 'completed'">
+                <div
+                    v-for="group in taskStore.completedTasksByDate"
+                    :key="group.key"
+                    class="completed-date-block"
+                >
+                    <div class="completed-date-header">
+                        <span class="completed-date-label">{{ group.label }}</span>
+                        <span class="completed-date-count">{{ group.tasks.length }}</span>
+                    </div>
+                    <div class="completed-date-items">
+                        <div
+                            v-for="task in group.tasks"
+                            :key="task.id"
+                            class="completed-item"
+                        >
+                            <!-- ステータス変更コントロール (クリックで未完了に戻す) -->
+                            <button
+                                class="status-badge done"
+                                @click.stop="cycleTaskStatus(task)"
+                                title="クリックで未完了に戻す"
+                                style="border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; height: 16px; line-height: 16px; padding: 0 5px; flex-shrink: 0;"
+                            >
+                                DONE
+                            </button>
+                            <div class="completed-main">
+                                <span class="completed-title">{{ task.title }}</span>
+                                <div class="completed-meta">
+                                    <span class="timeline-cat-badge">{{ getCategoryName(task.categoryId) }}</span>
+                                    <span v-if="task.endedAt" class="completed-date">{{ formatTime(task.endedAt) }}</span>
+                                </div>
+                            </div>
+                            <Button
+                                icon="pi pi-pencil"
+                                class="p-button-text p-button-secondary p-button-sm task-edit-btn"
+                                @click.stop="openTaskEditor(task)"
+                                title="タスクを編集"
+                            />
+                            <Button
+                                icon="pi pi-trash"
+                                class="p-button-text p-button-danger p-button-sm task-delete-btn"
+                                @click.stop="taskStore.deleteTask(task.id)"
+                                title="タスクを削除"
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="taskStore.completedTasks.length === 0" class="empty-state">
+                    完了したタスクはまだありません。
                 </div>
             </div>
             </div>
@@ -1057,14 +1285,33 @@ const saveFullscreenCalendarDate = () => {
                                 <span class="label-text">音声でお知らせする</span>
                             </label>
                             <div class="minutes-input-row" v-if="taskStore.enableNotification">
-                                <InputText 
-                                    v-model.number="taskStore.notificationMinutes" 
-                                    type="number" 
+                                <InputText
+                                    v-model.number="taskStore.notificationMinutes"
+                                    type="number"
                                     min="0"
                                     max="60"
                                     class="p-inputtext-sm minutes-input"
                                 />
                                 <span class="minutes-text">分前にお知らせ</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="divider"></div>
+
+                    <!-- DONE猶予設定 -->
+                    <div class="settings-section">
+                        <span class="section-title">完了(DONE)の猶予</span>
+                        <div class="notification-control">
+                            <div class="minutes-input-row" style="padding-left: 0;">
+                                <InputText
+                                    v-model.number="taskStore.completionGraceSeconds"
+                                    type="number"
+                                    min="0"
+                                    max="120"
+                                    class="p-inputtext-sm minutes-input"
+                                />
+                                <span class="minutes-text">秒後にCOMPへ移動 (0で即時)</span>
                             </div>
                         </div>
                     </div>
@@ -1127,6 +1374,11 @@ const saveFullscreenCalendarDate = () => {
             </div>
             <div class="calendar-panel-footer">
                 <Button 
+                    label="クリア" 
+                    class="p-button-outlined p-button-danger p-button-sm mr-auto" 
+                    @click="clearFullscreenCalendarDate" 
+                />
+                <Button 
                     label="キャンセル" 
                     class="p-button-outlined p-button-secondary p-button-sm" 
                     @click="activeCalendarTaskId = null" 
@@ -1135,6 +1387,71 @@ const saveFullscreenCalendarDate = () => {
                     label="決定" 
                     class="p-button-primary p-button-sm" 
                     @click="saveFullscreenCalendarDate" 
+                />
+            </div>
+        </div>
+
+        <!-- タスク編集パネル (ウィジェット全面) -->
+        <div v-if="editingFullTaskId" class="fullscreen-edit-panel">
+            <div class="calendar-panel-header">
+                <span class="panel-title">タスクの編集</span>
+                <Button
+                    icon="pi pi-times"
+                    class="p-button-text p-button-secondary close-btn"
+                    @click="closeTaskEditor"
+                />
+            </div>
+            <div class="edit-panel-content">
+                <label class="edit-field">
+                    <span class="edit-label">タイトル</span>
+                    <InputText v-model="editForm.title" class="p-inputtext-sm" placeholder="タイトル" />
+                </label>
+                <label class="edit-field">
+                    <span class="edit-label">メモ</span>
+                    <textarea v-model="editForm.memo" class="edit-textarea" rows="4" placeholder="メモ"></textarea>
+                </label>
+                <label class="edit-field">
+                    <span class="edit-label">カテゴリ</span>
+                    <select v-model="editForm.categoryId" class="edit-select">
+                        <option v-for="cat in taskStore.categories" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
+                    </select>
+                </label>
+                <div class="edit-field-row">
+                    <label class="edit-field">
+                        <span class="edit-label">開始</span>
+                        <DatePicker
+                            v-model="editForm.startedAt"
+                            showTime
+                            hourFormat="24"
+                            :stepMinute="5"
+                            showButtonBar
+                            placeholder="未設定"
+                        />
+                    </label>
+                    <label class="edit-field">
+                        <span class="edit-label">終了</span>
+                        <DatePicker
+                            v-model="editForm.endedAt"
+                            showTime
+                            hourFormat="24"
+                            :stepMinute="5"
+                            showButtonBar
+                            placeholder="未設定"
+                        />
+                    </label>
+                </div>
+            </div>
+            <div class="calendar-panel-footer">
+                <Button
+                    label="キャンセル"
+                    class="p-button-outlined p-button-secondary p-button-sm"
+                    @click="closeTaskEditor"
+                />
+                <Button
+                    label="保存"
+                    class="p-button-primary p-button-sm"
+                    :disabled="!editForm.title.trim()"
+                    @click="saveTaskEditor"
                 />
             </div>
         </div>
@@ -1164,7 +1481,7 @@ const saveFullscreenCalendarDate = () => {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 16px;
+    padding: 6px 12px;
     border-bottom: 1px solid #f1f5f9;
     cursor: grab;
     user-select: none;
@@ -1213,7 +1530,7 @@ const saveFullscreenCalendarDate = () => {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 12px;
+    padding: 3px 8px;
     background: #f8fafc;
     border-bottom: 1px solid #f1f5f9;
 }
@@ -1230,7 +1547,7 @@ const saveFullscreenCalendarDate = () => {
 }
 
 .tab-btn {
-    padding: 6px 12px;
+    padding: 4px 10px;
     font-size: 12px;
     font-weight: 600;
     color: #64748b;
@@ -1253,26 +1570,44 @@ const saveFullscreenCalendarDate = () => {
 }
 
 .tab-settings-btn {
-    width: 28px !important;
-    height: 28px !important;
+    width: 24px !important;
+    height: 24px !important;
     padding: 0 !important;
+}
+
+.tab-trash-btn {
+    width: 24px !important;
+    height: 24px !important;
+    padding: 0 !important;
+    color: #94a3b8 !important;
+    transition: all 0.2s ease;
+}
+
+.tab-trash-btn:hover {
+    color: #ef4444 !important;
+    background: rgba(239, 68, 68, 0.08) !important;
+}
+
+.tab-trash-btn.delete-mode-active {
+    color: #ef4444 !important;
+    background: rgba(239, 68, 68, 0.12) !important;
 }
 
 /* 3. メインスクロールエリア */
 .main-scroll-area {
     flex-grow: 1;
     overflow-y: auto;
-    padding: 12px;
+    padding: 8px;
     background: #f8fafc;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 5px;
 }
 
 .todo-view {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 5px;
 }
 
 /* タスクカード */
@@ -1287,14 +1622,14 @@ const saveFullscreenCalendarDate = () => {
 .parent-task-row {
     display: flex;
     align-items: center;
-    padding: 8px 12px;
-    gap: 8px;
+    padding: 4px 8px;
+    gap: 6px;
 }
 
 .drag-handle {
     cursor: grab;
     color: #94a3b8;
-    padding: 4px;
+    padding: 2px;
     display: flex;
     align-items: center;
 }
@@ -1372,9 +1707,103 @@ const saveFullscreenCalendarDate = () => {
 }
 
 .task-delete-btn {
-    width: 24px !important;
-    height: 24px !important;
+    width: 20px !important;
+    height: 20px !important;
     padding: 0 !important;
+}
+
+.task-edit-btn {
+    width: 20px !important;
+    height: 20px !important;
+    padding: 0 !important;
+}
+
+/* タスク編集パネル (ウィジェット全面) */
+.fullscreen-edit-panel {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #ffffff;
+    z-index: 150;
+    display: flex;
+    flex-direction: column;
+    animation: slideUp 0.2s ease-out;
+}
+
+.edit-panel-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.edit-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.edit-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+}
+
+.edit-textarea {
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    color: #334155;
+    background: #ffffff;
+    resize: vertical;
+    min-height: 60px;
+}
+
+.edit-textarea:focus {
+    border-color: #3b82f6;
+    outline: none;
+}
+
+.edit-select {
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    color: #334155;
+    background: #ffffff;
+}
+
+.edit-select:focus {
+    border-color: #3b82f6;
+    outline: none;
+}
+
+.edit-field-row {
+    display: flex;
+    gap: 12px;
+}
+
+.edit-field-row .edit-field {
+    flex: 1;
+    min-width: 0;
+}
+
+.edit-field-row :deep(.p-datepicker) {
+    width: 100%;
+}
+
+.edit-field-row :deep(.p-datepicker-input),
+.edit-field-row :deep(.p-inputtext) {
+    width: 100%;
+    font-size: 12px;
+    padding: 4px 8px;
 }
 
 /* サブタスクエリア */
@@ -1433,6 +1862,18 @@ const saveFullscreenCalendarDate = () => {
     color: #065f46;
 }
 
+/* DONE猶予中（クリックで取消） */
+.status-badge.pending-done {
+    background: #fef3c7;
+    color: #b45309;
+    animation: pendingPulse 1s ease-in-out infinite;
+}
+
+@keyframes pendingPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
 .subtask-title {
     flex-grow: 1;
     font-size: 12px;
@@ -1474,12 +1915,14 @@ const saveFullscreenCalendarDate = () => {
 .timeline-view {
     display: flex;
     flex-direction: column;
-    padding-left: 8px;
+    padding-left: 6px;
+    flex-grow: 1;
+    justify-content: flex-end; /* 下詰め: 現在時刻に近いものを下部へ集める */
 }
 
 .timeline-item {
     display: flex;
-    gap: 12px;
+    gap: 8px;
     position: relative;
 }
 
@@ -1489,38 +1932,71 @@ const saveFullscreenCalendarDate = () => {
     align-items: center;
 }
 
+.timeline-marker i {
+    font-size: 12px;
+}
+
 .timeline-line {
     width: 2px;
     background: #e2e8f0;
     flex-grow: 1;
-    min-height: 24px;
+    min-height: 12px;
 }
 
 .timeline-item:last-child .timeline-line {
     display: none;
 }
 
+/* 〇とタスクの間の予定(limit)時間 */
+.timeline-limit {
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    padding-top: 5px;
+    min-width: 52px;
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 600;
+    color: #3b82f6;
+    white-space: nowrap;
+}
+
+.timeline-limit .unscheduled {
+    color: #cbd5e1;
+    font-weight: 500;
+}
+
+.timeline-limit.overdue {
+    color: #dc2626;
+}
+
 .timeline-content-card {
     background: #ffffff;
     border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    padding: 8px 12px;
-    margin-bottom: 12px;
+    border-radius: 6px;
+    padding: 4px 8px;
+    margin-bottom: 5px;
     flex-grow: 1;
+    min-width: 0;
     box-shadow: 0 1px 2px rgba(0,0,0,0.01);
 }
 
-.timeline-meta {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 4px;
+/* 期限切れ（未完了で予定時刻超過）の警告表示 */
+.timeline-content-card.overdue {
+    background: #fef2f2;
+    border-color: #fecaca;
+    border-left: 3px solid #ef4444;
 }
 
-.timeline-time {
-    font-size: 10px;
-    color: #94a3b8;
-    font-weight: 500;
+.timeline-content-card.completed {
+    background: #f8fafc;
+}
+
+.timeline-row-main {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
 }
 
 .timeline-cat-badge {
@@ -1530,13 +2006,20 @@ const saveFullscreenCalendarDate = () => {
     background: #eff6ff;
     padding: 1px 4px;
     border-radius: 3px;
+    flex-shrink: 0;
 }
 
 .timeline-task-title {
+    flex-grow: 1;
+    min-width: 0;
     font-size: 12px;
     font-weight: 600;
     color: #334155;
     margin: 0;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .timeline-task-title.completed {
@@ -1544,28 +2027,79 @@ const saveFullscreenCalendarDate = () => {
     text-decoration: line-through;
 }
 
+.timeline-marker i.overdue-icon {
+    color: #ef4444;
+}
+
+/* COMPビュー (完了済み一覧) */
+.completed-view {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.completed-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 5px 8px;
+}
+
+.completed-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex-grow: 1;
+    min-width: 0;
+}
+
+.completed-title {
+    font-size: 12px;
+    font-weight: 500;
+    color: #94a3b8;
+    text-decoration: line-through;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.completed-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.completed-date {
+    font-size: 10px;
+    color: #94a3b8;
+    font-weight: 500;
+}
+
 /* 4. ビュー切り替えタブ */
 .view-toggle-bar {
     display: flex;
     justify-content: center;
-    padding: 6px 12px;
+    padding: 3px 12px;
     border-top: 1px solid #f1f5f9;
     background: #ffffff;
 }
 
 .view-selector {
-    transform: scale(0.9);
+    transform: scale(0.8);
 }
 
 :deep(.p-selectbutton .p-button) {
     font-size: 11px;
-    padding: 6px 16px;
+    padding: 4px 16px;
 }
 
 /* 5. 最下部固定フォーム */
 .widget-footer-form {
     display: flex;
-    padding: 12px;
+    padding: 8px;
     gap: 8px;
     border-top: 1px solid #e2e8f0;
     background: #ffffff;
@@ -1577,6 +2111,8 @@ const saveFullscreenCalendarDate = () => {
 
 .task-input-field {
     border-color: #cbd5e1;
+    height: 30px;
+    font-size: 12px;
 }
 
 .task-input-field:focus {
@@ -1793,15 +2329,15 @@ const saveFullscreenCalendarDate = () => {
     border: none;
     cursor: pointer;
     padding: 2px 4px;
-    font-size: 13px;
+    font-size: 12px;
     color: #64748b;
     border-radius: 4px;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: all 0.2s;
-    width: 24px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
 }
 
 .action-icon-btn:hover {
@@ -1837,6 +2373,13 @@ const saveFullscreenCalendarDate = () => {
 .task-card.status-doing {
     border-left: 3px solid #f59e0b; /* オレンジ色の左枠線 */
     background: #fffbeb; /* 薄いオレンジの背景 */
+}
+
+/* 期限切れタスクのスタイル（警告色） */
+.task-card.overdue {
+    border-left: 3px solid #ef4444; /* 赤色の左枠線 */
+    background: #fef2f2; /* 薄い赤の背景 */
+    border-color: #fecaca;
 }
 
 .doing-badge-pill {
