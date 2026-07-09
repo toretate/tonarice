@@ -23,6 +23,7 @@ const vFocus = {
 // 表示制御
 const showCategorySettings = ref(false); // インライン設定パネル表示トグル
 const newTaskTitle = ref('');
+const newTaskScheduledAt = ref<string | undefined>(undefined);
 const newSubTaskTitleMap = ref<Record<string, string>>({});
 
 // vue-draggable-plus用
@@ -497,8 +498,9 @@ const viewOptions = [
 const handleAddTask = () => {
     const title = newTaskTitle.value.trim();
     if (!title) return;
-    taskStore.addTask(taskStore.activeCategoryId, title, 'normal');
+    taskStore.addTask(taskStore.activeCategoryId, title, 'normal', newTaskScheduledAt.value);
     newTaskTitle.value = '';
+    newTaskScheduledAt.value = undefined;
 };
 
 // サブタスク追加
@@ -726,14 +728,21 @@ const innerHourNumbers = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 const outerHourNumbers = [0, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23];
 const minuteNumbers = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
 
-const openDatePicker = (taskId: string) => {
+const openDatePicker = (taskId: string | 'new_task') => {
     activeCalendarTaskId.value = taskId;
     calendarStep.value = 'date';
     clockMode.value = 'hour';
     
-    const task = taskStore.tasks.find(t => t.id === taskId);
-    if (task && task.scheduledAt) {
-        const d = new Date(task.scheduledAt);
+    let scheduledAt: string | undefined = undefined;
+    if (taskId === 'new_task') {
+        scheduledAt = newTaskScheduledAt.value;
+    } else {
+        const task = taskStore.tasks.find(t => t.id === taskId);
+        scheduledAt = task?.scheduledAt;
+    }
+    
+    if (scheduledAt) {
+        const d = new Date(scheduledAt);
         tempCalendarDate.value = d;
         selectedHour24.value = d.getHours();
         selectedMinuteVal.value = d.getMinutes();
@@ -747,15 +756,16 @@ const openDatePicker = (taskId: string) => {
     }
 };
 
-watch(tempCalendarDate, (newVal) => {
-    if (newVal && calendarStep.value === 'date') {
-        calendarStep.value = 'time';
-        clockMode.value = 'hour';
-    }
-});
+const onDateSelect = () => {
+    calendarStep.value = 'time';
+    clockMode.value = 'hour';
+};
 
 const getActiveCalendarTaskTitle = () => {
     if (!activeCalendarTaskId.value) return '';
+    if (activeCalendarTaskId.value === 'new_task') {
+        return newTaskTitle.value.trim() || '新規タスク';
+    }
     const task = taskStore.tasks.find(t => t.id === activeCalendarTaskId.value);
     return task ? task.title : '';
 };
@@ -766,14 +776,23 @@ const saveFullscreenCalendarDate = () => {
         targetDate.setHours(selectedHour24.value);
         targetDate.setMinutes(selectedMinuteVal.value);
         targetDate.setSeconds(0);
-        taskStore.updateTask(activeCalendarTaskId.value, { scheduledAt: targetDate.toISOString() });
+        
+        if (activeCalendarTaskId.value === 'new_task') {
+            newTaskScheduledAt.value = targetDate.toISOString();
+        } else {
+            taskStore.updateTask(activeCalendarTaskId.value, { scheduledAt: targetDate.toISOString() });
+        }
     }
     activeCalendarTaskId.value = null;
 };
 
 const clearFullscreenCalendarDate = () => {
     if (activeCalendarTaskId.value) {
-        taskStore.updateTask(activeCalendarTaskId.value, { scheduledAt: undefined });
+        if (activeCalendarTaskId.value === 'new_task') {
+            newTaskScheduledAt.value = undefined;
+        } else {
+            taskStore.updateTask(activeCalendarTaskId.value, { scheduledAt: undefined });
+        }
     }
     activeCalendarTaskId.value = null;
 };
@@ -1488,12 +1507,24 @@ const saveTaskEditor = () => {
 
         <!-- 5. 最下部固定フォーム -->
         <footer class="widget-footer-form" v-if="!showCategorySettings">
-            <InputText 
-                v-model="newTaskTitle" 
-                placeholder="新しいタスクを追加..." 
-                class="p-inputtext-sm flex-grow-1 task-input-field"
-                @keyup.enter="handleAddTask"
-            />
+            <div class="add-task-input-wrapper" style="position: relative; display: flex; align-items: center; flex-grow: 1; min-width: 0;">
+                <InputText 
+                    v-model="newTaskTitle" 
+                    placeholder="新しいタスクを追加..." 
+                    class="p-inputtext-sm w-full task-input-field"
+                    @keyup.enter="handleAddTask"
+                    style="padding-right: 32px;"
+                />
+                <button 
+                    class="action-icon-btn calendar-set-btn" 
+                    @click.stop="openDatePicker('new_task')"
+                    :title="newTaskScheduledAt ? '予定日時を変更' : '予定日時を設定'"
+                    style="position: absolute; right: 6px; padding: 4px; display: flex; align-items: center; justify-content: center; background: transparent; border: none; cursor: pointer;"
+                    type="button"
+                >
+                    <i class="pi pi-calendar" :style="{ color: newTaskScheduledAt ? '#3b82f6' : '#94a3b8' }"></i>
+                </button>
+            </div>
             <Button 
                 icon="pi pi-plus" 
                 class="p-button-sm add-task-btn" 
@@ -1524,6 +1555,7 @@ const saveTaskEditor = () => {
                         v-model="tempCalendarDate"
                         inline
                         style="width: 100%; border: none;"
+                        @date-select="onDateSelect"
                     />
                 </div>
                 

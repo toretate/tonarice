@@ -22,7 +22,10 @@
       "Bash(grep -rn \"split\\('\\\\\\\\\\\\\\\\n'\\)\\\\[0\\\\]\\\\|readFirstLine\\\\|// generated\" dist/runtime dist/*.d.*)",
       "Bash(wmux markdown *)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/)",
-      "PowerShell(Receive-Job *)"
+      "PowerShell(Receive-Job *)",
+      "Bash(curl -s --max-time 20 http://localhost:3000/api/tasks)",
+      "Bash(curl -s -w \"\\\\n[HTTP %{http_code}, time %{time_total}s]\\\\n\" --max-time 25 http://localhost:3000/api/tasks)",
+      "Bash(curl -s -w \"\\\\n[HTTP %{http_code}]\\\\n\" --max-time 15 http://localhost:3000/api/ping)"
     ]
   }
 }
