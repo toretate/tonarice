@@ -62,7 +62,7 @@ describe('ChatAiService の LM Studio 実機統合テスト (Mockなし)', () =>
                 if (toolName === 'manageTasks' && args.action === 'search') {
                     return JSON.stringify({
                         success: true,
-                        message: 'タスク・予定が 1 件見つかりました：\n- [未完了] LM Studio 実機テスト会議 (予定日時: 2026/07/07 15:00:00)'
+                        message: 'タスク・予定が 1 件見つかりました：\n- [ID: task_real_123] [未完了] LM Studio 実機テスト会議 (予定日時: 2026/07/07 15:00:00)'
                     });
                 }
                 return null;

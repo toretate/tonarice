@@ -8,8 +8,9 @@ import { sanitizeForIrodoriTTS } from '../utils/irodori-sanitizer';
 import { filterDialogue } from '../utils/dialogue-filter';
 import { authenticateUserToken } from '../middleware/auth';
 import { PROJECT_ROOT, USERS_DIR } from '../utils/paths';
-import { addTaskToDb, searchTasksFromDb, updateTaskInDb, deleteTaskFromDb } from '../utils/tasks-service';
-import { addMemoToDb, searchMemosFromDb, updateMemoInDb, deleteMemoFromDb } from '../utils/memos-service';
+import { executeMemosTool, executeTasksTool } from '../utils/tool-executor';
+import { updateTaskInDb } from '../utils/tasks-service';
+
 
 // ユーザーごとの接続管理（crosswsのPeerオブジェクトをSetに保存）
 const userConnections = new Map<string, Set<any>>();
@@ -188,98 +189,9 @@ export default defineWebSocketHandler({
                             }
                             try {
                                 if (toolName === 'manageMemos') {
-                                    switch (args.action) {
-                                        case 'add': {
-                                            if (!args.content) return JSON.stringify({ success: false, error: 'add には content が必須です。' });
-                                            const saved = addMemoToDb(userId, {
-                                                content: args.content,
-                                                color: args.color,
-                                                pinned: args.pinned
-                                            });
-                                            return JSON.stringify({ success: true, action: 'add', id: saved.memo.id, memo: saved.memo });
-                                        }
-                                        case 'search': {
-                                            const memos = searchMemosFromDb(userId, args.query);
-                                            if (memos.length === 0) return JSON.stringify({ success: true, message: '該当するメモは見つかりませんでした。' });
-                                            const lines = memos.map(m => `- ${m.content}`);
-                                            return JSON.stringify({ success: true, message: `メモが ${memos.length} 件見つかりました：\n${lines.join('\n')}` });
-                                        }
-                                        case 'update': {
-                                            if (!args.id) return JSON.stringify({ success: false, error: 'update には id が必須です。' });
-                                            const saved = updateMemoInDb(userId, args.id, args);
-                                            return JSON.stringify({ success: true, action: 'update', id: args.id, memo: saved.memo });
-                                        }
-                                        case 'delete': {
-                                            if (!args.id) return JSON.stringify({ success: false, error: 'delete には id が必須です。' });
-                                            deleteMemoFromDb(userId, args.id);
-                                            return JSON.stringify({ success: true, action: 'delete', id: args.id });
-                                        }
-                                        default:
-                                            return JSON.stringify({ success: false, error: `不明な action: ${args.action}` });
-                                    }
+                                    return await executeMemosTool(userId, args);
                                 }
-                                switch (args.action) {
-                                    case 'add': {
-                                        if (!args.title) {
-                                            return JSON.stringify({ success: false, error: 'add には title が必須です。' });
-                                        }
-                                        const saved = addTaskToDb(userId, {
-                                            title: args.title,
-                                            priority: args.priority,
-                                            categoryId: args.categoryId,
-                                            scheduledAt: args.scheduledAt || undefined
-                                        });
-                                        return JSON.stringify({
-                                            success: true,
-                                            action: 'add',
-                                            id: saved.task.id,
-                                            task: saved.task
-                                        });
-                                    }
-                                    case 'search': {
-                                        const tasks = searchTasksFromDb(userId, args.query, args.date, args.completed);
-                                        if (tasks.length === 0) {
-                                            return JSON.stringify({
-                                                success: true,
-                                                message: '該当する予定やタスクは見つかりませんでした。'
-                                            });
-                                        }
-                                        const lines = tasks.map(t => {
-                                            const dateStr = t.scheduledAt ? ` (予定日時: ${new Date(t.scheduledAt).toLocaleString('ja-JP')})` : '';
-                                            const statusStr = t.completed ? '[完了]' : '[未完了]';
-                                            return `- ${statusStr} ${t.title}${dateStr}`;
-                                        });
-                                        return JSON.stringify({
-                                            success: true,
-                                            message: `タスク・予定が ${tasks.length} 件見つかりました：\n${lines.join('\n')}`
-                                        });
-                                    }
-                                    case 'update': {
-                                        if (!args.id) {
-                                            return JSON.stringify({ success: false, error: 'update には id が必須です。' });
-                                        }
-                                        const saved = updateTaskInDb(userId, args.id, args);
-                                        return JSON.stringify({
-                                            success: true,
-                                            action: 'update',
-                                            id: args.id,
-                                            task: saved.task
-                                        });
-                                    }
-                                    case 'delete': {
-                                        if (!args.id) {
-                                            return JSON.stringify({ success: false, error: 'delete には id が必須です。' });
-                                        }
-                                        deleteTaskFromDb(userId, args.id);
-                                        return JSON.stringify({
-                                            success: true,
-                                            action: 'delete',
-                                            id: args.id
-                                        });
-                                    }
-                                    default:
-                                        return JSON.stringify({ success: false, error: `不明な action: ${args.action}` });
-                                }
+                                return await executeTasksTool(userId, args);
                             } catch (e: any) {
                                 console.error(`[WS] Intercepted tool ${toolName} (action: ${args.action}) failed:`, e.message);
                                 return JSON.stringify({

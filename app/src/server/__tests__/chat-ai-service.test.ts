@@ -58,7 +58,7 @@ describe('ChatAiService.generateResponse のテスト', () => {
                             args: { action: 'search', completed: false },
                             result: {
                                 success: true,
-                                message: 'タスク・予定が 1 件見つかりました：\n- [未完了] テスト会議'
+                                message: 'タスク・予定が 1 件見つかりました：\n- [ID: task_test_123] [未完了] テスト会議'
                             }
                         }
                     ],
@@ -85,7 +85,7 @@ describe('ChatAiService.generateResponse のテスト', () => {
                 if (toolName === 'manageTasks' && args.action === 'search') {
                     return JSON.stringify({
                         success: true,
-                        message: 'タスク・予定が 1 件見つかりました：\n- [未完了] テスト会議'
+                        message: 'タスク・予定が 1 件見つかりました：\n- [ID: task_test_123] [未完了] テスト会議'
                     });
                 }
                 return null;
@@ -128,7 +128,7 @@ describe('ChatAiService.generateResponse のテスト', () => {
                                 action: 'search',
                                 completed: false
                             },
-                            result: "{\"success\":true,\"message\":\"タスク・予定が 1 件見つかりました：\\n- [未完了] 特報会議\"}"
+                            result: "{\"success\":true,\"message\":\"タスク・予定が 1 件見つかりました：\\n- [ID: task_999] [未完了] 特報会議\"}"
                         }
                     ],
                     finishReason: 'tool-calls'
@@ -164,7 +164,7 @@ describe('ChatAiService.generateResponse のテスト', () => {
                 if (toolName === 'manageTasks' && args.action === 'search') {
                     return JSON.stringify({
                         success: true,
-                        message: 'タスク・予定が 1 件見つかりました：\n- [未完了] 特報会議'
+                        message: 'タスク・予定が 1 件見つかりました：\n- [ID: task_999] [未完了] 特報会議'
                     });
                 }
                 return null;
@@ -482,5 +482,39 @@ describe('ChatAiService.generateResponse のテスト', () => {
         });
 
         expect(reply.trim().length).toBeGreaterThan(0);
+    });
+
+    it('generateResponse_Gemini用のVerceltool定義に検索結果のIDを使う制約が含まれ、かつsystemプロンプトに個別ガイドラインが注入されないこと', async () => {
+        vi.mocked(generateText)
+            .mockReset()
+            .mockResolvedValueOnce({
+                text: '完了しました',
+                finishReason: 'stop',
+                steps: []
+            } as any);
+
+        await ChatAiService.generateResponse({
+            message: '今日のタスクを検索して',
+            apiKey: 'mock-api-key',
+            systemPrompt: 'あなたはアシスタントです。',
+            model: 'gemini-1.5-flash',
+            engine: 'gemini'
+        });
+
+        const options = vi.mocked(generateText).mock.calls[0][0] as any;
+
+        expect(options.tools).toHaveProperty('manageTasks');
+        expect(options.tools).toHaveProperty('manageMemos');
+
+        const manageTasksToolDef = options.tools.manageTasks;
+        const manageMemosToolDef = options.tools.manageMemos;
+
+        expect(manageTasksToolDef.description).toContain('ID');
+        expect(manageTasksToolDef.description).toContain('検索');
+        expect(manageMemosToolDef.description).toContain('ID');
+        expect(manageMemosToolDef.description).toContain('検索');
+
+        expect(options.system).not.toContain('期限のない自由メモ');
+        expect(options.system).not.toContain('一時的な通知');
     });
 });

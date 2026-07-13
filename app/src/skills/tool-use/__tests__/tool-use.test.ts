@@ -276,5 +276,29 @@ describe('Tool Use - 各ツールの挙動テスト', () => {
             expect(filtered.some(t => t.tool.name === 'manageMemos')).toBe(true);
         });
     });
+
+    describe('ツール定義の ID 操作ルールのテスト', () => {
+        test('manageTasks - ツール description および id パラメータに、不明な場合のみ事前検索を行いID明示時は不要である旨が記載されていること', () => {
+            const description = manageTasksTool.description;
+            expect(description).toContain('不明な場合のみ事前に検索');
+            expect(description).toContain('ID が直接提示された場合は、事前検索を行わずに');
+
+            const idDesc = (manageTasksTool as any).parametersSchema?.shape?.id?._def?.description || '';
+            expect(idDesc).toContain('不明な場合のみ事前に検索');
+            expect(idDesc).toContain('ID が直接提示された場合は、検索を行わずに');
+        });
+
+        test('manageMemos - ツール description および id パラメータに、不明な場合のみ事前検索を行いID明示時は不要である旨が記載されていること', () => {
+            const memoToolEntry = mascotTools.find(t => t.tool.name === 'manageMemos');
+            expect(memoToolEntry).toBeDefined();
+            const description = memoToolEntry!.tool.description;
+            expect(description).toContain('不明な場合のみ事前に検索');
+            expect(description).toContain('ID が直接提示された場合は、事前検索を行わずに');
+
+            const idDesc = (memoToolEntry!.tool as any).parametersSchema?.shape?.id?._def?.description || '';
+            expect(idDesc).toContain('不明な場合のみ事前に検索');
+            expect(idDesc).toContain('ID が直接提示された場合は、検索を行わずに');
+        });
+    });
 });
 
