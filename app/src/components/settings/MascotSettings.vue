@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
 import mascotEmotionIcon from '../../assets/mascot_emotion_icon.png';
 import mascotOutfitIcon from '../../assets/mascot_outfilt_icon.png';
 import mascotProfileIcon from '../../assets/mascot_profile_icon.png';
@@ -94,7 +94,8 @@ const {
     scannedSprites,
     isAssigningEmotionsModal,
     importFromSpriteSheet,
-    closeAssigningEmotionsModal
+    closeAssigningEmotionsModal,
+    uploadImportedImage
 } = useMascotSettings(props, emit);
 
 // モーダル管理用の状態
@@ -117,10 +118,19 @@ const addOutfitImage = async () => {
             editingMascot.value.assets.outfits = [];
         }
         
+        const newOutfitId = 'outfit_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+        let finalPath = result.path;
+
+        try {
+            finalPath = await uploadImportedImage(editingMascot.value.id, 'outfits', newOutfitId, result.path);
+        } catch (uploadErr) {
+            console.warn('[MascotSettings] 衣装画像のアップロードに失敗しました。Base64でフォールバック保持します:', uploadErr);
+        }
+
         const newOutfit: MascotAsset & { expressions?: MascotAsset[] } = {
-            id: 'outfit_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+            id: newOutfitId,
             name: '衣装_' + (editingMascot.value.assets.outfits.length + 1),
-            path: result.path,
+            path: finalPath,
             offsetX: 0,
             offsetY: 0,
             scale: 1.0,
@@ -203,6 +213,45 @@ const handleBackgroundRemovalDone = async (newBase64: string) => {
 
 const cropImageSrc = ref('');
 const selectedCropExpression = ref<MascotAsset | null>(null);
+const selectedImageBlob = ref<Blob | null>(null);
+const selectedImageOriginalPath = ref('');
+const cropImageBlobUrl = ref('');
+
+const base64ToBlob = (base64: string): Blob => {
+    const parts = base64.split(';base64,');
+    if (parts.length < 2) return new Blob();
+    const contentType = parts[0].split(':')[1];
+    const raw = window.atob(parts[1]);
+    const rawLength = raw.length;
+    const uInt8Array = new Uint8Array(rawLength);
+    for (let i = 0; i < rawLength; ++i) {
+        uInt8Array[i] = raw.charCodeAt(i);
+    }
+    return new Blob([uInt8Array], { type: contentType });
+};
+
+const blobToDataUrl = (blob: Blob): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('BlobのData URL変換に失敗しました。'));
+    reader.readAsDataURL(blob);
+});
+
+const cleanCropResources = () => {
+    if (cropImageBlobUrl.value) {
+        URL.revokeObjectURL(cropImageBlobUrl.value);
+        cropImageBlobUrl.value = '';
+    }
+    cropImageSrc.value = '';
+    selectedImageBlob.value = null;
+    selectedImageOriginalPath.value = '';
+};
+
+const closeCropModal = () => {
+    isCropModalActive.value = false;
+    selectedCropExpression.value = null;
+    cleanCropResources();
+};
 
 const openExpressionEditModal = (step: number) => {
     editorInitialStep.value = step;
@@ -233,8 +282,10 @@ const handleClearExpression = (slot: MascotAsset) => {
 
 const handleCropCurrent = (slot: MascotAsset) => {
     if (slot.path) {
+        cleanCropResources();
         selectedCropExpression.value = slot;
         cropImageSrc.value = slot.path;
+        selectedImageOriginalPath.value = slot.originalPath || slot.path;
         isCropModalActive.value = true;
     }
 };
@@ -244,7 +295,17 @@ const handleCropNew = async (slot?: MascotAsset) => {
     const result = await window.electronAPI.selectLocalImage();
     if (result && result.success) {
         if (slot) selectedCropExpression.value = slot;
-        cropImageSrc.value = result.path;
+        cleanCropResources();
+
+        if (result.path.startsWith('data:image/')) {
+            const blob = base64ToBlob(result.path);
+            selectedImageBlob.value = blob;
+            cropImageBlobUrl.value = URL.createObjectURL(blob);
+            cropImageSrc.value = cropImageBlobUrl.value;
+        } else {
+            cropImageSrc.value = result.path;
+            selectedImageOriginalPath.value = result.path;
+        }
         isCropModalActive.value = true;
     }
 };
@@ -253,24 +314,28 @@ const handleCropDone = async (croppedBase64: string) => {
     const currentMascotExpressions = activeOutfit.value?.expressions || editingMascot.value.assets.expressions || [];
     const targetSlot = selectedCropExpression.value || currentMascotExpressions.find((e: any) => e.name === '通常') || currentMascotExpressions[0];
     if (targetSlot) {
-        let finalPath = croppedBase64;
-        let finalOriginalPath = cropImageSrc.value;
+        const originalSource = selectedImageBlob.value
+            ? await blobToDataUrl(selectedImageBlob.value)
+            : selectedImageOriginalPath.value;
+        const croppedSource = croppedBase64.startsWith('blob:') ? originalSource : croppedBase64;
+        let finalPath = croppedSource;
+        let finalOriginalPath = originalSource;
         if (window.electronAPI?.saveMascotImage && editingMascot.value?.id) {
             try {
                 const sanitizedLabel = targetSlot.name.replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]/g, '_');
                 const outfitName = activeOutfit.value?.name.replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]/g, '_') || 'default';
 
-                if (cropImageSrc.value.startsWith('data:image/')) {
+                if (originalSource.startsWith('data:image/')) {
                     try {
                         const originalFilename = `expressions/${outfitName}/original/orig_expr_${sanitizedLabel}.png`;
-                        const saveOriginalResult = await window.electronAPI.saveMascotImage(editingMascot.value.id, originalFilename, cropImageSrc.value);
+                        const saveOriginalResult = await window.electronAPI.saveMascotImage(editingMascot.value.id, originalFilename, originalSource);
                         if (saveOriginalResult.success && saveOriginalResult.path) finalOriginalPath = saveOriginalResult.path;
                     } catch (originalErr) { console.warn('[MascotSettings] 元画像の保存に失敗しました:', originalErr); }
                 }
 
-                if (croppedBase64.startsWith('data:image/')) {
+                if (croppedSource.startsWith('data:image/')) {
                     const filename = `expressions/${outfitName}/expr_${sanitizedLabel}.png`;
-                    const saveResult = await window.electronAPI.saveMascotImage(editingMascot.value.id, filename, croppedBase64);
+                    const saveResult = await window.electronAPI.saveMascotImage(editingMascot.value.id, filename, croppedSource);
                     if (saveResult.success && saveResult.path) finalPath = saveResult.path;
                 }
             } catch (err) { console.warn('[MascotSettings] 切り抜き画像の保存に失敗しました:', err); }
@@ -281,10 +346,13 @@ const handleCropDone = async (croppedBase64: string) => {
     
     isCropModalActive.value = false;
     selectedCropExpression.value = null;
+    cleanCropResources();
     await syncAndSave();
     emit('save-settings');
     updateMascotPreview();
 };
+
+onBeforeUnmount(cleanCropResources);
 
 const registeredExpressions = computed(() => {
     if (!editingMascot.value) return [];
@@ -528,7 +596,7 @@ const handleBackFromExpressionEditor = async () => {
     <ImageCropModal 
         :visible="isCropModalActive"
         :image-src="cropImageSrc"
-        @close="isCropModalActive = false"
+        @close="closeCropModal"
         @crop="handleCropDone"
     />
 

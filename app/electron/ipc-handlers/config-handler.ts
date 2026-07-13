@@ -7,6 +7,7 @@ import { getMascotWindow } from '../window/mascot-window';
 import { getSettingsWindow } from '../window/settings-window';
 import { getIntegratedWindow } from '../window/integrated-window';
 import { getCompactWindow } from '../window/compact-window';
+import { resolveMascotPath } from '../../src/server/utils/paths';
 
 // デフォルトラジオプロンプトのインポート
 import radioModeDefault from '@prompt/radio/radio-mode.prompt';
@@ -208,33 +209,48 @@ export function registerConfigHandlers(config: AppConfig) {
 
     // 画像データを mascots/<mascotId> に保存するハンドラー
     ipcMain.handle('save-mascot-image', async (event, mascotId: string, filename: string, base64Data: string) => {
-        const currentCwd = process.cwd();
-        const baseCwd = path.basename(currentCwd) === 'ui' ? path.dirname(currentCwd) : currentCwd;
-        const mascotDir = path.join(baseCwd, 'mascots', mascotId);
+        // mascotId のバリデーション (英数字、アンダースコア、ハイフンのみ許可)
+        if (!/^[a-zA-Z0-9_-]+$/.test(mascotId)) {
+            return { success: false, error: 'Invalid mascotId' };
+        }
+
+        // filename のバリデーション (親ディレクトリ移動を禁止)
+        if (filename.includes('..') || filename.includes('\\')) {
+            return { success: false, error: 'Invalid filename' };
+        }
+
+        const userId = 'usr_local_dev_bypass'; // Electronはローカル開発用バイパスIDで固定
+        const requestPath = `/mascots/users/${userId}/${mascotId}/${filename}`;
 
         try {
-            if (!fs.existsSync(mascotDir)) {
-                fs.mkdirSync(mascotDir, { recursive: true });
+            // Web版と同じ画像保存パスを解決
+            const absPath = resolveMascotPath(requestPath);
+
+            // ディレクトリトラバーサル防止チェック
+            const baseDir = resolveMascotPath(`/mascots/users/${userId}/${mascotId}`);
+            const relativePath = path.relative(baseDir, absPath);
+            if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+                return { success: false, error: 'Directory traversal detected' };
             }
 
-            // data:image/png;base64,... のようなヘッダーがあれば除去
-            const base64Content = base64Data.replace(/^data:image\/\w+;base64,/, '');
-            const buffer = Buffer.from(base64Content, 'base64');
-
-            const filePath = path.join(mascotDir, filename);
-            const fileDir = path.dirname(filePath);
+            const fileDir = path.dirname(absPath);
             if (!fs.existsSync(fileDir)) {
                 fs.mkdirSync(fileDir, { recursive: true });
             }
 
-            fs.writeFileSync(filePath, buffer);
+            // data:image/png;base64,... のようなヘッダーがあれば除去
+            // svg+xml などの + や . や - を含む MIME タイプにも対応
+            const base64Content = base64Data.replace(/^data:image\/[\w+.-]+;base64,/, '');
+            const buffer = Buffer.from(base64Content, 'base64');
 
-            console.log(`[Config] Mascot image saved: ${filePath}`);
+            fs.writeFileSync(absPath, buffer);
+
+            console.log(`[Config] Mascot image saved (Electron): ${absPath}`);
             
             // UIからアクセス可能な相対アセットパスを返す
             return {
                 success: true,
-                path: `/mascots/${mascotId}/${filename}`
+                path: requestPath
             };
         } catch (error: any) {
             console.error('[Config] Failed to save mascot image:', error);

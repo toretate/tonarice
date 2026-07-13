@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { useMascotSettings } from '../composables/useMascotSettings';
+import { useMascotSettings, type MascotAsset } from '../composables/useMascotSettings';
 import { createPinia, setActivePinia } from 'pinia';
 import { useConfigStore } from '../../../store/config';
-import { mount } from '@vue/test-utils';
+import { mount, flushPromises } from '@vue/test-utils';
 import MascotSettings from '../MascotSettings.vue';
 
 vi.mock('../../../skills/expression-alignment/auto-align-v2', () => ({
@@ -287,6 +287,108 @@ describe('outfit切り替え時のちらつき防止テスト', () => {
             // emit で save-settings が呼ばれる（これが config-updated ブロードキャストのトリガー）
             emit('save-settings');
             expect(emit).toHaveBeenCalledWith('save-settings');
+        });
+    });
+
+    describe('MascotSettings コンポーネント (addOutfitImage)', () => {
+        it('addOutfitImage_衣装インポート時に即時アップロードが成功し、アップロード後のパスが格納されること', async () => {
+            const configStore = useConfigStore();
+            const testMascot = createTestMascot();
+            configStore.mascots = [testMascot];
+            configStore.activeMascotId = 'mascot_test';
+
+            const selectLocalImageMock = vi.fn().mockResolvedValue({
+                success: true,
+                path: 'data:image/png;base64,iVBORw0K...'
+            });
+            const saveMascotImageMock = vi.fn().mockResolvedValue({
+                success: true,
+                path: '/mascots/users/usr_local_dev_bypass/mascot_test/outfits/outfit_new.png'
+            });
+
+            (window as any).electronAPI.selectLocalImage = selectLocalImageMock;
+            (window as any).electronAPI.saveMascotImage = saveMascotImageMock;
+
+            const wrapper = mount(MascotSettings, {
+                props: {
+                    mascots: configStore.mascots,
+                    activeMascotId: 'mascot_test',
+                    geminiApiKey: 'test-api-key'
+                }
+            });
+
+            // outfit タブへ切り替え
+            const outfitTabBtn = wrapper.findAll('button').find(
+                btn => btn.text().includes('立ち絵')
+            );
+            if (outfitTabBtn) {
+                await outfitTabBtn.trigger('click');
+            }
+
+            // MascotOutfitSettngs コンポーネントを取得し、add-outfit イベントを発火
+            const outfitComponent = wrapper.findComponent({ name: 'MascotOutfitSettngs' });
+            expect(outfitComponent.exists()).toBe(true);
+
+            await outfitComponent.vm.$emit('add-outfit');
+            await flushPromises();
+
+            expect(selectLocalImageMock).toHaveBeenCalled();
+            expect(saveMascotImageMock).toHaveBeenCalled();
+
+            // 新しく追加された outfit の path がアップロード後のパスになっていること
+            const updatedMascot = configStore.mascots.find(m => m.id === 'mascot_test');
+            const newOutfit = updatedMascot?.assets.outfits.find((o: MascotAsset) => o.id.startsWith('outfit_') && o.id !== 'outfit_1' && o.id !== 'outfit_2');
+            expect(newOutfit).toBeTruthy();
+            expect(newOutfit?.path).toBe('/mascots/users/usr_local_dev_bypass/mascot_test/outfits/outfit_new.png');
+        });
+
+        it('addOutfitImage_衣装インポート時にアップロードが失敗した場合、Base64パスがフォールバック格納されること', async () => {
+            const configStore = useConfigStore();
+            const testMascot = createTestMascot();
+            configStore.mascots = [testMascot];
+            configStore.activeMascotId = 'mascot_test';
+
+            const selectLocalImageMock = vi.fn().mockResolvedValue({
+                success: true,
+                path: 'data:image/png;base64,iVBORw0K_fallback...'
+            });
+            const saveMascotImageMock = vi.fn().mockResolvedValue({
+                success: false,
+                error: 'ネットワークエラー'
+            });
+
+            (window as any).electronAPI.selectLocalImage = selectLocalImageMock;
+            (window as any).electronAPI.saveMascotImage = saveMascotImageMock;
+
+            const wrapper = mount(MascotSettings, {
+                props: {
+                    mascots: configStore.mascots,
+                    activeMascotId: 'mascot_test',
+                    geminiApiKey: 'test-api-key'
+                }
+            });
+
+            // outfit タブへ切り替え
+            const outfitTabBtn = wrapper.findAll('button').find(
+                btn => btn.text().includes('立ち絵')
+            );
+            if (outfitTabBtn) {
+                await outfitTabBtn.trigger('click');
+            }
+
+            const outfitComponent = wrapper.findComponent({ name: 'MascotOutfitSettngs' });
+            expect(outfitComponent.exists()).toBe(true);
+            await outfitComponent.vm.$emit('add-outfit');
+            await flushPromises();
+
+            expect(selectLocalImageMock).toHaveBeenCalled();
+            expect(saveMascotImageMock).toHaveBeenCalled();
+
+            // アップロード失敗時、フォールバックで元の Base64 データが格納されていること
+            const updatedMascot = configStore.mascots.find(m => m.id === 'mascot_test');
+            const newOutfit = updatedMascot?.assets.outfits.find((o: MascotAsset) => o.path.startsWith('data:image/'));
+            expect(newOutfit).toBeTruthy();
+            expect(newOutfit?.path).toBe('data:image/png;base64,iVBORw0K_fallback...');
         });
     });
 });

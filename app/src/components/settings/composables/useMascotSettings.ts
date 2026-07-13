@@ -587,6 +587,42 @@ export function useMascotSettings(
         scannedSprites,
         isAssigningEmotionsModal,
         importFromSpriteSheet,
-        closeAssigningEmotionsModal
+        closeAssigningEmotionsModal,
+        uploadImportedImage
     };
+}
+
+const getExtensionFromBase64 = (base64Str: string): string => {
+    const match = base64Str.match(/^data:image\/([\w+.-]+);base64,/);
+    if (match && match[1]) {
+        const mimeSub = match[1].toLowerCase();
+        if (mimeSub === 'jpeg') return 'jpg';
+        if (mimeSub === 'svg+xml') return 'svg';
+        return mimeSub;
+    }
+    return 'png'; // デフォルト
+};
+
+export async function uploadImportedImage(
+    mascotId: string,
+    assetType: 'outfits' | 'expressions' | 'poses' | 'avatar',
+    assetId: string,
+    source: string
+): Promise<string> {
+    if (!window.electronAPI?.saveMascotImage) {
+        throw new Error('electronAPI.saveMascotImage is not available');
+    }
+    if (!source.startsWith('data:image/')) {
+        return source;
+    }
+    const ext = getExtensionFromBase64(source);
+    const filename = `${assetType}/${assetId}.${ext}`;
+
+    console.log(`[Upload] Uploading ${assetType} image to mascot ${mascotId}: ${filename}`);
+    const result = await window.electronAPI.saveMascotImage(mascotId, filename, source);
+    if (result && result.success && result.path) {
+        return result.path;
+    } else {
+        throw new Error(result?.error || 'Failed to save mascot image via API');
+    }
 }

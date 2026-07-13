@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
 import Button from 'primevue/button';
 import { useConfigStore } from '../../../store/config';
 import { detectFaceFeatures } from '../../../skills/expression-alignment/feature-island-detector';
@@ -19,7 +19,7 @@ const configStore = useConfigStore();
 
 const resolveImageUrl = (path: string | undefined | null): string => {
     if (!path) return '';
-    if (path.startsWith('data:image/')) {
+    if (path.startsWith('data:image/') || path.startsWith('blob:')) {
         return path;
     }
     let resolved = path;
@@ -351,6 +351,10 @@ const handleAutoDetectCropArea = async () => {
 onMounted(() => {
     // マウスアップイベントをグローバルで検知して安全にドラッグを終了する
     window.addEventListener('mouseup', onCropMouseUp);
+});
+
+onBeforeUnmount(() => {
+    window.removeEventListener('mouseup', onCropMouseUp);
 });
 </script>
 
