@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue';
 import { useConfigStore } from '@/store/config';
 import Button from 'primevue/button';
+import { resolveMascotImageUrl } from '../../../utils/mascot-image-url';
 
 const configStore = useConfigStore();
 
@@ -17,19 +18,11 @@ const isImage = (path: string | undefined | null): boolean => {
 
 // アセットURLの解決
 const resolveImageUrl = (path: string | undefined | null): string => {
-    if (!path) return '';
-    if (path.startsWith('data:image/')) {
-        return path;
-    }
-    let resolved = path;
-    if (path.startsWith('/mascots/') && configStore.useServer) {
-        resolved = `http://${configStore.serverHost}:${configStore.serverPort}${path}`;
-    }
-    if (/^[a-zA-Z]:\\/.test(resolved)) {
-        return resolved;
-    }
-    const separator = resolved.includes('?') ? '&' : '?';
-    return `${resolved}${separator}v=${configStore.configVersion}`;
+    return resolveMascotImageUrl(path, {
+        serverHost: configStore.serverHost,
+        serverPort: configStore.serverPort,
+        absoluteMascotUrl: configStore.useServer
+    });
 };
 
 interface MascotAsset {

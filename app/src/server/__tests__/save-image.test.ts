@@ -7,6 +7,10 @@ const { mockReadBody, mockMkdirSync, mockWriteFileSync } = vi.hoisted(() => ({
     mockWriteFileSync: vi.fn()
 }));
 
+vi.mock('node:crypto', () => ({
+    randomUUID: () => 'asset-version-test'
+}));
+
 vi.mock('h3', async (importOriginal) => {
     const actual = await importOriginal<typeof import('h3')>();
     return {
@@ -50,7 +54,7 @@ describe('/api/mascots/save-image', () => {
         const result = await runHandler();
 
         expect(result.success).toBe(true);
-        expect(result.path).toBe('/mascots/users/test_user/mascot_ok/outfits/outfit_1.png');
+        expect(result.path).toBe('/mascots/users/test_user/mascot_ok/outfits/outfit_1.png?v=asset-version-test');
         expect(mockWriteFileSync).toHaveBeenCalledOnce();
     });
 

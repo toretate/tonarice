@@ -252,7 +252,6 @@ export const useConfigStore = defineStore('config', () => {
     const forgeModelsList = ref<string[]>([]);
     const forgeLorasList = ref<string[]>([]);
     const forgeDebugLog = ref(false);
-    const configVersion = ref(0);
 
     // ---- Getters ----
     // アクティブなマスコットのデータを返す定義
@@ -949,7 +948,6 @@ export const useConfigStore = defineStore('config', () => {
         if (newConfig.forgeLorasList !== undefined) forgeLorasList.value = newConfig.forgeLorasList;
         if (newConfig.forgeDebugLog !== undefined) forgeDebugLog.value = !!newConfig.forgeDebugLog;
         
-        configVersion.value++;
     };
 
     return {
@@ -1052,7 +1050,6 @@ export const useConfigStore = defineStore('config', () => {
         forgeModelsList,
         forgeLorasList,
         forgeDebugLog,
-        configVersion,
         loadConfig,
         saveConfig,
         saveMascot,

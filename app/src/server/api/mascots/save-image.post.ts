@@ -1,6 +1,7 @@
 import { defineEventHandler, readBody, createError, isError } from 'h3';
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { resolveMascotPath } from '../../utils/paths';
 
 export default defineEventHandler(async (event) => {
@@ -60,7 +61,7 @@ export default defineEventHandler(async (event) => {
         fs.writeFileSync(absPath, buffer);
 
         console.log(`[Server] Saved mascot image: ${absPath}`);
-        return { success: true, path: requestPath };
+        return { success: true, path: `${requestPath}?v=${randomUUID()}` };
     } catch (error: any) {
         console.error('[Server] save-image failed:', error.message);
         if (isError(error)) {

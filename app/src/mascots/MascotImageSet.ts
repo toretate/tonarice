@@ -2,6 +2,7 @@ export interface MascotAsset {
     id: string;
     name: string;
     path: string;
+    nofacePath?: string;
     offsetX?: number;
     offsetY?: number;
     scale?: number;

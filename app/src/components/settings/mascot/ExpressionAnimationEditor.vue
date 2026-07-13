@@ -3,6 +3,7 @@ import { ref, computed, watch, onUnmounted, nextTick } from 'vue';
 import { useConfigStore } from '../../../store/config';
 import Button from 'primevue/button';
 import Slider from 'primevue/slider';
+import { resolveMascotImageUrl } from '../../../utils/mascot-image-url';
 
 const configStore = useConfigStore();
 
@@ -10,6 +11,7 @@ interface MascotAsset {
     id: string;
     name: string;
     path: string;
+    nofacePath?: string;
     originalPath?: string;
     offsetX?: number;
     offsetY?: number;
@@ -51,26 +53,16 @@ const isImage = (path: string | undefined | null): boolean => {
 
 // アセットURLの解決
 const resolveImageUrl = (path: string | undefined | null): string => {
-    if (!path) return '';
-    if (path.startsWith('data:image/')) {
-        return path;
-    }
-    let resolved = path;
-    if (path.startsWith('/mascots/') && configStore.useServer) {
-        resolved = `http://${configStore.serverHost}:${configStore.serverPort}${path}`;
-    }
-    if (/^[a-zA-Z]:\\/.test(resolved)) {
-        return resolved;
-    }
-    const separator = resolved.includes('?') ? '&' : '?';
-    return `${resolved}${separator}v=${configStore.configVersion}`;
+    return resolveMascotImageUrl(path, {
+        serverHost: configStore.serverHost,
+        serverPort: configStore.serverPort,
+        absoluteMascotUrl: configStore.useServer
+    });
 };
 
 // プレビュー表示するベースマスコット画像の解決（のっぺらぼう優先）
 const baseMascotImageUrl = computed(() => {
-    // ユーザーが生成済みののっぺらぼう画像があればそれを使う
-    const nofacePath = `/mascots/users/usr_local_dev_bypass/${props.editingMascot.id}/noface.png`;
-    return nofacePath;
+    return props.activeOutfit?.nofacePath || props.activeOutfit?.path || '';
 });
 
 const currentExpressions = computed(() => {
@@ -201,6 +193,7 @@ const generatePartsFromSprites = async () => {
 
 // 4.4: アトラス作成実行
 const handlePackAtlas = async () => {
+    if (!props.activeOutfit?.id) return;
     if (!partsCache.value.eyes.open) {
         alert('表情パーツが抽出されていません。先に「表情パーツ抽出」を実行してください。');
         return;
@@ -228,6 +221,7 @@ const handlePackAtlas = async () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 mascotId: props.editingMascot.id,
+                outfitId: props.activeOutfit.id,
                 partsList: partsList
             })
         });

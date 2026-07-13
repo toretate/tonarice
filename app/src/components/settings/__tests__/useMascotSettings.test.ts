@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { useMascotSettings, uploadImportedImage } from '../composables/useMascotSettings';
+import { selectOutfitPreviewExpression, useMascotSettings, uploadImportedImage } from '../composables/useMascotSettings';
 import { createPinia, setActivePinia } from 'pinia';
 import { useConfigStore } from '../../../store/config';
 
@@ -102,15 +102,34 @@ describe('useMascotSettings', () => {
 
         const emit = vi.fn();
 
-        const { editingMascot, initEditingMascot, setDefaultExpression } = useMascotSettings(props, emit);
+        const { editingMascot, activePreviewExpression, initEditingMascot, setDefaultExpression } = useMascotSettings(props, emit);
         initEditingMascot();
 
         // 通常表示の表情を「喜び」に設定
         setDefaultExpression('expr_joy');
 
         expect(editingMascot.value.defaultExpressionId).toBe('expr_joy');
+        expect(activePreviewExpression.value?.id).toBe('expr_joy');
         expect(window.electronAPI!.previewMascotState).toHaveBeenCalled();
         expect(emit).toHaveBeenCalledWith('save-settings');
+    });
+
+    it('selectOutfitPreviewExpression - 新しい衣装の同名スロットに画像がなければ表情なしへフォールバックすること', () => {
+        const expressions = [
+            { id: 'expr_normal', name: '通常', path: '' },
+            { id: 'expr_joy', name: '喜び', path: '' }
+        ];
+
+        expect(selectOutfitPreviewExpression(expressions, 'expr_joy', '喜び')).toBeNull();
+    });
+
+    it('selectOutfitPreviewExpression - 新しい衣装に指定表情があればその画像を選ぶこと', () => {
+        const expressions = [
+            { id: 'expr_normal', name: '通常', path: '/normal.png' },
+            { id: 'expr_joy', name: '喜び', path: '/joy.png' }
+        ];
+
+        expect(selectOutfitPreviewExpression(expressions, 'expr_joy', '喜び')?.path).toBe('/joy.png');
     });
 
     describe('uploadImportedImage', () => {

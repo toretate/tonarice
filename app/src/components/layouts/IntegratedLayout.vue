@@ -8,6 +8,7 @@ import { useTaskStore } from '../../store/task';
 import { useMemoStore } from '../../store/memo';
 import MemoWidget from '../MemoWidget.vue';
 import { storeToRefs } from 'pinia';
+import { resolveMascotImageUrl } from '../../utils/mascot-image-url';
 
 const configStore = useConfigStore();
 const taskStore = useTaskStore();
@@ -22,7 +23,6 @@ const {
     useServer,
     serverHost,
     serverPort,
-    configVersion,
     integratedChatRatio
 } = storeToRefs(configStore);
 
@@ -66,19 +66,11 @@ const onSplitterPointerDown = (event: PointerEvent) => {
 
 // アセットURLの解決
 const resolveImageUrl = (path: string | undefined | null): string => {
-    if (!path) return '';
-    if (path.startsWith('data:image/')) {
-        return path;
-    }
-    let resolved = path;
-    if (path.startsWith('/mascots/') && useServer.value) {
-        resolved = `http://${serverHost.value}:${serverPort.value}${path}`;
-    }
-    if (/^[a-zA-Z]:\\/.test(resolved)) {
-        return resolved;
-    }
-    const separator = resolved.includes('?') ? '&' : '?';
-    return `${resolved}${separator}v=${configVersion.value}`;
+    return resolveMascotImageUrl(path, {
+        serverHost: serverHost.value,
+        serverPort: serverPort.value,
+        absoluteMascotUrl: useServer.value
+    });
 };
 
 const getRgbaBackground = computed(() => {

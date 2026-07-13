@@ -1,6 +1,7 @@
 import { defineEventHandler, readBody, createError } from 'h3';
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'node:crypto';
 import { USERS_DIR } from '../../utils/paths';
 import { safeWriteFileSync } from '../../utils/fs-helpers';
 
@@ -31,7 +32,7 @@ function saveBase64Image(base64Data: string, userId: string, mascotId: string, a
     fs.writeFileSync(filePath, dataBuffer);
     console.log(`[Server] Saved asset to ${filePath}`);
 
-    return `/mascots/users/${userId}/${mascotId}/${assetType}/${filename}`;
+    return `/mascots/users/${userId}/${mascotId}/${assetType}/${filename}?v=${randomUUID()}`;
 }
 
 function processMascotAssets(userId: string, mascot: any): any {

@@ -4,6 +4,7 @@ import Button from 'primevue/button';
 import { useConfigStore } from '../../../store/config';
 import { detectFaceFeatures } from '../../../skills/expression-alignment/feature-island-detector';
 import { detectContentBounds, loadImage } from '../../../skills/expression-alignment/content-bounds-detector';
+import { resolveMascotImageUrl } from '../../../utils/mascot-image-url';
 
 const props = defineProps<{
     visible: boolean;
@@ -18,19 +19,11 @@ const emit = defineEmits<{
 const configStore = useConfigStore();
 
 const resolveImageUrl = (path: string | undefined | null): string => {
-    if (!path) return '';
-    if (path.startsWith('data:image/') || path.startsWith('blob:')) {
-        return path;
-    }
-    let resolved = path;
-    if (path.startsWith('/mascots/') && configStore.useServer) {
-        resolved = `http://${configStore.serverHost}:${configStore.serverPort}${path}`;
-    }
-    if (/^[a-zA-Z]:\\/.test(resolved)) {
-        return resolved;
-    }
-    const separator = resolved.includes('?') ? '&' : '?';
-    return `${resolved}${separator}v=${configStore.configVersion}`;
+    return resolveMascotImageUrl(path, {
+        serverHost: configStore.serverHost,
+        serverPort: configStore.serverPort,
+        absoluteMascotUrl: configStore.useServer
+    });
 };
 
 

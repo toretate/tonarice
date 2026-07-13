@@ -3,11 +3,13 @@ import { useConfigStore } from '../../../store/config';
 import { autoAlignBatch, CONFIDENCE_THRESHOLD } from '../../../skills/expression-alignment/auto-align-v2';
 import { isValidImageSource } from '../../../skills/expression-alignment/expression-auto-align';
 import { MascotImageSetBuilder } from '../../../mascots/MascotImageSetBuilder';
+import { resolveMascotImageUrl } from '../../../utils/mascot-image-url';
 
 export interface MascotAsset {
     id: string;
     name: string;
     path: string;
+    nofacePath?: string;
     originalPath?: string;
     offsetX?: number;
     offsetY?: number;
@@ -46,6 +48,19 @@ export interface MascotData {
     };
 }
 
+export function selectOutfitPreviewExpression(
+    expressions: MascotAsset[] | undefined,
+    preferredId?: string,
+    preferredName?: string
+): MascotAsset | null {
+    const available = (expressions || []).filter(expression => !!expression?.path);
+    return available.find(expression => expression.id === preferredId)
+        || available.find(expression => expression.name === preferredName)
+        || available.find(expression => expression.name === '通常')
+        || available[0]
+        || null;
+}
+
 export function useMascotSettings(
     props: { mascots: MascotData[]; activeMascotId: string; geminiApiKey: string },
     emit: {
@@ -76,19 +91,11 @@ export function useMascotSettings(
 
     // アセットURLの解決
     const resolveImageUrl = (path: string | undefined | null): string => {
-        if (!path) return '';
-        if (path.startsWith('data:image/')) {
-            return path;
-        }
-        let resolved = path;
-        if (path.startsWith('/mascots/') && configStore.useServer) {
-            resolved = `http://${configStore.serverHost}:${configStore.serverPort}${path}`;
-        }
-        if (/^[a-zA-Z]:\\/.test(resolved)) {
-            return resolved;
-        }
-        const separator = resolved.includes('?') ? '&' : '?';
-        return `${resolved}${separator}v=${configStore.configVersion}`;
+        return resolveMascotImageUrl(path, {
+            serverHost: configStore.serverHost,
+            serverPort: configStore.serverPort,
+            absoluteMascotUrl: configStore.useServer
+        });
     };
 
     // 28個の感情スロットの初期化保証
@@ -265,7 +272,10 @@ export function useMascotSettings(
         editingMascot.value = JSON.parse(JSON.stringify(mascot));
         const currentMascotOutfit = mascot.assets?.outfits?.find((o: any) => o.id === mascot.currentOutfitId) || mascot.assets?.outfits?.[0] || null;
         const currentMascotExpressions = currentMascotOutfit?.expressions || mascot.assets?.expressions || [];
-        activeExpression.value = currentMascotExpressions.find((e: any) => e.name === '通常') || currentMascotExpressions[0] || null;
+        activeExpression.value = selectOutfitPreviewExpression(
+            currentMascotExpressions,
+            mascot.defaultExpressionId
+        );
         activePreviewExpression.value = activeExpression.value;
         
         updateMascotPreview();
@@ -300,7 +310,10 @@ export function useMascotSettings(
             
             const currentMascotOutfit = editingMascot.value.assets?.outfits?.find((o: any) => o && o.id === editingMascot.value.currentOutfitId) || editingMascot.value.assets?.outfits?.[0] || null;
             const currentMascotExpressions = currentMascotOutfit?.expressions || editingMascot.value.assets?.expressions || [];
-            activeExpression.value = currentMascotExpressions.find((e: any) => e && e.name === '通常') || currentMascotExpressions[0] || null;
+            activeExpression.value = selectOutfitPreviewExpression(
+                currentMascotExpressions,
+                editingMascot.value.defaultExpressionId
+            );
             activePreviewExpression.value = activeExpression.value;
             loadMascotPrompts();
         }
@@ -310,13 +323,13 @@ export function useMascotSettings(
         const idx = configStore.mascots.findIndex(m => m.id === editingMascot.value.id);
         if (idx !== -1) {
             configStore.mascots.splice(idx, 1, JSON.parse(JSON.stringify(editingMascot.value)));
-            configStore.configVersion++;
             emit('live-update');
         }
     };
 
     const setDefaultExpression = (id: string) => {
         editingMascot.value.defaultExpressionId = id;
+        activePreviewExpression.value = currentExpressions.value.find(expression => expression.id === id) || null;
         updateMascotPreview();
         syncAndSave();
         emit('save-settings');

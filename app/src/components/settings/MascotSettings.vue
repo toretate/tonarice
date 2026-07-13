@@ -5,7 +5,7 @@ import mascotOutfitIcon from '../../assets/mascot_outfilt_icon.png';
 import mascotProfileIcon from '../../assets/mascot_profile_icon.png';
 import Button from 'primevue/button';
 import { useConfigStore } from '../../store/config';
-import { useMascotSettings } from './composables/useMascotSettings';
+import { selectOutfitPreviewExpression, useMascotSettings } from './composables/useMascotSettings';
 
 // 新規切り出しモーダルのインポート
 import MascotVerticalList from './components/MascotVerticalList.vue';
@@ -26,6 +26,7 @@ interface MascotAsset {
     id: string;
     name: string;
     path: string;
+    nofacePath?: string;
     originalPath?: string;
     offsetX?: number;
     offsetY?: number;
@@ -150,14 +151,13 @@ const addOutfitImage = async () => {
 };
 
 const setMainOutfit = (outfit: MascotAsset) => {
+    const previousExpression = activePreviewExpression.value;
     editingMascot.value.currentOutfitId = outfit.id;
-    
-    if (activePreviewExpression.value) {
-        const newExpr = outfit.expressions?.find(e => e.name === activePreviewExpression.value?.name);
-        if (newExpr) {
-            activePreviewExpression.value = newExpr;
-        }
-    }
+    activePreviewExpression.value = selectOutfitPreviewExpression(
+        outfit.expressions,
+        previousExpression?.id || editingMascot.value.defaultExpressionId,
+        previousExpression?.name
+    );
 
     // config-updated IPC 1回のみで MascotViewer 側が切り替わるようにし、
     // updateMascotPreview との2重送信によるちらつきを防止する
@@ -174,8 +174,13 @@ const deleteOutfit = (outfit: MascotAsset) => {
             editingMascot.value.currentOutfitId = nextOutfitId;
             
             if (nextOutfit) {
-                const newExpr = nextOutfit.expressions?.find(e => e.name === activePreviewExpression.value?.name);
-                if (newExpr) activePreviewExpression.value = newExpr;
+                activePreviewExpression.value = selectOutfitPreviewExpression(
+                    nextOutfit.expressions,
+                    activePreviewExpression.value?.id || editingMascot.value.defaultExpressionId,
+                    activePreviewExpression.value?.name
+                );
+            } else {
+                activePreviewExpression.value = null;
             }
             // config-updated IPC のみで切り替え（updateMascotPreview の二重送信を防止）
         }
@@ -374,6 +379,11 @@ const handleBackFromExpressionEditor = async () => {
     emit('save-settings');
     isEditingExpressionsModal.value = false;
 };
+
+const updateOutfitNofacePath = ({ outfitId, nofacePath }: { outfitId: string; nofacePath: string }) => {
+    const outfit = editingMascot.value?.assets.outfits.find(item => item.id === outfitId);
+    if (outfit) outfit.nofacePath = nofacePath;
+};
 </script>
 
 <template>
@@ -385,6 +395,7 @@ const handleBackFromExpressionEditor = async () => {
         :default-front-avatar="defaultFrontAvatar"
         :initial-step="editorInitialStep"
         :initial-expression-id="activePreviewExpression?.id"
+        @update-outfit-noface="updateOutfitNofacePath"
         @back-to-settings="handleBackFromExpressionEditor"
     />
     <div v-else class="mascot-settings-container" :class="{ 'show-detail-mobile': showDetailOnMobile }">

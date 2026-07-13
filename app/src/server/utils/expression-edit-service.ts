@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import fs from 'node:fs';
 import { PYTHON_DIR, resolveMascotPath, PROJECT_ROOT } from './paths';
+import { buildOutfitNofacePath } from '../../utils/mascot-noface';
 import { uploadImage, runWorkflow } from './comfy-connector';
 
 const execFileAsync = promisify(execFile);
@@ -11,6 +12,7 @@ const PYTHON_BIN = process.env.REMBG_PYTHON
     ?? path.join(PYTHON_DIR, process.platform === 'win32' ? '.venv/Scripts/python.exe' : '.venv/bin/python');
 
 const NOFACE_SCRIPT = path.join(PYTHON_DIR, 'generate_noface.py');
+const NORMALIZE_NOFACE_SCRIPT = path.join(PYTHON_DIR, 'normalize_noface.py');
 const RETOUCH_SCRIPT = path.join(PYTHON_DIR, 'retouch.py');
 
 function resolveImagePath(imagePath: string): string {
@@ -138,29 +140,41 @@ export async function generateNofaceImage(
     }
 
     if (engine === 'comfy') {
-        return await generateNofaceWithComfyUI(inputPath, outputPath, prompt || 'Remove eyes, eyebrows, mouth, and nose from the face, making the face completely blank/faceless. Keep all other parts like hair, clothes, and outline exactly the same.');
+        await generateNofaceWithComfyUI(inputPath, outputPath, prompt || 'Remove eyes, eyebrows, mouth, and nose from the face, making the face completely blank/faceless. Keep all other parts like hair, clothes, and outline exactly the same.');
     } else if (engine === 'gemini') {
         if (!geminiApiKey) {
             throw new Error('Gemini API Key is required for Gemini engine');
         }
-        return await generateNofaceWithGemini(inputPath, outputPath, prompt || '目、眉、口、鼻を完全に消去し、周囲の肌色と滑らかに馴染ませた「のっぺらぼう」の顔にしてください。髪や輪郭、服、ポーズ、背景などは一切変更せず、完全に元のままとし、顔のパーツ（目・眉・口・鼻）の領域だけを周囲の肌色で自然に埋めてください。最終的な画像のみを出力してください。', geminiApiKey);
+        await generateNofaceWithGemini(inputPath, outputPath, prompt || '目、眉、口、鼻を完全に消去し、周囲の肌色と滑らかに馴染ませた「のっぺらぼう」の顔にしてください。髪や輪郭、服、ポーズ、背景などは一切変更せず、完全に元のままとし、顔のパーツ（目・眉・口・鼻）の領域だけを周囲の肌色で自然に埋めてください。最終的な画像のみを出力してください。', geminiApiKey);
+    } else {
+        // 従来の MediaPipe / OpenCV を使用した画像処理
+        const pyMode = detectMode === 'comfy' ? 'ai' : detectMode;
+        const { stdout } = await execFileAsync(
+            PYTHON_BIN,
+            [NOFACE_SCRIPT, absInput, absOutput, '--mode', pyMode],
+            { timeout: 30_000 }
+        );
+
+        const result = JSON.parse(stdout.trim()) as { success: boolean; outputPath?: string; error?: string };
+        if (!result.success || result.error) {
+            throw new Error(`generate_noface failed: ${result.error}`);
+        }
     }
 
-    // 従来の MediaPipe / OpenCV を使用した画像処理
-    // Python側は --mode に 'comfy' をサポートしていないため、'comfy' の場合は 'ai' にフォールバックする
-    const pyMode = detectMode === 'comfy' ? 'ai' : detectMode;
+    await normalizeNofaceImage(inputPath, outputPath);
+    return outputPath;
+}
+
+export async function normalizeNofaceImage(sourcePath: string, nofacePath: string): Promise<void> {
+    const absSource = resolveImagePath(sourcePath);
+    const absNoface = resolveImagePath(nofacePath);
     const { stdout } = await execFileAsync(
         PYTHON_BIN,
-        [NOFACE_SCRIPT, absInput, absOutput, '--mode', pyMode],
+        [NORMALIZE_NOFACE_SCRIPT, absSource, absNoface],
         { timeout: 30_000 }
     );
-
-    const result = JSON.parse(stdout.trim()) as { success: boolean; outputPath?: string; error?: string };
-    if (!result.success || result.error) {
-        throw new Error(`generate_noface failed: ${result.error}`);
-    }
-
-    return outputPath;
+    const result = JSON.parse(stdout.trim()) as { success: boolean; error?: string };
+    if (!result.success) throw new Error(`normalize_noface failed: ${result.error}`);
 }
 
 /**
@@ -302,10 +316,12 @@ const PACK_ATLAS_SCRIPT = path.join(PYTHON_DIR, 'pack_atlas.py');
  * テクスチャアトラスをパッキングする。
  */
 export async function packTextureAtlas(
+    userId: string,
     mascotId: string,
+    outfitId: string,
     partsList: Array<{ name: string; path: string; offsetX: number; offsetY: number }>
 ): Promise<{ success: boolean; atlasPath: string; jsonPath: string; width: number; height: number; error?: string }> {
-    const mascotDir = path.dirname(resolveImagePath(`/mascots/users/usr_local_dev_bypass/${mascotId}/noface.png`));
+    const mascotDir = path.dirname(resolveImagePath(buildOutfitNofacePath(mascotId, outfitId, userId)));
     
     // 一時JSONファイルを作成
     const tempPartsJsonPath = path.join(mascotDir, `temp_parts_${Date.now()}.json`);

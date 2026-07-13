@@ -3,6 +3,7 @@ import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import { useConfigStore } from '../../../../store/config';
 import Button from 'primevue/button';
 import Slider from 'primevue/slider';
+import { resolveMascotImageUrl } from '../../../../utils/mascot-image-url';
 
 const configStore = useConfigStore();
 
@@ -10,6 +11,7 @@ interface MascotAsset {
     id: string;
     name: string;
     path: string;
+    nofacePath?: string;
     originalPath?: string;
     offsetX?: number;
     offsetY?: number;
@@ -52,28 +54,18 @@ const emit = defineEmits<{
 }>();
 
 const baseMascotImageUrl = computed(() => {
-    if (props.activePose?.path) return props.activePose.path;
+    if (props.activeOutfit?.nofacePath) return props.activeOutfit.nofacePath;
     if (props.activeOutfit?.path) return props.activeOutfit.path;
     if (props.defaultFrontAvatar?.path) return props.defaultFrontAvatar.path;
     return props.editingMascot?.avatar || '';
 });
 
 const resolveImageUrl = (path: string | undefined | null): string => {
-    if (!path) {
-        return '';
-    }
-    if (path.startsWith('data:image/')) {
-        return path;
-    }
-    let resolved = path;
-    if (path.startsWith('/mascots/') && configStore.useServer) {
-        resolved = `http://${configStore.serverHost}:${configStore.serverPort}${path}`;
-    }
-    if (/^[a-zA-Z]:\\/.test(resolved)) {
-        return resolved;
-    }
-    const separator = resolved.includes('?') ? '&' : '?';
-    return `${resolved}${separator}v=${configStore.configVersion}`;
+    return resolveMascotImageUrl(path, {
+        serverHost: configStore.serverHost,
+        serverPort: configStore.serverPort,
+        absoluteMascotUrl: configStore.useServer
+    });
 };
 
 const currentExpressions = computed(() => {
@@ -280,7 +272,8 @@ const extractSinglePart = async (expr: MascotAsset) => {
         expr.originalPath = expr.path;
     }
     
-    const nofacePath = props.nofaceImagePath || `/mascots/users/usr_local_dev_bypass/${props.editingMascot.id}/noface.png`;
+    const nofacePath = props.nofaceImagePath || props.activeOutfit?.nofacePath;
+    if (!nofacePath) return;
     
     const sanitizedLabel = expr.name.replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]/g, '_');
     const outfitName = props.activeOutfit?.name.replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]/g, '_') || 'default';
@@ -523,7 +516,7 @@ const updateExtractedParts = async () => {
         extractedPartsUrl.value = null;
         return;
     }
-    const nofacePath = props.nofaceImagePath || baseMascotImageUrl.value;
+    const nofacePath = props.nofaceImagePath || props.activeOutfit?.nofacePath;
     if (!nofacePath) {
         extractedPartsUrl.value = null;
         return;

@@ -2,11 +2,13 @@
 import { ref, computed, watch } from 'vue';
 import Button from 'primevue/button';
 import { useConfigStore } from '../../../store/config';
+import { resolveMascotImageUrl } from '../../../utils/mascot-image-url';
 
 interface MascotAsset {
     id: string;
     name: string;
     path: string;
+    nofacePath?: string;
     originalPath?: string;
     offsetX?: number;
     offsetY?: number;
@@ -74,19 +76,11 @@ const isImage = (path: string | undefined | null): boolean => {
 
 // アセットURLの解決
 const resolveImageUrl = (path: string | undefined | null): string => {
-    if (!path) return '';
-    if (path.startsWith('data:image/')) {
-        return path;
-    }
-    let resolved = path;
-    if (path.startsWith('/mascots/') && configStore.useServer) {
-        resolved = `http://${configStore.serverHost}:${configStore.serverPort}${path}`;
-    }
-    if (/^[a-zA-Z]:\\/.test(resolved)) {
-        return resolved;
-    }
-    const separator = resolved.includes('?') ? '&' : '?';
-    return `${resolved}${separator}v=${configStore.configVersion}`;
+    return resolveMascotImageUrl(path, {
+        serverHost: configStore.serverHost,
+        serverPort: configStore.serverPort,
+        absoluteMascotUrl: configStore.useServer
+    });
 };
 
 const getMascotCoverImage = (mascot: MascotData): string => {
@@ -150,14 +144,37 @@ const onExprImageLoad = (event: Event) => {
     exprNaturalHeight.value = img.naturalHeight;
 };
 
-// 選択マスコット切替時の画像サイズ初期化
-watch(() => props.activeMascotId, () => {
+// マスコット・衣装の切替時は、合成に使う全画像のサイズを再取得する。
+watch(() => [
+    props.activeMascotId,
+    props.activeOutfit?.id,
+    props.activeOutfit?.path
+], () => {
     baseNaturalWidth.value = 0;
     baseNaturalHeight.value = 0;
     exprNaturalWidth.value = 0;
     exprNaturalHeight.value = 0;
     outfitNaturalWidth.value = 0;
     outfitNaturalHeight.value = 0;
+    delete nofaceErrors.value[props.activeMascotId];
+});
+
+// 表情だけを切り替える場合、nofaceと衣装の寸法は維持する。
+// srcが変わらない画像ではloadイベントが再発火しないため、ここでリセットすると
+// 表情レイヤーの配置計算ができず、nofaceだけが表示されてしまう。
+watch(() => [
+    props.activePreviewExpression?.id,
+    props.activePreviewExpression?.path
+], () => {
+    exprNaturalWidth.value = 0;
+    exprNaturalHeight.value = 0;
+});
+
+// 同じ衣装でnofaceを再生成した場合は、衣装寸法を残したままベースだけ再取得する。
+watch(() => props.activeOutfit?.nofacePath, () => {
+    baseNaturalWidth.value = 0;
+    baseNaturalHeight.value = 0;
+    delete nofaceErrors.value[props.activeMascotId];
 });
 
 // 重ね合わせ用のスタイル計算
@@ -251,6 +268,7 @@ const computedExpressionStyle = computed(() => {
         <!-- 元の衣装のサイズを動的ロードして検出するための非表示画像タグ -->
         <img 
             v-if="activeOutfit" 
+            data-testid="active-outfit-size-probe"
             :src="resolveImageUrl(activeOutfit.path)" 
             style="display: none;" 
             @load="onOutfitImageLoad" 
@@ -277,17 +295,18 @@ const computedExpressionStyle = computed(() => {
                         <template v-if="activeMascotId === mascot.id">
                             <!-- のっぺらぼう画像（表情プレビュー中でエラーがない場合） -->
                             <img 
-                                v-if="activePreviewExpression && !nofaceErrors[mascot.id]" 
-                                key="active-noface" 
-                                :src="resolveImageUrl(`/mascots/users/usr_local_dev_bypass/${mascot.id}/noface.png`)" 
+                                v-if="activeOutfit?.nofacePath && activePreviewExpression?.path && isImage(activePreviewExpression.path) && !nofaceErrors[mascot.id]"
+                                :key="`active-noface-${activeOutfit?.id}`"
+                                data-testid="active-noface-preview"
+                                :src="resolveImageUrl(activeOutfit.nofacePath)"
                                 style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1;" 
                                 @load="onBaseImageLoad"
                                 @error="handleNofaceError(mascot.id)"
                             />
-                            <!-- ポーズ画像優先 -->
-                            <img v-else-if="activePose && isImage(activePose.path)" key="active-pose" :src="resolveImageUrl(activePose.path)" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1;" />
                             <!-- 衣装画像優先 -->
-                            <img v-else-if="activeOutfit && isImage(activeOutfit.path)" key="active-outfit" :src="resolveImageUrl(activeOutfit.path)" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1;" />
+                            <img v-else-if="activeOutfit && isImage(activeOutfit.path)" :key="`active-outfit-${activeOutfit.id}`" data-testid="active-outfit-preview" :src="resolveImageUrl(activeOutfit.path)" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1;" />
+                            <!-- 衣装がない場合のみポーズ画像へフォールバック -->
+                            <img v-else-if="activePose && isImage(activePose.path)" key="active-pose" :src="resolveImageUrl(activePose.path)" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1;" />
                             <!-- フロント画像優先 -->
                             <img v-else-if="defaultFrontAvatar && isImage(defaultFrontAvatar.path)" key="active-front" :src="resolveImageUrl(defaultFrontAvatar.path)" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1;" />
                             <!-- ベースアバター優先 -->
@@ -304,6 +323,7 @@ const computedExpressionStyle = computed(() => {
                         <template v-if="activeMascotId === mascot.id && activePreviewExpression && activePreviewExpression.path">
                             <img 
                                 v-if="isImage(activePreviewExpression.path)" 
+                                data-testid="active-expression-preview"
                                 :src="resolveImageUrl(activePreviewExpression.path)" 
                                 :style="computedExpressionStyle"
                                 @load="onExprImageLoad"

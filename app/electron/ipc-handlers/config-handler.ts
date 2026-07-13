@@ -8,6 +8,7 @@ import { getSettingsWindow } from '../window/settings-window';
 import { getIntegratedWindow } from '../window/integrated-window';
 import { getCompactWindow } from '../window/compact-window';
 import { resolveMascotPath } from '../../src/server/utils/paths';
+import { randomUUID } from 'node:crypto';
 
 // デフォルトラジオプロンプトのインポート
 import radioModeDefault from '@prompt/radio/radio-mode.prompt';
@@ -250,7 +251,7 @@ export function registerConfigHandlers(config: AppConfig) {
             // UIからアクセス可能な相対アセットパスを返す
             return {
                 success: true,
-                path: requestPath
+                path: `${requestPath}?v=${randomUUID()}`
             };
         } catch (error: any) {
             console.error('[Config] Failed to save mascot image:', error);
