@@ -21,7 +21,7 @@ describe('Standard Multistep Path Verification', () => {
             console.log('[Verify Test] searchTasks executed with args:', args);
             return JSON.stringify({
                 success: true,
-                message: 'タスク・予定が 1 件見つかりました：\n- [未完了] 検証ブランチテスト会議 (予定日時: 2026/07/07 15:00:00)'
+                message: 'タスク・予定が 1 件見つかりました：\n- [ID: task_verify_123] [未完了] 検証ブランチテスト会議 (予定日時: 2026/07/07 15:00:00)'
             });
         }
     });

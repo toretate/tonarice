@@ -7,8 +7,11 @@ import { splitSentences } from '../utils/sentence-splitter';
 import { sanitizeForIrodoriTTS } from '../utils/irodori-sanitizer';
 import { filterDialogue } from '../utils/dialogue-filter';
 import { authenticateUserToken } from '../middleware/auth';
+import { normalizeTextForTts, stripResidualAsterisks } from '../utils/tts-normalizer';
 import { PROJECT_ROOT, USERS_DIR } from '../utils/paths';
-import { addTaskToDb, searchTasksFromDb, updateTaskInDb, deleteTaskFromDb } from '../utils/tasks-service';
+import { executeMemosTool, executeTasksTool } from '../utils/tool-executor';
+import { updateTaskInDb } from '../utils/tasks-service';
+
 
 // ユーザーごとの接続管理（crosswsのPeerオブジェクトをSetに保存）
 const userConnections = new Map<string, Set<any>>();
@@ -137,7 +140,8 @@ export default defineWebSocketHandler({
                     frequencyPenalty,
                     repetitionPenalty,
                     maxOutputTokens,
-                    enableThinking
+                    enableThinking,
+                    ttsDictionary
                 } = data;
 
                 console.log(`=========================================`);
@@ -182,72 +186,14 @@ export default defineWebSocketHandler({
                         onToolExecute: async (toolName, args) => {
                             const userId = ((peer as any).ctx && (peer as any).ctx.userId) || 'anonymous';
                             console.log(`[WS] Tool execution intercept: ${toolName}`, args);
-                            if (toolName !== 'manageTasks') {
+                            if (toolName !== 'manageTasks' && toolName !== 'manageMemos') {
                                 return null;
                             }
                             try {
-                                switch (args.action) {
-                                    case 'add': {
-                                        if (!args.title) {
-                                            return JSON.stringify({ success: false, error: 'add には title が必須です。' });
-                                        }
-                                        const saved = addTaskToDb(userId, {
-                                            title: args.title,
-                                            priority: args.priority,
-                                            categoryId: args.categoryId,
-                                            scheduledAt: args.scheduledAt || undefined
-                                        });
-                                        return JSON.stringify({
-                                            success: true,
-                                            action: 'add',
-                                            id: saved.task.id,
-                                            task: saved.task
-                                        });
-                                    }
-                                    case 'search': {
-                                        const tasks = searchTasksFromDb(userId, args.query, args.date, args.completed);
-                                        if (tasks.length === 0) {
-                                            return JSON.stringify({
-                                                success: true,
-                                                message: '該当する予定やタスクは見つかりませんでした。'
-                                            });
-                                        }
-                                        const lines = tasks.map(t => {
-                                            const dateStr = t.scheduledAt ? ` (予定日時: ${new Date(t.scheduledAt).toLocaleString('ja-JP')})` : '';
-                                            const statusStr = t.completed ? '[完了]' : '[未完了]';
-                                            return `- ${statusStr} ${t.title}${dateStr}`;
-                                        });
-                                        return JSON.stringify({
-                                            success: true,
-                                            message: `タスク・予定が ${tasks.length} 件見つかりました：\n${lines.join('\n')}`
-                                        });
-                                    }
-                                    case 'update': {
-                                        if (!args.id) {
-                                            return JSON.stringify({ success: false, error: 'update には id が必須です。' });
-                                        }
-                                        const saved = updateTaskInDb(userId, args.id, args);
-                                        return JSON.stringify({
-                                            success: true,
-                                            action: 'update',
-                                            id: args.id,
-                                            task: saved.task
-                                        });
-                                    }
-                                    case 'delete': {
-                                        if (!args.id) {
-                                            return JSON.stringify({ success: false, error: 'delete には id が必須です。' });
-                                        }
-                                        deleteTaskFromDb(userId, args.id);
-                                        return JSON.stringify({
-                                            success: true,
-                                            action: 'delete',
-                                            id: args.id
-                                        });
-                                    }
-                                    default:
-                                        return JSON.stringify({ success: false, error: `不明な action: ${args.action}` });
+                                if (toolName === 'manageMemos') {
+                                    return await executeMemosTool(userId, args);
                                 }
+                                return await executeTasksTool(userId, args);
                             } catch (e: any) {
                                 console.error(`[WS] Intercepted tool ${toolName} (action: ${args.action}) failed:`, e.message);
                                 return JSON.stringify({
@@ -258,7 +204,25 @@ export default defineWebSocketHandler({
                         },
                         onToolResult: (toolName, input, output) => {
                             const userId = ((peer as any).ctx && (peer as any).ctx.userId) || 'anonymous';
-                            if (toolName !== 'manageTasks') {
+                            if (toolName !== 'manageTasks' && toolName !== 'manageMemos') {
+                                return;
+                            }
+                            if (toolName === 'manageMemos') {
+                                try {
+                                    const parsedOutput = typeof output === 'string' ? JSON.parse(output) : output;
+                                    if (!parsedOutput || !parsedOutput.success) return;
+                                    console.log(`[WS] Tool execution detected in ws.ts: ${toolName} (action: ${input.action})`, input);
+                                    peer.send(JSON.stringify({
+                                        event: 'memo-action',
+                                        data: {
+                                            action: input.action,
+                                            memoId: parsedOutput.id || input.id,
+                                            memo: parsedOutput.memo
+                                        }
+                                    }));
+                                } catch (e: any) {
+                                    console.error('[WS] Failed to sync tool memo action to client:', e.message);
+                                }
                                 return;
                             }
                             try {
@@ -294,9 +258,33 @@ export default defineWebSocketHandler({
                     });
                 } catch (aiError: any) {
                     console.error('[WS] AI Engine Error:', aiError.message);
+                    let detailMessage = aiError.message;
+                    const responseBodyStr = aiError.responseBody || '';
+                    const errorStr = (detailMessage + ' ' + responseBodyStr).toLowerCase();
+
+                    // コンテキスト制限エラーのときは分かりやすい日本語メッセージにする
+                    if (
+                        errorStr.includes('context size') ||
+                        errorStr.includes('context length') ||
+                        errorStr.includes('context_length_exceeded') ||
+                        errorStr.includes('context exceeded')
+                    ) {
+                        detailMessage = 'AIのコンテキスト長（一度に処理できる会話量）の上限を超えました。LM Studio等の設定画面で「Context Length」を 4096 や 8192 以上に引き上げてください。';
+                    } else if (aiError.responseBody) {
+                        try {
+                            const parsedBody = JSON.parse(aiError.responseBody);
+                            if (parsedBody.error) {
+                                detailMessage += ` (${parsedBody.error})`;
+                            } else {
+                                detailMessage += ` (${aiError.responseBody})`;
+                            }
+                        } catch {
+                            detailMessage += ` (${aiError.responseBody})`;
+                        }
+                    }
                     peer.send(JSON.stringify({
                         event: 'chat-error',
-                        data: { message: `AIサーバーとの通信エラー: ${aiError.message}` }
+                        data: { message: `AIサーバーとの通信エラー: ${detailMessage}` }
                     }));
                     return;
                 }
@@ -349,7 +337,9 @@ export default defineWebSocketHandler({
                     const irodoriModelName = irodoriModel || 'irodori-tts-500m-v3';
                     const irodoriVoiceName = irodoriVoice || 'default';
 
-                    const targetSpeechText = ttsReadNarrative === false ? filterDialogue(speechText) : speechText;
+                    const normalized = normalizeTextForTts(speechText, ttsDictionary);
+                    const dialogueFiltered = ttsReadNarrative === false ? filterDialogue(normalized) : normalized;
+                    const targetSpeechText = stripResidualAsterisks(dialogueFiltered);
 
                     if (targetSpeechText.trim()) {
                         const processedSentences = splitSentences(targetSpeechText);
