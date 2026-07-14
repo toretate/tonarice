@@ -25,6 +25,9 @@ export interface IElectronAPI {
     getAppConfig: () => Promise<any>;
     updateAppConfig: (config: any) => Promise<void>;
     testServerConnection: (host: string, port: number) => Promise<{ success: boolean; message?: string; error?: string }>;
+    forgeTestConnection: (host: string) => Promise<boolean>;
+    forgeGetModels: (host: string) => Promise<string[]>;
+    forgeGetLoras: (host: string) => Promise<string[]>;
     askGemini: (message: string, apiKey: string, systemPrompt: string, modelName: string, history?: any[], attachments?: any[]) => Promise<string>;
     askLmStudio: (message: string, systemPrompt: string, modelName: string, endpoint: string, history?: any[], attachments?: any[], tools?: any) => Promise<string>;
     getChatHistory: () => Promise<any>;

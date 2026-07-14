@@ -4,6 +4,14 @@ import { autoAlignBatch, CONFIDENCE_THRESHOLD } from '../../../skills/expression
 import { isValidImageSource } from '../../../skills/expression-alignment/expression-auto-align';
 import { MascotImageSetBuilder } from '../../../mascots/MascotImageSetBuilder';
 import { resolveMascotImageUrl } from '../../../utils/mascot-image-url';
+import {
+    blobToDataUrl,
+    canvasToImageBlob,
+    getImageExtension,
+    MascotImageSource,
+    saveMascotImageSource,
+    selectMascotImage
+} from '../../../utils/mascot-image-upload';
 
 export interface MascotAsset {
     id: string;
@@ -406,16 +414,26 @@ export function useMascotSettings(
         }
     };
 
-    const importFromSpriteSheet = async (importData?: string | { imagePath: string; importId: string }) => {
+    const importFromSpriteSheet = async (importData?: MascotImageSource | { imagePath: string; importId: string }) => {
         if (!window.electronAPI) return;
         
         let imagePath = '';
         let importId = '';
         let isBase64 = false;
         let originalSource = '';
+        let selectedSource: MascotImageSource | null = null;
+        let releaseSelectedSource: () => void = () => undefined;
         
         if (importData) {
-            if (typeof importData === 'string') {
+            if (importData instanceof Blob) {
+                selectedSource = importData;
+                const previewUrl = URL.createObjectURL(importData);
+                imagePath = previewUrl;
+                originalSource = imagePath;
+                releaseSelectedSource = () => URL.revokeObjectURL(previewUrl);
+                isBase64 = true;
+                importId = 'sheet_' + Date.now();
+            } else if (typeof importData === 'string') {
                 imagePath = importData;
                 originalSource = importData;
                 isBase64 = imagePath.startsWith('data:image/');
@@ -428,11 +446,13 @@ export function useMascotSettings(
                 isBase64 = imagePath.startsWith('data:image/');
             }
         } else {
-            const result = await window.electronAPI.selectLocalImage();
-            if (!result || !result.success) return;
-            imagePath = result.path;
-            originalSource = result.path;
-            isBase64 = imagePath.startsWith('data:image/');
+            const result = await selectMascotImage();
+            if (!result) return;
+            selectedSource = result.source;
+            imagePath = result.previewUrl;
+            originalSource = result.previewUrl;
+            releaseSelectedSource = result.release;
+            isBase64 = selectedSource instanceof Blob || imagePath.startsWith('data:image/');
             importId = 'sheet_' + Date.now();
         }
         
@@ -450,16 +470,19 @@ export function useMascotSettings(
             if (isBase64 && editingMascot.value?.id) {
                 try {
                     const sheetFilename = `expressions/working/${importId}/spritesheet_${importId}.png`;
-                    const saveResult = await window.electronAPI.saveMascotImage(
+                    const saveResult = await saveMascotImageSource(
                         editingMascot.value.id,
                         sheetFilename,
-                        imagePath
+                        selectedSource || imagePath
                     );
                     if (saveResult.success && saveResult.path) {
                         imagePath = saveResult.path;
                     }
                 } catch (saveErr) {
                     console.warn('[useMascotSettings] スプライトシート全体の保存に失敗しました:', saveErr);
+                    if (selectedSource instanceof Blob) {
+                        imagePath = await blobToDataUrl(selectedSource);
+                    }
                 }
             }
             
@@ -511,19 +534,19 @@ export function useMascotSettings(
                         height
                     );
                     
-                    const croppedBase64 = canvas.toDataURL('image/png');
+                    const croppedBlob = await canvasToImageBlob(canvas);
                     const rawLabel = label.trim();
                     const translatedLabel = emotionTranslationMap[rawLabel.toLowerCase()] || rawLabel;
                     
-                    let finalCroppedPath = croppedBase64;
-                    if (window.electronAPI?.saveMascotImage && editingMascot.value?.id) {
+                    let finalCroppedPath = '';
+                    if (editingMascot.value?.id) {
                         try {
                             const sanitizedLabel = translatedLabel.replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]/g, '_');
                             const filename = `expressions/working/${importId}/expr_${sanitizedLabel}.png`;
-                            const saveResult = await window.electronAPI.saveMascotImage(
+                            const saveResult = await saveMascotImageSource(
                                 editingMascot.value.id,
                                 filename,
-                                croppedBase64
+                                croppedBlob
                             );
                             if (saveResult.success && saveResult.path) {
                                 finalCroppedPath = saveResult.path;
@@ -531,6 +554,9 @@ export function useMascotSettings(
                         } catch (saveErr) {
                             console.warn(`[useMascotSettings] 表情 ${translatedLabel} の保存に失敗しました:`, saveErr);
                         }
+                    }
+                    if (!finalCroppedPath) {
+                        finalCroppedPath = await blobToDataUrl(croppedBlob);
                     }
                     
                     const currentMascotExpressions = activeOutfit.value?.expressions || editingMascot.value.assets?.expressions || [];
@@ -556,6 +582,7 @@ export function useMascotSettings(
             alert('解析に失敗しました: ' + e.message);
         } finally {
             isScanningSprite.value = false;
+            releaseSelectedSource();
         }
     };
 
@@ -605,34 +632,23 @@ export function useMascotSettings(
     };
 }
 
-const getExtensionFromBase64 = (base64Str: string): string => {
-    const match = base64Str.match(/^data:image\/([\w+.-]+);base64,/);
-    if (match && match[1]) {
-        const mimeSub = match[1].toLowerCase();
-        if (mimeSub === 'jpeg') return 'jpg';
-        if (mimeSub === 'svg+xml') return 'svg';
-        return mimeSub;
-    }
-    return 'png'; // デフォルト
-};
-
 export async function uploadImportedImage(
     mascotId: string,
     assetType: 'outfits' | 'expressions' | 'poses' | 'avatar',
     assetId: string,
-    source: string
+    source: MascotImageSource
 ): Promise<string> {
     if (!window.electronAPI?.saveMascotImage) {
         throw new Error('electronAPI.saveMascotImage is not available');
     }
-    if (!source.startsWith('data:image/')) {
+    if (typeof source === 'string' && !source.startsWith('data:image/') && !source.startsWith('blob:')) {
         return source;
     }
-    const ext = getExtensionFromBase64(source);
+    const ext = getImageExtension(source);
     const filename = `${assetType}/${assetId}.${ext}`;
 
     console.log(`[Upload] Uploading ${assetType} image to mascot ${mascotId}: ${filename}`);
-    const result = await window.electronAPI.saveMascotImage(mascotId, filename, source);
+    const result = await saveMascotImageSource(mascotId, filename, source);
     if (result && result.success && result.path) {
         return result.path;
     } else {

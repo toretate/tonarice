@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { PYTHON_DIR, resolveMascotPath, PROJECT_ROOT } from './paths';
 import { buildOutfitNofacePath } from '../../utils/mascot-noface';
-import { uploadImage, runWorkflow } from './comfy-connector';
+import { uploadImage, runJsonWorkflow, runWorkflow } from './comfy-connector';
 
 const execFileAsync = promisify(execFile);
 

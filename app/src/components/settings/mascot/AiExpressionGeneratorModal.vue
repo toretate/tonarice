@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue';
 import { useConfigStore } from '@/store/config';
 import Button from 'primevue/button';
 import { resolveMascotImageUrl } from '../../../utils/mascot-image-url';
+import { saveMascotImageSource } from '../../../utils/mascot-image-upload';
 
 const configStore = useConfigStore();
 
@@ -284,7 +285,7 @@ const generateExpressions = async () => {
                 const importId = Date.now().toString();
                 currentGenerationId.value = importId;
                 const filename = `expressions/working/${importId}/spritesheet_${importId}.png`;
-                const saveResult = await window.electronAPI.saveMascotImage(
+                const saveResult = await saveMascotImageSource(
                     props.editingMascot.id,
                     filename,
                     result.imageBytes

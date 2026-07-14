@@ -6,6 +6,12 @@ import mascotProfileIcon from '../../assets/mascot_profile_icon.png';
 import Button from 'primevue/button';
 import { useConfigStore } from '../../store/config';
 import { selectOutfitPreviewExpression, useMascotSettings } from './composables/useMascotSettings';
+import {
+    blobToDataUrl,
+    MascotImageSource,
+    saveMascotImageSource,
+    selectMascotImage
+} from '../../utils/mascot-image-upload';
 
 // 新規切り出しモーダルのインポート
 import MascotVerticalList from './components/MascotVerticalList.vue';
@@ -113,20 +119,24 @@ const backgroundRemovalTargetOutfitId = ref<string | null>(null);
 // --- 立ち絵アセット（全身像）操作関数群 ---
 const addOutfitImage = async () => {
     if (!window.electronAPI) return;
-    const result = await window.electronAPI.selectLocalImage();
-    if (result && result.success) {
+    const result = await selectMascotImage();
+    if (result) {
         if (!editingMascot.value.assets.outfits) {
             editingMascot.value.assets.outfits = [];
         }
         
         const newOutfitId = 'outfit_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
-        let finalPath = result.path;
+        let finalPath = result.previewUrl;
 
         try {
-            finalPath = await uploadImportedImage(editingMascot.value.id, 'outfits', newOutfitId, result.path);
+            finalPath = await uploadImportedImage(editingMascot.value.id, 'outfits', newOutfitId, result.source);
         } catch (uploadErr) {
             console.warn('[MascotSettings] 衣装画像のアップロードに失敗しました。Base64でフォールバック保持します:', uploadErr);
+            if (result.source instanceof Blob) {
+                finalPath = await blobToDataUrl(result.source);
+            }
         }
+        result.release();
 
         const newOutfit: MascotAsset & { expressions?: MascotAsset[] } = {
             id: newOutfitId,
@@ -222,26 +232,6 @@ const selectedImageBlob = ref<Blob | null>(null);
 const selectedImageOriginalPath = ref('');
 const cropImageBlobUrl = ref('');
 
-const base64ToBlob = (base64: string): Blob => {
-    const parts = base64.split(';base64,');
-    if (parts.length < 2) return new Blob();
-    const contentType = parts[0].split(':')[1];
-    const raw = window.atob(parts[1]);
-    const rawLength = raw.length;
-    const uInt8Array = new Uint8Array(rawLength);
-    for (let i = 0; i < rawLength; ++i) {
-        uInt8Array[i] = raw.charCodeAt(i);
-    }
-    return new Blob([uInt8Array], { type: contentType });
-};
-
-const blobToDataUrl = (blob: Blob): Promise<string> => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(reader.error || new Error('BlobのData URL変換に失敗しました。'));
-    reader.readAsDataURL(blob);
-});
-
 const cleanCropResources = () => {
     if (cropImageBlobUrl.value) {
         URL.revokeObjectURL(cropImageBlobUrl.value);
@@ -297,54 +287,55 @@ const handleCropCurrent = (slot: MascotAsset) => {
 
 const handleCropNew = async (slot?: MascotAsset) => {
     if (!window.electronAPI) return;
-    const result = await window.electronAPI.selectLocalImage();
-    if (result && result.success) {
+    const result = await selectMascotImage();
+    if (result) {
         if (slot) selectedCropExpression.value = slot;
         cleanCropResources();
 
-        if (result.path.startsWith('data:image/')) {
-            const blob = base64ToBlob(result.path);
-            selectedImageBlob.value = blob;
-            cropImageBlobUrl.value = URL.createObjectURL(blob);
-            cropImageSrc.value = cropImageBlobUrl.value;
+        if (result.source instanceof Blob) {
+            selectedImageBlob.value = result.source;
+            cropImageBlobUrl.value = result.previewUrl;
+            cropImageSrc.value = result.previewUrl;
         } else {
-            cropImageSrc.value = result.path;
-            selectedImageOriginalPath.value = result.path;
+            cropImageSrc.value = result.previewUrl;
+            selectedImageOriginalPath.value = result.source;
         }
         isCropModalActive.value = true;
     }
 };
 
-const handleCropDone = async (croppedBase64: string) => {
+const handleCropDone = async (croppedImage: MascotImageSource) => {
     const currentMascotExpressions = activeOutfit.value?.expressions || editingMascot.value.assets.expressions || [];
     const targetSlot = selectedCropExpression.value || currentMascotExpressions.find((e: any) => e.name === '通常') || currentMascotExpressions[0];
     if (targetSlot) {
-        const originalSource = selectedImageBlob.value
-            ? await blobToDataUrl(selectedImageBlob.value)
-            : selectedImageOriginalPath.value;
-        const croppedSource = croppedBase64.startsWith('blob:') ? originalSource : croppedBase64;
-        let finalPath = croppedSource;
-        let finalOriginalPath = originalSource;
+        const originalSource: MascotImageSource = selectedImageBlob.value || selectedImageOriginalPath.value;
+        const croppedSource = typeof croppedImage === 'string' && croppedImage.startsWith('blob:')
+            ? originalSource
+            : croppedImage;
+        let finalPath = typeof croppedSource === 'string' ? croppedSource : '';
+        let finalOriginalPath = typeof originalSource === 'string' ? originalSource : '';
         if (window.electronAPI?.saveMascotImage && editingMascot.value?.id) {
             try {
                 const sanitizedLabel = targetSlot.name.replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]/g, '_');
                 const outfitName = activeOutfit.value?.name.replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]/g, '_') || 'default';
 
-                if (originalSource.startsWith('data:image/')) {
+                if (originalSource instanceof Blob || originalSource.startsWith('data:image/')) {
                     try {
                         const originalFilename = `expressions/${outfitName}/original/orig_expr_${sanitizedLabel}.png`;
-                        const saveOriginalResult = await window.electronAPI.saveMascotImage(editingMascot.value.id, originalFilename, originalSource);
+                        const saveOriginalResult = await saveMascotImageSource(editingMascot.value.id, originalFilename, originalSource);
                         if (saveOriginalResult.success && saveOriginalResult.path) finalOriginalPath = saveOriginalResult.path;
                     } catch (originalErr) { console.warn('[MascotSettings] 元画像の保存に失敗しました:', originalErr); }
                 }
 
-                if (croppedSource.startsWith('data:image/')) {
+                if (croppedSource instanceof Blob || croppedSource.startsWith('data:image/')) {
                     const filename = `expressions/${outfitName}/expr_${sanitizedLabel}.png`;
-                    const saveResult = await window.electronAPI.saveMascotImage(editingMascot.value.id, filename, croppedSource);
+                    const saveResult = await saveMascotImageSource(editingMascot.value.id, filename, croppedSource);
                     if (saveResult.success && saveResult.path) finalPath = saveResult.path;
                 }
             } catch (err) { console.warn('[MascotSettings] 切り抜き画像の保存に失敗しました:', err); }
         }
+        if (!finalPath && croppedSource instanceof Blob) finalPath = await blobToDataUrl(croppedSource);
+        if (!finalOriginalPath && originalSource instanceof Blob) finalOriginalPath = await blobToDataUrl(originalSource);
         targetSlot.path = finalPath;
         targetSlot.originalPath = finalOriginalPath;
     }

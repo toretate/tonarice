@@ -8,6 +8,7 @@ import { autoAlignSingle, CONFIDENCE_THRESHOLD, type AutoAlignV2Result } from '.
 import type { SharedTransform } from '@desktop-ai-mascot/expression-alignment';
 import BackgroundRemovalModal from './BackgroundRemovalModal.vue';
 import { resolveMascotImageUrl } from '../../../utils/mascot-image-url';
+import { saveMascotImageSource } from '../../../utils/mascot-image-upload';
 
 const configStore = useConfigStore();
 
@@ -323,7 +324,7 @@ const handleAutoCrop = async () => {
                 const outfitName = props.activeOutfit?.name.replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]/g, '_') || 'default';
                 const filename = `expressions/${outfitName}/expr_${sanitizedLabel}.png`;
                 
-                const saveResult = await window.electronAPI.saveMascotImage(
+                const saveResult = await saveMascotImageSource(
                     props.editingMascot.id,
                     filename,
                     cropped
@@ -497,7 +498,7 @@ const handleBackgroundRemovalDone = async (newBase64: string) => {
                 const outfitName = props.activeOutfit?.name.replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]/g, '_') || 'default';
                 const filename = `expressions/${outfitName}/expr_${sanitizedLabel}.png`;
                 
-                const saveResult = await window.electronAPI.saveMascotImage(
+                const saveResult = await saveMascotImageSource(
                     props.editingMascot.id,
                     filename,
                     newBase64

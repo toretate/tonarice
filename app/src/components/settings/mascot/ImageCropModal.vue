@@ -5,6 +5,7 @@ import { useConfigStore } from '../../../store/config';
 import { detectFaceFeatures } from '../../../skills/expression-alignment/feature-island-detector';
 import { detectContentBounds, loadImage } from '../../../skills/expression-alignment/content-bounds-detector';
 import { resolveMascotImageUrl } from '../../../utils/mascot-image-url';
+import { canvasToImageBlob, MascotImageSource } from '../../../utils/mascot-image-upload';
 
 const props = defineProps<{
     visible: boolean;
@@ -13,7 +14,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     (e: 'close'): void;
-    (e: 'crop', base64: string): void;
+    (e: 'crop', image: MascotImageSource): void;
 }>();
 
 const configStore = useConfigStore();
@@ -247,8 +248,7 @@ const executeCrop = async () => {
             cropHeight.value
         );
         
-        const croppedBase64 = canvas.toDataURL('image/png');
-        emit('crop', croppedBase64);
+        emit('crop', await canvasToImageBlob(canvas));
     }
 };
 

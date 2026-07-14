@@ -8,7 +8,9 @@ describe('Standard Multistep Path Verification', () => {
     const lmstudioEndpoint = process.env.TEST_LMSTUDIO_ENDPOINT || 'http://localhost:1234/v1';
 
     // 検索ツールの定義 (本番の schema を簡易再現)
-    const testSearchTasksTool = tool({
+    // 実接続経路の確認が目的のため、AI SDKとZod間の深い型推論はここでは行わない。
+    const createTestTool = tool as any;
+    const testSearchTasksTool = createTestTool({
         description: 'タスク（TODO）やスケジュール（予定）を検索します。',
         inputSchema: z.object({
             query: z.string().optional().describe('タイトルに含まれる検索キーワード'),
@@ -17,7 +19,7 @@ describe('Standard Multistep Path Verification', () => {
             action: z.enum(['add', 'search', 'delete']).optional().describe('操作アクション'),
             tags: z.array(z.string()).optional().describe('タグのリスト')
         }),
-        execute: async (args) => {
+        execute: async (args: unknown) => {
             console.log('[Verify Test] searchTasks executed with args:', args);
             return JSON.stringify({
                 success: true,
@@ -53,8 +55,7 @@ describe('Standard Multistep Path Verification', () => {
             const lmstudio = createOpenAI({
                 baseURL: lmstudioEndpoint,
                 apiKey: 'not-needed',
-                compatibility: 'compatible'
-            });
+        });
             modelProvider = lmstudio.chat('qwen3.5-9b-uncensored-hauhaucs-aggressive');
         }
 

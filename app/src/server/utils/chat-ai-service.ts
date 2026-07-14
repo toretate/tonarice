@@ -7,6 +7,60 @@ import { convertLmStudioToolToVercel } from './tool-adapter';
 // 共通ガイドラインテンプレートの読み込み
 import toolUseGuidelineTemplate from '@prompt/tool-use-guideline';
 
+function createLmStudioFetch(repetitionPenalty?: number, enableThinking?: boolean): typeof fetch {
+    return async (input, init) => {
+        if (!init?.body || typeof init.body !== 'string') {
+            return fetch(input, init);
+        }
+
+        try {
+            const body = JSON.parse(init.body) as Record<string, unknown>;
+            if (repetitionPenalty !== undefined) {
+                body.repetition_penalty = repetitionPenalty;
+            }
+            if (enableThinking === false) {
+                body.reasoning_format = 'none';
+                body.include_reasoning = false;
+            }
+            return fetch(input, { ...init, body: JSON.stringify(body) });
+        } catch {
+            // JSON以外の要求は加工せず、そのまま送信する。
+            return fetch(input, init);
+        }
+    };
+}
+
+function extractToolResultMessage(output: unknown): string | null {
+    if (typeof output === 'string') {
+        const trimmed = output.trim();
+        if (!trimmed) return null;
+        try {
+            return extractToolResultMessage(JSON.parse(trimmed));
+        } catch {
+            return trimmed;
+        }
+    }
+    if (!output || typeof output !== 'object') return null;
+
+    const result = output as Record<string, unknown>;
+    for (const key of ['message', 'error', 'result']) {
+        if (typeof result[key] === 'string' && result[key].trim()) {
+            return result[key].trim();
+        }
+    }
+    return null;
+}
+
+function buildToolResultFallback(
+    executedTools: Array<{ toolName: string; input: unknown; output: unknown }>
+): string | null {
+    const messages = executedTools
+        .map(tool => extractToolResultMessage(tool.output))
+        .filter((message): message is string => !!message);
+    const uniqueMessages = [...new Set(messages)];
+    return uniqueMessages.length > 0 ? uniqueMessages.join('\n') : null;
+}
+
 // 生成テキストのループ崩壊（リピート問題）を検知してカットするヘルパー
 function removeRepetitiveLoops(text: string): string {
     if (!text) return text;
@@ -327,20 +381,10 @@ export class ChatAiService {
                 const lmstudio = createOpenAI({
                     baseURL: finalEndpoint,
                     apiKey: 'not-needed',
-                    compatibility: 'compatible'
+                    name: 'lmstudio',
+                    fetch: createLmStudioFetch(repetitionPenalty, enableThinking)
                 });
-                const additionalBody: any = {};
-                if (repetitionPenalty !== undefined) {
-                    additionalBody.repetition_penalty = repetitionPenalty;
-                }
-                if (enableThinking === false) {
-                    additionalBody.reasoning_format = 'none';
-                    additionalBody.include_reasoning = false;
-                }
-                const chatSettings = Object.keys(additionalBody).length > 0 ? {
-                    additionalBody
-                } : {};
-                modelProvider = lmstudio.chat(model || 'unspecified', chatSettings);
+                modelProvider = lmstudio.chat(model || 'unspecified');
             } else if (currentEngine === 'gemini') {
                 const targetModel = model || 'gemini-1.5-flash';
                 console.log(`[ChatAiService] Routing to Gemini via Vercel AI SDK (Model: ${targetModel})`);
@@ -432,7 +476,8 @@ export class ChatAiService {
                 toolResults: s.toolResults,
                 finishReason: s.finishReason
             })), null, 2));
-            let cleanedContent = response.text || '';
+            const rawContent = response.text || '';
+            let cleanedContent = rawContent;
 
             // 思考プロセス（Thinking Process や <think>, <thought> タグ、<|channel>thought タグ）のクレンジング
             if (cleanedContent.includes('</think>')) {
@@ -469,7 +514,13 @@ export class ChatAiService {
             // ツール呼び出しも発火しないまま UI が無反応になる。必ず何か発話を返す。
             if (!finalReply.trim()) {
                 const finishReason = response.finishReason;
-                console.warn(`[ChatAiService] クレンジング後の応答が空です (finishReason: ${finishReason})。フォールバック応答を返します。`);
+                const emptyStage = rawContent.trim() ? 'クレンジング後の応答' : 'モデルの最終発話';
+                const toolResultFallback = buildToolResultFallback(executedTools);
+                if (toolResultFallback) {
+                    console.warn(`[ChatAiService] ${emptyStage}が空です (finishReason: ${finishReason})。成功済みツールの結果を最終発話として返します。`);
+                    return toolResultFallback;
+                }
+                console.warn(`[ChatAiService] ${emptyStage}が空です (finishReason: ${finishReason})。フォールバック応答を返します。`);
                 if (finishReason === 'length') {
                     return 'うーん、考えているうちに言葉が長くなりすぎちゃったみたい…！ごめんね、もう一度お願いできる？（応答長の上限を上げると安定するよ）';
                 }

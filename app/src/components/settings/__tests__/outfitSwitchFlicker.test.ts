@@ -299,7 +299,7 @@ describe('outfit切り替え時のちらつき防止テスト', () => {
 
             const selectLocalImageMock = vi.fn().mockResolvedValue({
                 success: true,
-                path: 'data:image/png;base64,iVBORw0K...'
+                path: 'data:image/png;base64,iVBORw0KGgo='
             });
             const saveMascotImageMock = vi.fn().mockResolvedValue({
                 success: true,
@@ -333,7 +333,8 @@ describe('outfit切り替え時のちらつき防止テスト', () => {
             await flushPromises();
 
             expect(selectLocalImageMock).toHaveBeenCalled();
-            expect(saveMascotImageMock).toHaveBeenCalled();
+            await vi.waitFor(() => expect(saveMascotImageMock).toHaveBeenCalled());
+            await flushPromises();
 
             // 新しく追加された outfit の path がアップロード後のパスになっていること
             const updatedMascot = configStore.mascots.find(m => m.id === 'mascot_test');
@@ -350,7 +351,7 @@ describe('outfit切り替え時のちらつき防止テスト', () => {
 
             const selectLocalImageMock = vi.fn().mockResolvedValue({
                 success: true,
-                path: 'data:image/png;base64,iVBORw0K_fallback...'
+                path: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=='
             });
             const saveMascotImageMock = vi.fn().mockResolvedValue({
                 success: false,
@@ -382,13 +383,14 @@ describe('outfit切り替え時のちらつき防止テスト', () => {
             await flushPromises();
 
             expect(selectLocalImageMock).toHaveBeenCalled();
-            expect(saveMascotImageMock).toHaveBeenCalled();
+            await vi.waitFor(() => expect(saveMascotImageMock).toHaveBeenCalled());
+            await flushPromises();
 
             // アップロード失敗時、フォールバックで元の Base64 データが格納されていること
             const updatedMascot = configStore.mascots.find(m => m.id === 'mascot_test');
             const newOutfit = updatedMascot?.assets.outfits.find((o: MascotAsset) => o.path.startsWith('data:image/'));
             expect(newOutfit).toBeTruthy();
-            expect(newOutfit?.path).toBe('data:image/png;base64,iVBORw0K_fallback...');
+            expect(newOutfit?.path).toBe('data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==');
         });
     });
 });

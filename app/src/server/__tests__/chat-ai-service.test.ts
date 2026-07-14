@@ -484,6 +484,41 @@ describe('ChatAiService.generateResponse のテスト', () => {
         expect(reply.trim().length).toBeGreaterThan(0);
     });
 
+    it('generateResponse_ツール成功後にモデル最終発話が空ならツール結果のmessageを返すこと', async () => {
+        vi.mocked(generateText)
+            .mockReset()
+            .mockImplementationOnce(async (options: any) => {
+                await options.tools.manageTasks.execute(
+                    { action: 'add', title: '牛乳を買う' },
+                    { abortSignal: new AbortController().signal }
+                );
+                return {
+                    text: '',
+                    finishReason: 'stop',
+                    steps: [
+                        { text: '', toolCalls: [{ toolName: 'manageTasks' }], toolResults: [], finishReason: 'tool-calls' },
+                        { text: '', toolCalls: [], toolResults: [], finishReason: 'stop' }
+                    ]
+                } as any;
+            });
+
+        const reply = await ChatAiService.generateResponse({
+            message: '牛乳を買うタスクを追加して',
+            apiKey: 'not-needed',
+            systemPrompt: 'あなたはアシスタントです。',
+            model: 'local-model',
+            engine: 'lmstudio',
+            lmstudioEndpoint: 'http://localhost:1234/v1',
+            onToolExecute: async () => JSON.stringify({
+                success: true,
+                message: 'タスク「牛乳を買う」を追加しました。'
+            })
+        });
+
+        expect(reply).toBe('タスク「牛乳を買う」を追加しました。');
+        expect(reply).not.toContain('うまく応答を作れなかった');
+    });
+
     it('generateResponse_Gemini用のVerceltool定義に検索結果のIDを使う制約が含まれ、かつsystemプロンプトに個別ガイドラインが注入されないこと', async () => {
         vi.mocked(generateText)
             .mockReset()

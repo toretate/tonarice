@@ -36,6 +36,7 @@ export interface AppConfig {
     
     // チャットウィンドウ設定
     chatOpacity: number;
+    taskOpacity: number;
     chatAlwaysOnTop: boolean | 'sync';
     chatSendKey: string;
     chatFontFamily: string;

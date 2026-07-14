@@ -4,6 +4,7 @@ import { useConfigStore } from '../../../../store/config';
 import Button from 'primevue/button';
 import Slider from 'primevue/slider';
 import { resolveMascotImageUrl } from '../../../../utils/mascot-image-url';
+import { canvasToImageBlob } from '../../../../utils/mascot-image-upload';
 
 const configStore = useConfigStore();
 
@@ -422,6 +423,15 @@ const stopDragExpression = () => {
 };
 
 const extractedPartsUrl = ref<string | null>(null);
+let extractedPartsObjectUrl = '';
+let partsExtractionGeneration = 0;
+
+const clearExtractedPartsObjectUrl = () => {
+    if (extractedPartsObjectUrl) {
+        URL.revokeObjectURL(extractedPartsObjectUrl);
+        extractedPartsObjectUrl = '';
+    }
+};
 const isExtractingParts = ref(false);
 const partsImageCache = new Map<string, HTMLCanvasElement>();
 
@@ -512,6 +522,8 @@ const getPartsImage = (exprPath: string, nofacePath: string): Promise<HTMLCanvas
 };
 
 const updateExtractedParts = async () => {
+    const generation = ++partsExtractionGeneration;
+    clearExtractedPartsObjectUrl();
     if (!selectedExpression.value?.path) {
         extractedPartsUrl.value = null;
         return;
@@ -525,8 +537,12 @@ const updateExtractedParts = async () => {
     isExtractingParts.value = true;
     try {
         const partsCanvas = await getPartsImage(selectedExpression.value.path, nofacePath);
+        if (generation !== partsExtractionGeneration) return;
         if (partsCanvas) {
-            extractedPartsUrl.value = partsCanvas.toDataURL('image/png');
+            const partsBlob = await canvasToImageBlob(partsCanvas);
+            if (generation !== partsExtractionGeneration) return;
+            extractedPartsObjectUrl = URL.createObjectURL(partsBlob);
+            extractedPartsUrl.value = extractedPartsObjectUrl;
         } else {
             extractedPartsUrl.value = resolveImageUrl(selectedExpression.value.path);
         }
@@ -545,6 +561,8 @@ watch(
     },
     { immediate: true }
 );
+
+onUnmounted(clearExtractedPartsObjectUrl);
 </script>
 
 <template>

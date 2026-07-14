@@ -58,7 +58,7 @@ process.on('unhandledRejection', (reason) => {
 });
 
 process.on('uncaughtException', (error) => {
-    if (error && error.code === 'ECONNRESET') {
+    if ((error as NodeJS.ErrnoException).code === 'ECONNRESET') {
         console.warn('[Electron] Uncaught Exception (ECONNRESET) ignored:', error.message);
     } else {
         console.error('[Electron] Uncaught Exception:', error);

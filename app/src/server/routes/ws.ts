@@ -43,6 +43,11 @@ function broadcastToUser(userId: string, event: string, data: any) {
     }
 }
 
+function getPeerUserId(peer: { context: Record<string, unknown> }): string {
+    const userId = peer.context.userId;
+    return typeof userId === 'string' ? userId : 'anonymous';
+}
+
 // Cookieを手動でパースするヘルパー関数
 function parseCookies(cookieHeader: string | undefined): Record<string, string> {
     const list: Record<string, string> = {};
@@ -61,7 +66,7 @@ export default defineWebSocketHandler({
     async open(peer) {
         console.log('[WS] Client connecting via Nitro...');
         
-        const requestUrl = peer.url || '';
+        const requestUrl = peer.request.url || '';
         const urlObj = new URL(requestUrl, 'http://localhost');
         
         // 1. クエリパラメータから token を取得
@@ -69,8 +74,7 @@ export default defineWebSocketHandler({
 
         // 2. Cookie から取得
         if (!token) {
-            const headers = (peer as any).headers || {};
-            const cookieHeader = headers['cookie'] || headers['Cookie'] || '';
+            const cookieHeader = peer.request.headers.get('cookie') || '';
             const cookies = parseCookies(cookieHeader);
             token = cookies['session_token'] || '';
         }
@@ -102,14 +106,13 @@ export default defineWebSocketHandler({
         }
 
         // コネクションの登録
-        peer.ctx = peer.ctx || {};
-        peer.ctx.userId = userId;
+        peer.context.userId = userId;
         addConnection(userId, peer);
         console.log(`[WS] Client connected successfully (User: ${userId})`);
     },
 
     async message(peer, msg) {
-        const userId = (peer.ctx && peer.ctx.userId) || 'anonymous';
+        const userId = getPeerUserId(peer);
         try {
             const rawMessage = msg.text();
             const parsed = JSON.parse(rawMessage);
@@ -403,7 +406,7 @@ export default defineWebSocketHandler({
     },
 
     close(peer, details) {
-        const userId = (peer.ctx && peer.ctx.userId) || 'anonymous';
+        const userId = getPeerUserId(peer);
         console.log(`[WS] Client disconnected (User: ${userId}, Details: ${JSON.stringify(details)})`);
         removeConnection(userId, peer);
     }

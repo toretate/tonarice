@@ -9,7 +9,9 @@ const comfyHost = '127.0.0.1:8188';
  */
 export async function uploadImage(imageBuffer: Buffer, filename: string): Promise<string> {
     const formData = new FormData();
-    const blob = new Blob([imageBuffer]);
+    const imageBytes = new Uint8Array(imageBuffer.length);
+    imageBytes.set(imageBuffer);
+    const blob = new Blob([imageBytes]);
     formData.append('image', blob, filename);
     formData.append('overwrite', 'true');
 
@@ -189,4 +191,3 @@ export async function runJsonWorkflow(workflowJson: any): Promise<any> {
         });
     });
 }
-

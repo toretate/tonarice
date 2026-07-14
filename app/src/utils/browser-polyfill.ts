@@ -69,8 +69,17 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
         toggleChat: () => {
             console.log('[Polyfill] toggleChat triggered');
         },
+        toggleTasks: () => {
+            console.log('[Polyfill] toggleTasks triggered');
+        },
+        toggleMemo: () => {
+            console.log('[Polyfill] toggleMemo triggered');
+        },
         resizeChatWindow: (size: { width: number; height: number }) => {
             console.log(`[Polyfill] resizeChatWindow: ${size.width}x${size.height}`);
+        },
+        resizeWindow: (size: { width: number; height: number }) => {
+            console.log(`[Polyfill] resizeWindow: ${size.width}x${size.height}`);
         },
         openSettings: () => {
             // Web版では、ハッシュを #settings に切り替えることで設定画面を表示する
