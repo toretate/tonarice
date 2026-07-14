@@ -1,4 +1,4 @@
-import { defineNuxtPlugin } from '#app';
+import { defineNuxtPlugin } from 'nuxt/app';
 import '@/utils/browser-polyfill';
 
 export default defineNuxtPlugin(() => {

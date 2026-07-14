@@ -1,4 +1,4 @@
-import { defineEventHandler, createError, sendStream, setResponseHeader, getHeader, getCookie } from 'h3';
+import { defineEventHandler, createError, sendStream, sendNoContent, setResponseHeader, getHeader, getCookie } from 'h3';
 import fs from 'fs';
 import path from 'path';
 import { resolveMascotPath, USERS_DIR } from '../../utils/paths';
@@ -13,6 +13,33 @@ const MIME_TYPES: Record<string, string> = {
     '.webp': 'image/webp',
     '.json': 'application/json',
 };
+
+export function createFileEtag(size: number, mtimeMs: number): string {
+    return `W/"${size.toString(16)}-${Math.trunc(mtimeMs).toString(16)}"`;
+}
+
+const normalizeWeakEtag = (etag: string): string => etag.trim().replace(/^W\//, '');
+
+export function isRequestNotModified(
+    ifNoneMatch: string | undefined,
+    ifModifiedSince: string | undefined,
+    etag: string,
+    mtimeMs: number
+): boolean {
+    // RFC 9110に従い、If-None-Matchが存在する場合はIf-Modified-Sinceより優先する。
+    if (ifNoneMatch !== undefined) {
+        if (ifNoneMatch.trim() === '*') return true;
+        const current = normalizeWeakEtag(etag);
+        return ifNoneMatch
+            .split(',')
+            .some(candidate => normalizeWeakEtag(candidate) === current);
+    }
+
+    if (!ifModifiedSince) return false;
+    const sinceMs = Date.parse(ifModifiedSince);
+    if (!Number.isFinite(sinceMs)) return false;
+    return Math.floor(mtimeMs / 1000) <= Math.floor(sinceMs / 1000);
+}
 
 export default defineEventHandler(async (event) => {
     const subpath = event.context.params?.path;
@@ -91,7 +118,15 @@ export default defineEventHandler(async (event) => {
     }
 
     // ファイルの存在確認
-    if (!fs.existsSync(targetPath) || fs.statSync(targetPath).isDirectory()) {
+    if (!fs.existsSync(targetPath)) {
+        throw createError({
+            statusCode: 404,
+            statusMessage: 'File not found',
+        });
+    }
+
+    const stat = fs.statSync(targetPath);
+    if (stat.isDirectory()) {
         throw createError({
             statusCode: 404,
             statusMessage: 'File not found',
@@ -100,9 +135,22 @@ export default defineEventHandler(async (event) => {
 
     const ext = path.extname(targetPath).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+    const etag = createFileEtag(stat.size, stat.mtimeMs);
+    const lastModified = stat.mtime.toUTCString();
 
     setResponseHeader(event, 'Content-Type', contentType);
-    setResponseHeader(event, 'Cache-Control', 'public, max-age=3600');
+    setResponseHeader(event, 'Cache-Control', 'no-cache');
+    setResponseHeader(event, 'ETag', etag);
+    setResponseHeader(event, 'Last-Modified', lastModified);
+
+    if (isRequestNotModified(
+        getHeader(event, 'if-none-match'),
+        getHeader(event, 'if-modified-since'),
+        etag,
+        stat.mtimeMs
+    )) {
+        return sendNoContent(event, 304);
+    }
 
     return sendStream(event, fs.createReadStream(targetPath));
 });

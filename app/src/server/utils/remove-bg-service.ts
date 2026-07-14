@@ -41,7 +41,9 @@ export async function removeBackground(imageBuffer: Buffer, mimeType: string, en
         return await removeBackgroundRembg(imageBuffer, 'isnet-anime');
     } else {
         // デフォルトは Node.js 内の @imgly/background-removal-node
-        const inputBlob = new Blob([imageBuffer], { type: mimeType });
+        const imageBytes = new Uint8Array(imageBuffer.length);
+        imageBytes.set(imageBuffer);
+        const inputBlob = new Blob([imageBytes], { type: mimeType });
         const resultBlob = await imglyRemoveBackground(inputBlob);
         return Buffer.from(await resultBlob.arrayBuffer());
     }

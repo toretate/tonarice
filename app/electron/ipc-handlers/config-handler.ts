@@ -7,6 +7,14 @@ import { getMascotWindow } from '../window/mascot-window';
 import { getSettingsWindow } from '../window/settings-window';
 import { getIntegratedWindow } from '../window/integrated-window';
 import { getCompactWindow } from '../window/compact-window';
+import { resolveMascotPath } from '../../src/server/utils/paths';
+import { randomUUID } from 'node:crypto';
+
+// デフォルトラジオプロンプトのインポート
+import radioModeDefault from '@prompt/radio/radio-mode.prompt';
+import activeTalkDefault from '@prompt/radio/active-radio-talk.prompt';
+import exRadioModeDefault from '@prompt/radio/ex-radio-mode.prompt';
+import exActiveTalkDefault from '@prompt/radio/ex-active-radio-talk.prompt';
 
 /**
  * プロジェクトの prompts/radio ディレクトリの絶対パスを探索して取得する
@@ -202,33 +210,48 @@ export function registerConfigHandlers(config: AppConfig) {
 
     // 画像データを mascots/<mascotId> に保存するハンドラー
     ipcMain.handle('save-mascot-image', async (event, mascotId: string, filename: string, base64Data: string) => {
-        const currentCwd = process.cwd();
-        const baseCwd = path.basename(currentCwd) === 'ui' ? path.dirname(currentCwd) : currentCwd;
-        const mascotDir = path.join(baseCwd, 'mascots', mascotId);
+        // mascotId のバリデーション (英数字、アンダースコア、ハイフンのみ許可)
+        if (!/^[a-zA-Z0-9_-]+$/.test(mascotId)) {
+            return { success: false, error: 'Invalid mascotId' };
+        }
+
+        // filename のバリデーション (親ディレクトリ移動を禁止)
+        if (filename.includes('..') || filename.includes('\\')) {
+            return { success: false, error: 'Invalid filename' };
+        }
+
+        const userId = 'usr_local_dev_bypass'; // Electronはローカル開発用バイパスIDで固定
+        const requestPath = `/mascots/users/${userId}/${mascotId}/${filename}`;
 
         try {
-            if (!fs.existsSync(mascotDir)) {
-                fs.mkdirSync(mascotDir, { recursive: true });
+            // Web版と同じ画像保存パスを解決
+            const absPath = resolveMascotPath(requestPath);
+
+            // ディレクトリトラバーサル防止チェック
+            const baseDir = resolveMascotPath(`/mascots/users/${userId}/${mascotId}`);
+            const relativePath = path.relative(baseDir, absPath);
+            if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+                return { success: false, error: 'Directory traversal detected' };
             }
 
-            // data:image/png;base64,... のようなヘッダーがあれば除去
-            const base64Content = base64Data.replace(/^data:image\/\w+;base64,/, '');
-            const buffer = Buffer.from(base64Content, 'base64');
-
-            const filePath = path.join(mascotDir, filename);
-            const fileDir = path.dirname(filePath);
+            const fileDir = path.dirname(absPath);
             if (!fs.existsSync(fileDir)) {
                 fs.mkdirSync(fileDir, { recursive: true });
             }
 
-            fs.writeFileSync(filePath, buffer);
+            // data:image/png;base64,... のようなヘッダーがあれば除去
+            // svg+xml などの + や . や - を含む MIME タイプにも対応
+            const base64Content = base64Data.replace(/^data:image\/[\w+.-]+;base64,/, '');
+            const buffer = Buffer.from(base64Content, 'base64');
 
-            console.log(`[Config] Mascot image saved: ${filePath}`);
+            fs.writeFileSync(absPath, buffer);
+
+            console.log(`[Config] Mascot image saved (Electron): ${absPath}`);
             
             // UIからアクセス可能な相対アセットパスを返す
             return {
                 success: true,
-                path: `/mascots/${mascotId}/${filename}`
+                path: `${requestPath}?v=${randomUUID()}`
             };
         } catch (error: any) {
             console.error('[Config] Failed to save mascot image:', error);
@@ -239,13 +262,13 @@ export function registerConfigHandlers(config: AppConfig) {
     // ラジオモード用のプロンプト（通常・能動フリートーク・Ex）の読み込みハンドラー
     ipcMain.handle('get-radio-prompts', async () => {
         const radioDir = resolveRadioDir();
-        console.log(`[Config] Reading radio prompts from: ${radioDir} (cwd: ${process.cwd()})`);
+        console.log(`[Config] Reading radio prompts (cwd: ${process.cwd()})`);
 
         const result = {
-            radioMode: '',
-            activeTalk: '',
-            exRadioMode: '',
-            exActiveTalk: ''
+            radioMode: radioModeDefault,
+            activeTalk: activeTalkDefault,
+            exRadioMode: exRadioModeDefault,
+            exActiveTalk: exActiveTalkDefault
         };
 
         try {
@@ -257,25 +280,25 @@ export function registerConfigHandlers(config: AppConfig) {
 
                 if (fs.existsSync(radioModePath)) {
                     result.radioMode = fs.readFileSync(radioModePath, 'utf8');
-                    console.log(`[Config] Successfully loaded radio_mode_instructions.md (${result.radioMode.length} chars)`);
+                    console.log(`[Config] Successfully loaded custom radio_mode_instructions.md (${result.radioMode.length} chars)`);
                 }
                 if (fs.existsSync(activeTalkPath)) {
                     result.activeTalk = fs.readFileSync(activeTalkPath, 'utf8');
-                    console.log(`[Config] Successfully loaded active_radio_talk_instructions.md (${result.activeTalk.length} chars)`);
+                    console.log(`[Config] Successfully loaded custom active_radio_talk_instructions.md (${result.activeTalk.length} chars)`);
                 }
                 if (fs.existsSync(exRadioModePath)) {
                     result.exRadioMode = fs.readFileSync(exRadioModePath, 'utf8');
-                    console.log(`[Config] Successfully loaded ex_radio_mode_instructions.md (${result.exRadioMode.length} chars)`);
+                    console.log(`[Config] Successfully loaded custom ex_radio_mode_instructions.md (${result.exRadioMode.length} chars)`);
                 }
                 if (fs.existsSync(exActiveTalkPath)) {
                     result.exActiveTalk = fs.readFileSync(exActiveTalkPath, 'utf8');
-                    console.log(`[Config] Successfully loaded ex_active_radio_talk_instructions.md (${result.exActiveTalk.length} chars)`);
+                    console.log(`[Config] Successfully loaded custom ex_active_radio_talk_instructions.md (${result.exActiveTalk.length} chars)`);
                 }
             } else {
-                console.warn(`[Config] Radio directory not found: ${radioDir}`);
+                console.warn(`[Config] Radio directory not found: ${radioDir}, using built-in defaults`);
             }
         } catch (e: any) {
-            console.error('[Config] Error reading radio prompts:', e);
+            console.error('[Config] Error reading custom radio prompts, using built-in defaults:', e);
         }
         return result;
     });

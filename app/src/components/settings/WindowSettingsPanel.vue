@@ -8,13 +8,13 @@ import InputText from 'primevue/inputtext';
 import { useConfigStore } from '@/store/config';
 import { useAuthStore } from '@/store/auth';
 import { storeToRefs } from 'pinia';
+import { resolveMascotImageUrl as resolveImageAssetUrl } from '@/utils/mascot-image-url';
 
 const configStore = useConfigStore();
 const authStore = useAuthStore();
 
 const {
     activeMascot,
-    configVersion,
     windowMode,
     mascotScale,
     alwaysOnTop,
@@ -207,19 +207,11 @@ const isMascotImage = (path: string | undefined | null): boolean => {
 };
 
 const resolveMascotImageUrl = (path: string | undefined | null): string => {
-    if (!path) return '';
-    if (path.startsWith('data:image/')) {
-        return path;
-    }
-    let resolved = path;
-    if (path.startsWith('/mascots/')) {
-        resolved = `http://${serverHost.value}:${serverPort.value}${path}`;
-    }
-    if (/^[a-zA-Z]:\\/.test(resolved)) {
-        return resolved;
-    }
-    const separator = resolved.includes('?') ? '&' : '?';
-    return `${resolved}${separator}v=${configVersion.value}`;
+    return resolveImageAssetUrl(path, {
+        serverHost: serverHost.value,
+        serverPort: serverPort.value,
+        absoluteMascotUrl: true
+    });
 };
 
 const activeMascotImageUrl = computed(() => {

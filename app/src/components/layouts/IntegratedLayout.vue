@@ -5,10 +5,14 @@ import ChatPanel from '../ChatPanel.vue';
 import TaskManagement from '../TaskManagement.vue';
 import { useConfigStore } from '../../store/config';
 import { useTaskStore } from '../../store/task';
+import { useMemoStore } from '../../store/memo';
+import MemoWidget from '../MemoWidget.vue';
 import { storeToRefs } from 'pinia';
+import { resolveMascotImageUrl } from '../../utils/mascot-image-url';
 
 const configStore = useConfigStore();
 const taskStore = useTaskStore();
+const memoStore = useMemoStore();
 const { 
     windowMode,
     integratedBackgroundColor,
@@ -19,11 +23,11 @@ const {
     useServer,
     serverHost,
     serverPort,
-    configVersion,
     integratedChatRatio
 } = storeToRefs(configStore);
 
 const { showTaskWidget } = storeToRefs(taskStore);
+const { showMemoWidget } = storeToRefs(memoStore);
 
 // チャット欄の幅比率の調整（スプリッターのドラッグ）
 const MIN_CHAT_RATIO = 0.2;
@@ -62,19 +66,11 @@ const onSplitterPointerDown = (event: PointerEvent) => {
 
 // アセットURLの解決
 const resolveImageUrl = (path: string | undefined | null): string => {
-    if (!path) return '';
-    if (path.startsWith('data:image/')) {
-        return path;
-    }
-    let resolved = path;
-    if (path.startsWith('/mascots/') && useServer.value) {
-        resolved = `http://${serverHost.value}:${serverPort.value}${path}`;
-    }
-    if (/^[a-zA-Z]:\\/.test(resolved)) {
-        return resolved;
-    }
-    const separator = resolved.includes('?') ? '&' : '?';
-    return `${resolved}${separator}v=${configVersion.value}`;
+    return resolveMascotImageUrl(path, {
+        serverHost: serverHost.value,
+        serverPort: serverPort.value,
+        absoluteMascotUrl: useServer.value
+    });
 };
 
 const getRgbaBackground = computed(() => {
@@ -155,8 +151,14 @@ const integratedBackgroundStyle = computed(() => {
             <ChatPanel />
         </div>
         
-        <!-- タスク管理フローティングウィジェット -->
-        <TaskManagement v-if="showTaskWidget" />
+        <!-- フローティングウィジェット用絶対配置レイヤー（Flexレイアウト干渉防止） -->
+        <div class="floating-widgets-layer">
+            <!-- タスク管理フローティングウィジェット -->
+            <TaskManagement v-if="showTaskWidget" />
+
+            <!-- メモ管理フローティングウィジェット -->
+            <MemoWidget v-if="showMemoWidget" />
+        </div>
     </div>
 </template>
 
@@ -243,5 +245,20 @@ const integratedBackgroundStyle = computed(() => {
 :deep(.chat-panel-container) {
     background: transparent !important;
     height: 100% !important;
+}
+
+/* フローティングウィジェット専用の絶対配置レイヤー */
+.floating-widgets-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.floating-widgets-layer > * {
+    pointer-events: auto;
 }
 </style>

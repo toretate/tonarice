@@ -7,6 +7,8 @@ import { alignSingle, isValidImageSource, autoCropImage, autoCropFaceRegion } fr
 import { autoAlignSingle, CONFIDENCE_THRESHOLD, type AutoAlignV2Result } from '../../../skills/expression-alignment/auto-align-v2';
 import type { SharedTransform } from '@desktop-ai-mascot/expression-alignment';
 import BackgroundRemovalModal from './BackgroundRemovalModal.vue';
+import { resolveMascotImageUrl } from '../../../utils/mascot-image-url';
+import { saveMascotImageSource } from '../../../utils/mascot-image-upload';
 
 const configStore = useConfigStore();
 
@@ -22,19 +24,11 @@ const isImage = (path: string | undefined | null): boolean => {
 
 // アセットURLの解決
 const resolveImageUrl = (path: string | undefined | null): string => {
-    if (!path) return '';
-    if (path.startsWith('data:image/')) {
-        return path;
-    }
-    let resolved = path;
-    if (path.startsWith('/mascots/') && configStore.useServer) {
-        resolved = `http://${configStore.serverHost}:${configStore.serverPort}${path}`;
-    }
-    if (/^[a-zA-Z]:\\/.test(resolved)) {
-        return resolved;
-    }
-    const separator = resolved.includes('?') ? '&' : '?';
-    return `${resolved}${separator}v=${configStore.configVersion}`;
+    return resolveMascotImageUrl(path, {
+        serverHost: configStore.serverHost,
+        serverPort: configStore.serverPort,
+        absoluteMascotUrl: configStore.useServer
+    });
 };
 
 interface MascotAsset {
@@ -330,7 +324,7 @@ const handleAutoCrop = async () => {
                 const outfitName = props.activeOutfit?.name.replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]/g, '_') || 'default';
                 const filename = `expressions/${outfitName}/expr_${sanitizedLabel}.png`;
                 
-                const saveResult = await window.electronAPI.saveMascotImage(
+                const saveResult = await saveMascotImageSource(
                     props.editingMascot.id,
                     filename,
                     cropped
@@ -504,7 +498,7 @@ const handleBackgroundRemovalDone = async (newBase64: string) => {
                 const outfitName = props.activeOutfit?.name.replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]/g, '_') || 'default';
                 const filename = `expressions/${outfitName}/expr_${sanitizedLabel}.png`;
                 
-                const saveResult = await window.electronAPI.saveMascotImage(
+                const saveResult = await saveMascotImageSource(
                     props.editingMascot.id,
                     filename,
                     newBase64

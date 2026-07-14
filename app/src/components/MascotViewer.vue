@@ -3,6 +3,8 @@ import { ref, onMounted, computed, onUnmounted, watch, nextTick } from 'vue';
 import { MascotImageSetBuilder } from '../mascots/MascotImageSetBuilder';
 import { useConfigStore } from '../store/config';
 import { useMascotStore } from '../store/mascot';
+import { normalizeTextForTts, stripResidualAsterisks } from '../utils/tts-normalizer';
+import { resolveMascotImageUrl } from '../utils/mascot-image-url';
 import { storeToRefs } from 'pinia';
 import { Application, Container, Sprite, Assets, Texture } from 'pixi.js';
 
@@ -24,19 +26,11 @@ const isImage = (path: string | undefined | null): boolean => {
 
 // アセットURLの解決
 const resolveImageUrl = (path: string | undefined | null): string => {
-    if (!path) return '';
-    if (path.startsWith('data:image/')) {
-        return path;
-    }
-    let resolved = path;
-    if (path.startsWith('/mascots/')) {
-        resolved = `http://${configStore.serverHost}:${configStore.serverPort}${path}`;
-    }
-    if (/^[a-zA-Z]:\\/.test(resolved)) {
-        return resolved;
-    }
-    const separator = resolved.includes('?') ? '&' : '?';
-    return `${resolved}${separator}v=${configStore.configVersion}`;
+    return resolveMascotImageUrl(path, {
+        serverHost: configStore.serverHost,
+        serverPort: configStore.serverPort,
+        absoluteMascotUrl: true
+    });
 };
 
 
@@ -98,6 +92,37 @@ let retryTransformTimeoutId: NodeJS.Timeout | null = null;
 let retryTransformCount = 0;
 // ロード世代カウンター: 新しいロードが開始されたら古いロードの表示復帰をスキップする
 let loadGeneration = 0;
+let preloadGeneration = 0;
+let activeAssetUrls = new Set<string>();
+let preloadedAssetUrls = new Set<string>();
+
+const unloadAssetIfUnused = (url: string) => {
+    if (!url || activeAssetUrls.has(url) || preloadedAssetUrls.has(url)) return;
+    Assets.unload(url).catch((error) => {
+        console.debug('[MascotViewer] Texture unload skipped:', url, error);
+    });
+};
+
+const replaceActiveAssetUrls = (nextUrls: Set<string>) => {
+    const previousUrls = activeAssetUrls;
+    activeAssetUrls = nextUrls;
+    previousUrls.forEach(unloadAssetIfUnused);
+};
+
+const replacePreloadedAssetUrls = (nextUrls: Set<string>) => {
+    const previousUrls = preloadedAssetUrls;
+    preloadedAssetUrls = nextUrls;
+    previousUrls.forEach(unloadAssetIfUnused);
+};
+
+const releaseAllViewerAssets = () => {
+    const urls = new Set([...activeAssetUrls, ...preloadedAssetUrls]);
+    activeAssetUrls.clear();
+    preloadedAssetUrls.clear();
+    urls.forEach((url) => {
+        Assets.unload(url).catch(() => undefined);
+    });
+};
 
 const triggerTransitionLock = () => {
     isAssetsLoading.value = true;
@@ -110,9 +135,7 @@ const triggerTransitionLock = () => {
         isTransitioning.value = false;
         if (activeLoadCount === 0) {
             // ロード完了済みパスが現在の描画パスと一致している場合のみ表示を復帰する
-            const cleanBody = getCleanPath(currentBodyPath.value);
-            const cleanExpr = getCleanPath(currentExpressionPath.value);
-            if (cleanBody === lastBodyPathClean && cleanExpr === lastExpressionPathClean) {
+            if (currentBodyPath.value === lastBodyPath && currentExpressionPath.value === lastExpressionPath) {
                 isAssetsLoading.value = false;
                 if (bodySprite) bodySprite.visible = true;
                 if (expressionSprite) expressionSprite.visible = true;
@@ -384,13 +407,21 @@ const activeExpressionStyle = computed(() => {
     return {};
 });
 
+// 既定の正面画像
+const defaultFrontAvatar = computed(() => {
+    return activeMascotImageSet.value?.getFrontImage() || null;
+});
+
 // 描画されるべき体の画像パスの解決
 const currentBodyPath = computed(() => {
     if (activePose.value && isImage(activePose.value.path)) {
         return resolveImageUrl(activePose.value.path);
     }
     if (activeOutfit.value && isImage(activeOutfit.value.path)) {
-        return resolveImageUrl(activeOutfit.value.path);
+        const bodyPath = activeExpression.value && activeOutfit.value.nofacePath
+            ? activeOutfit.value.nofacePath
+            : activeOutfit.value.path;
+        return resolveImageUrl(bodyPath);
     }
     if (activeMascot.value) {
         if (defaultFrontAvatar.value && isImage(defaultFrontAvatar.value.path)) {
@@ -473,6 +504,7 @@ const isMouthOpen = ref(false);
 let expressionNormalTexture: Texture | null = null;
 let expressionCloseTexture: Texture | null = null;
 let expressionTalkTexture: Texture | null = null;
+let bodyTextureDisplayScale = 1;
 
 // 体と表情のロード処理をアトミックかつ並列に行う関数
 const loadMascotAssets = async (bodyPath: string, expressionPath: string) => {
@@ -486,6 +518,7 @@ const loadMascotAssets = async (bodyPath: string, expressionPath: string) => {
 
     // このロードの世代を記録。完了時に最新世代でなければ表示復帰をスキップする
     const myGeneration = ++loadGeneration;
+    const requestedUrls = new Set<string>();
 
     activeLoadCount++;
     isAssetsLoading.value = true;
@@ -503,6 +536,7 @@ const loadMascotAssets = async (bodyPath: string, expressionPath: string) => {
     // 体画像のロードプロミス
     let bodyPromise: Promise<Texture | null> = Promise.resolve(null);
     if (bodyPath) {
+        requestedUrls.add(bodyPath);
         bodyPromise = Assets.load(bodyPath).catch(err => {
             console.error('[MascotViewer] Failed to load body texture:', bodyPath, err);
             return null;
@@ -516,6 +550,7 @@ const loadMascotAssets = async (bodyPath: string, expressionPath: string) => {
     let talkPromise: Promise<Texture | null> = Promise.resolve(null);
 
     if (expressionPath) {
+        requestedUrls.add(expressionPath);
         normalPromise = Assets.load(expressionPath).catch(err => {
             console.error('[MascotViewer] Failed to load normal expression:', expressionPath, err);
             return null;
@@ -523,16 +558,24 @@ const loadMascotAssets = async (bodyPath: string, expressionPath: string) => {
         promises.push(normalPromise);
 
         const closePath = getSuffixPath(expressionPath, '_close');
+        requestedUrls.add(closePath);
         closePromise = Assets.load(closePath).catch(() => null); // _close は存在しない場合もあるのでエラー無視
         promises.push(closePromise);
 
         const talkPath = getSuffixPath(expressionPath, '_talk');
+        requestedUrls.add(talkPath);
         talkPromise = Assets.load(talkPath).catch(() => null); // _talk も存在しない場合があるのでエラー無視
         promises.push(talkPromise);
     }
 
     // すべてのアセットを並列ロード
     await Promise.all(promises);
+
+    // 後続世代が開始済みなら、古いロード結果をスプライトへ適用しない。
+    if (myGeneration !== loadGeneration) {
+        requestedUrls.forEach(unloadAssetIfUnused);
+        return;
+    }
 
     // すべてのロードが完了した段階で、同時にスプライトへ適用する
     // 体画像の適用
@@ -557,14 +600,17 @@ const loadMascotAssets = async (bodyPath: string, expressionPath: string) => {
             bodySprite.x = containerW / 2;
             bodySprite.y = containerH / 2;
             bodySprite.anchor.set(0.5);
+            bodyTextureDisplayScale = bodySprite.width / bodyTexture.width;
 
             // クリック透過領域の更新
             updateCharacterBoundsFromUrl(bodyPath);
         } else if (bodySprite) {
             bodySprite.texture = Texture.EMPTY;
+            bodyTextureDisplayScale = 1;
         }
     } else if (bodySprite) {
         bodySprite.texture = Texture.EMPTY;
+        bodyTextureDisplayScale = 1;
     }
 
     // 表情画像の適用
@@ -599,15 +645,15 @@ const loadMascotAssets = async (bodyPath: string, expressionPath: string) => {
         expressionSprite.texture = Texture.EMPTY;
         stopBlinkLoop();
     }
+
+    replaceActiveAssetUrls(requestedUrls);
     } finally {
         await nextTick();
         activeLoadCount--;
-        // このロードが最新世代でない場合は表示復帰をスキップ（後続のロードに委ねる）
-        if (myGeneration !== loadGeneration) {
-            return;
-        }
-        // 他のアクティブロードがなく、かつトランジションロック期間も明けている場合のみ表示を復帰する
-        if (activeLoadCount === 0 && !isTransitioning.value) {
+        // 最新世代の描画が確定した時点、または最後の旧ロードが終了した時点で表示を復帰する。
+        // 旧ロードは世代チェックで適用されないため、最新世代が先に完了した場合に待つ必要はない。
+        const canRevealLatest = myGeneration === loadGeneration || activeLoadCount === 0;
+        if (canRevealLatest && !isTransitioning.value) {
             if (bodySprite) bodySprite.visible = true;
             if (expressionSprite) expressionSprite.visible = true;
             isAssetsLoading.value = false;
@@ -663,12 +709,23 @@ const preloadMascotAssets = async (mascot: any) => {
 
     // 重複を排除
     const uniquePaths = Array.from(new Set(pathsToLoad.filter(p => !!p)));
+    const myPreloadGeneration = ++preloadGeneration;
 
     if (uniquePaths.length > 0) {
         console.log('[MascotViewer] Preloading assets for ' + mascot.name + ':', uniquePaths.length);
-        Assets.backgroundLoad(uniquePaths).catch(err => {
+        try {
+            await Assets.backgroundLoad(uniquePaths);
+            const nextUrls = new Set(uniquePaths);
+            if (myPreloadGeneration === preloadGeneration) {
+                replacePreloadedAssetUrls(nextUrls);
+            } else {
+                nextUrls.forEach(unloadAssetIfUnused);
+            }
+        } catch (err) {
             console.warn('[MascotViewer] Preloading failed:', err);
-        });
+        }
+    } else if (myPreloadGeneration === preloadGeneration) {
+        replacePreloadedAssetUrls(new Set());
     }
 };
 
@@ -778,68 +835,35 @@ const applyExpressionTransform = () => {
     const sc = isMatchingPreview ? (previewState.value.expressionScale ?? 1) : (found.scale ?? 1);
     const rot = isMatchingPreview ? (previewState.value.expressionRotation ?? 0) : (found.rotation ?? 0);
 
-    const scaleFactor = 512 / 420;
-    const scaledOx = ox * scaleFactor;
-    const scaledOy = oy * scaleFactor;
+    // エディタが保存するオフセットは元衣装キャンバス上のピクセル値。
+    // 固定UI幅ではなく、現在のnofaceテクスチャが実際に表示される倍率へ変換する。
+    const scaledOx = ox * bodyTextureDisplayScale;
+    const scaledOy = oy * bodyTextureDisplayScale;
 
     // 中央原点に対するオフセット調整
     expressionSprite.x = (512 / 2) + scaledOx;
     expressionSprite.y = (683 / 2) + scaledOy;
     
-    // スケール適用 (テクスチャ本来のサイズに対する 171px の基本スケール比に sc を乗算)
-    const texture = expressionSprite.texture;
-    let textureWidth = texture?.width;
-
-    if (texture?.source && texture.source.width > 1) {
-        textureWidth = texture.source.width;
-    }
-
-    // テクスチャのサイズがまだロード完了していない（0や1、あるいは未定義）場合は、後で再計算を試みる
-    if (!textureWidth || textureWidth <= 1) {
-        if (retryTransformTimeoutId) clearTimeout(retryTransformTimeoutId);
-        
-        if (retryTransformCount < 30) {
-            retryTransformCount++;
-            retryTransformTimeoutId = setTimeout(() => {
-                applyExpressionTransform();
-            }, 50);
-        }
-        
-        expressionSprite.scale.set(sc);
-        expressionSprite.rotation = rot * (Math.PI / 180);
-        return;
-    }
-
     retryTransformCount = 0;
     if (retryTransformTimeoutId) {
         clearTimeout(retryTransformTimeoutId);
         retryTransformTimeoutId = null;
     }
 
-    const baseScale = 171 / textureWidth;
-    expressionSprite.scale.set(baseScale * sc);
+    expressionSprite.scale.set(bodyTextureDisplayScale * sc);
     
     // 回転の適用 (角度からラジアン)
     expressionSprite.rotation = rot * (Math.PI / 180);
 };
 
-// パスの変更を監視
-// パスの変更を監視してアトミックにロードを実行
-const getCleanPath = (url: string | undefined | null): string => {
-    if (!url) return '';
-    return url.split('?')[0];
-};
-
-let lastBodyPathClean = '';
-let lastExpressionPathClean = '';
+// アセット単位の版数クエリを含む完全なURLで変更を監視する。
+let lastBodyPath = '';
+let lastExpressionPath = '';
 
 watch([currentBodyPath, currentExpressionPath], async ([newBodyPath, newExpressionPath]) => {
-    const cleanBody = getCleanPath(newBodyPath);
-    const cleanExpr = getCleanPath(newExpressionPath);
-    
-    if (cleanBody !== lastBodyPathClean || cleanExpr !== lastExpressionPathClean) {
-        lastBodyPathClean = cleanBody;
-        lastExpressionPathClean = cleanExpr;
+    if (newBodyPath !== lastBodyPath || newExpressionPath !== lastExpressionPath) {
+        lastBodyPath = newBodyPath;
+        lastExpressionPath = newExpressionPath;
         await loadMascotAssets(newBodyPath, newExpressionPath);
     }
 }, { flush: 'sync' });
@@ -847,7 +871,7 @@ watch([currentBodyPath, currentExpressionPath], async ([newBodyPath, newExpressi
 // activeMascot の変更を監視してプリロードを実行
 watch(activeMascot, (newMascot) => {
     preloadMascotAssets(newMascot);
-});
+}, { deep: true });
 
 // isSpeaking（音声再生状態）を監視して口パクの開始・停止
 watch(isSpeaking, (speaking) => {
@@ -875,10 +899,7 @@ watch([
     applyExpressionTransform();
 }, { deep: true });
 
-// 既定の正面画像
-const defaultFrontAvatar = computed(() => {
-    return activeMascotImageSet.value?.getFrontImage() || null;
-});
+// 既定の正面画像は上に移動されました
 
 // トータルスケール値の計算 (余計な縮小スケールを廃止し、設定スライダーの scale 値を等倍基準としてそのまま適用。ただしコンパクトモード時は 0.5 固定とする)
 const totalMascotScale = computed(() => {
@@ -1238,11 +1259,13 @@ onMounted(async () => {
 
             if (window.electronAPI) {
                 try {
+                    const dict = activeMascot.value?.aiConfig?.ttsDictionary;
+                    const normalizedMemo = stripResidualAsterisks(normalizeTextForTts(memo, dict));
                     let base64Audio: string | null = null;
                     if (voiceEngine === 'irodori') {
-                        base64Audio = await window.electronAPI.synthesizeIrodori(memo, irodoriEndpointUrl, irodoriModelName, irodoriVoiceName, 'surprised');
+                        base64Audio = await window.electronAPI.synthesizeIrodori(normalizedMemo, irodoriEndpointUrl, irodoriModelName, irodoriVoiceName, 'surprised');
                     } else {
-                        base64Audio = await window.electronAPI.synthesizeVoicevox(memo, speakerId, voicevoxEndpointUrl);
+                        base64Audio = await window.electronAPI.synthesizeVoicevox(normalizedMemo, speakerId, voicevoxEndpointUrl);
                     }
                     if (base64Audio) {
                         playlist.stop();
@@ -1265,6 +1288,15 @@ onMounted(async () => {
 
 
 onUnmounted(() => {
+    loadGeneration++;
+    preloadGeneration++;
+    if (bodySprite) bodySprite.texture = Texture.EMPTY;
+    if (expressionSprite) expressionSprite.texture = Texture.EMPTY;
+    expressionNormalTexture = null;
+    expressionCloseTexture = null;
+    expressionTalkTexture = null;
+    releaseAllViewerAssets();
+
     if (pixiApp) {
         if (mascotContainer) {
             mascotContainer.destroy({ children: true });

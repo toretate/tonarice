@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
 import mascotEmotionIcon from '../../assets/mascot_emotion_icon.png';
 import mascotOutfitIcon from '../../assets/mascot_outfilt_icon.png';
 import mascotProfileIcon from '../../assets/mascot_profile_icon.png';
 import Button from 'primevue/button';
 import { useConfigStore } from '../../store/config';
-import { useMascotSettings } from './composables/useMascotSettings';
+import { selectOutfitPreviewExpression, useMascotSettings } from './composables/useMascotSettings';
+import {
+    blobToDataUrl,
+    MascotImageSource,
+    saveMascotImageSource,
+    selectMascotImage
+} from '../../utils/mascot-image-upload';
 
 // 新規切り出しモーダルのインポート
 import MascotVerticalList from './components/MascotVerticalList.vue';
@@ -26,6 +32,7 @@ interface MascotAsset {
     id: string;
     name: string;
     path: string;
+    nofacePath?: string;
     originalPath?: string;
     offsetX?: number;
     offsetY?: number;
@@ -94,7 +101,8 @@ const {
     scannedSprites,
     isAssigningEmotionsModal,
     importFromSpriteSheet,
-    closeAssigningEmotionsModal
+    closeAssigningEmotionsModal,
+    uploadImportedImage
 } = useMascotSettings(props, emit);
 
 // モーダル管理用の状態
@@ -111,16 +119,29 @@ const backgroundRemovalTargetOutfitId = ref<string | null>(null);
 // --- 立ち絵アセット（全身像）操作関数群 ---
 const addOutfitImage = async () => {
     if (!window.electronAPI) return;
-    const result = await window.electronAPI.selectLocalImage();
-    if (result && result.success) {
+    const result = await selectMascotImage();
+    if (result) {
         if (!editingMascot.value.assets.outfits) {
             editingMascot.value.assets.outfits = [];
         }
         
+        const newOutfitId = 'outfit_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+        let finalPath = result.previewUrl;
+
+        try {
+            finalPath = await uploadImportedImage(editingMascot.value.id, 'outfits', newOutfitId, result.source);
+        } catch (uploadErr) {
+            console.warn('[MascotSettings] 衣装画像のアップロードに失敗しました。Base64でフォールバック保持します:', uploadErr);
+            if (result.source instanceof Blob) {
+                finalPath = await blobToDataUrl(result.source);
+            }
+        }
+        result.release();
+
         const newOutfit: MascotAsset & { expressions?: MascotAsset[] } = {
-            id: 'outfit_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+            id: newOutfitId,
             name: '衣装_' + (editingMascot.value.assets.outfits.length + 1),
-            path: result.path,
+            path: finalPath,
             offsetX: 0,
             offsetY: 0,
             scale: 1.0,
@@ -140,14 +161,13 @@ const addOutfitImage = async () => {
 };
 
 const setMainOutfit = (outfit: MascotAsset) => {
+    const previousExpression = activePreviewExpression.value;
     editingMascot.value.currentOutfitId = outfit.id;
-    
-    if (activePreviewExpression.value) {
-        const newExpr = outfit.expressions?.find(e => e.name === activePreviewExpression.value?.name);
-        if (newExpr) {
-            activePreviewExpression.value = newExpr;
-        }
-    }
+    activePreviewExpression.value = selectOutfitPreviewExpression(
+        outfit.expressions,
+        previousExpression?.id || editingMascot.value.defaultExpressionId,
+        previousExpression?.name
+    );
 
     // config-updated IPC 1回のみで MascotViewer 側が切り替わるようにし、
     // updateMascotPreview との2重送信によるちらつきを防止する
@@ -164,8 +184,13 @@ const deleteOutfit = (outfit: MascotAsset) => {
             editingMascot.value.currentOutfitId = nextOutfitId;
             
             if (nextOutfit) {
-                const newExpr = nextOutfit.expressions?.find(e => e.name === activePreviewExpression.value?.name);
-                if (newExpr) activePreviewExpression.value = newExpr;
+                activePreviewExpression.value = selectOutfitPreviewExpression(
+                    nextOutfit.expressions,
+                    activePreviewExpression.value?.id || editingMascot.value.defaultExpressionId,
+                    activePreviewExpression.value?.name
+                );
+            } else {
+                activePreviewExpression.value = null;
             }
             // config-updated IPC のみで切り替え（updateMascotPreview の二重送信を防止）
         }
@@ -203,6 +228,25 @@ const handleBackgroundRemovalDone = async (newBase64: string) => {
 
 const cropImageSrc = ref('');
 const selectedCropExpression = ref<MascotAsset | null>(null);
+const selectedImageBlob = ref<Blob | null>(null);
+const selectedImageOriginalPath = ref('');
+const cropImageBlobUrl = ref('');
+
+const cleanCropResources = () => {
+    if (cropImageBlobUrl.value) {
+        URL.revokeObjectURL(cropImageBlobUrl.value);
+        cropImageBlobUrl.value = '';
+    }
+    cropImageSrc.value = '';
+    selectedImageBlob.value = null;
+    selectedImageOriginalPath.value = '';
+};
+
+const closeCropModal = () => {
+    isCropModalActive.value = false;
+    selectedCropExpression.value = null;
+    cleanCropResources();
+};
 
 const openExpressionEditModal = (step: number) => {
     editorInitialStep.value = step;
@@ -233,58 +277,78 @@ const handleClearExpression = (slot: MascotAsset) => {
 
 const handleCropCurrent = (slot: MascotAsset) => {
     if (slot.path) {
+        cleanCropResources();
         selectedCropExpression.value = slot;
         cropImageSrc.value = slot.path;
+        selectedImageOriginalPath.value = slot.originalPath || slot.path;
         isCropModalActive.value = true;
     }
 };
 
 const handleCropNew = async (slot?: MascotAsset) => {
     if (!window.electronAPI) return;
-    const result = await window.electronAPI.selectLocalImage();
-    if (result && result.success) {
+    const result = await selectMascotImage();
+    if (result) {
         if (slot) selectedCropExpression.value = slot;
-        cropImageSrc.value = result.path;
+        cleanCropResources();
+
+        if (result.source instanceof Blob) {
+            selectedImageBlob.value = result.source;
+            cropImageBlobUrl.value = result.previewUrl;
+            cropImageSrc.value = result.previewUrl;
+        } else {
+            cropImageSrc.value = result.previewUrl;
+            selectedImageOriginalPath.value = result.source;
+        }
         isCropModalActive.value = true;
     }
 };
 
-const handleCropDone = async (croppedBase64: string) => {
+const handleCropDone = async (croppedImage: MascotImageSource) => {
     const currentMascotExpressions = activeOutfit.value?.expressions || editingMascot.value.assets.expressions || [];
     const targetSlot = selectedCropExpression.value || currentMascotExpressions.find((e: any) => e.name === '通常') || currentMascotExpressions[0];
     if (targetSlot) {
-        let finalPath = croppedBase64;
-        let finalOriginalPath = cropImageSrc.value;
+        const originalSource: MascotImageSource = selectedImageBlob.value || selectedImageOriginalPath.value;
+        const croppedSource = typeof croppedImage === 'string' && croppedImage.startsWith('blob:')
+            ? originalSource
+            : croppedImage;
+        let finalPath = typeof croppedSource === 'string' ? croppedSource : '';
+        let finalOriginalPath = typeof originalSource === 'string' ? originalSource : '';
         if (window.electronAPI?.saveMascotImage && editingMascot.value?.id) {
             try {
                 const sanitizedLabel = targetSlot.name.replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]/g, '_');
                 const outfitName = activeOutfit.value?.name.replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]/g, '_') || 'default';
 
-                if (cropImageSrc.value.startsWith('data:image/')) {
+                if (originalSource instanceof Blob || originalSource.startsWith('data:image/')) {
                     try {
                         const originalFilename = `expressions/${outfitName}/original/orig_expr_${sanitizedLabel}.png`;
-                        const saveOriginalResult = await window.electronAPI.saveMascotImage(editingMascot.value.id, originalFilename, cropImageSrc.value);
+                        const saveOriginalResult = await saveMascotImageSource(editingMascot.value.id, originalFilename, originalSource);
                         if (saveOriginalResult.success && saveOriginalResult.path) finalOriginalPath = saveOriginalResult.path;
                     } catch (originalErr) { console.warn('[MascotSettings] 元画像の保存に失敗しました:', originalErr); }
                 }
 
-                if (croppedBase64.startsWith('data:image/')) {
+                if (croppedSource instanceof Blob || croppedSource.startsWith('data:image/')) {
                     const filename = `expressions/${outfitName}/expr_${sanitizedLabel}.png`;
-                    const saveResult = await window.electronAPI.saveMascotImage(editingMascot.value.id, filename, croppedBase64);
+                    const saveResult = await saveMascotImageSource(editingMascot.value.id, filename, croppedSource);
                     if (saveResult.success && saveResult.path) finalPath = saveResult.path;
                 }
             } catch (err) { console.warn('[MascotSettings] 切り抜き画像の保存に失敗しました:', err); }
         }
+        if (!finalPath && croppedSource instanceof Blob) finalPath = await blobToDataUrl(croppedSource);
+        if (!finalOriginalPath && originalSource instanceof Blob) finalOriginalPath = await blobToDataUrl(originalSource);
         targetSlot.path = finalPath;
         targetSlot.originalPath = finalOriginalPath;
     }
     
     isCropModalActive.value = false;
     selectedCropExpression.value = null;
+    cleanCropResources();
     await syncAndSave();
     emit('save-settings');
     updateMascotPreview();
 };
+
+onBeforeUnmount(cleanCropResources);
 
 const registeredExpressions = computed(() => {
     if (!editingMascot.value) return [];
@@ -306,6 +370,11 @@ const handleBackFromExpressionEditor = async () => {
     emit('save-settings');
     isEditingExpressionsModal.value = false;
 };
+
+const updateOutfitNofacePath = ({ outfitId, nofacePath }: { outfitId: string; nofacePath: string }) => {
+    const outfit = editingMascot.value?.assets.outfits.find(item => item.id === outfitId);
+    if (outfit) outfit.nofacePath = nofacePath;
+};
 </script>
 
 <template>
@@ -317,6 +386,7 @@ const handleBackFromExpressionEditor = async () => {
         :default-front-avatar="defaultFrontAvatar"
         :initial-step="editorInitialStep"
         :initial-expression-id="activePreviewExpression?.id"
+        @update-outfit-noface="updateOutfitNofacePath"
         @back-to-settings="handleBackFromExpressionEditor"
     />
     <div v-else class="mascot-settings-container" :class="{ 'show-detail-mobile': showDetailOnMobile }">
@@ -528,7 +598,7 @@ const handleBackFromExpressionEditor = async () => {
     <ImageCropModal 
         :visible="isCropModalActive"
         :image-src="cropImageSrc"
-        @close="isCropModalActive = false"
+        @close="closeCropModal"
         @crop="handleCropDone"
     />
 

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
 import Button from 'primevue/button';
 import { useConfigStore } from '../../../store/config';
 import { detectFaceFeatures } from '../../../skills/expression-alignment/feature-island-detector';
 import { detectContentBounds, loadImage } from '../../../skills/expression-alignment/content-bounds-detector';
+import { resolveMascotImageUrl } from '../../../utils/mascot-image-url';
+import { canvasToImageBlob, MascotImageSource } from '../../../utils/mascot-image-upload';
 
 const props = defineProps<{
     visible: boolean;
@@ -12,25 +14,17 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     (e: 'close'): void;
-    (e: 'crop', base64: string): void;
+    (e: 'crop', image: MascotImageSource): void;
 }>();
 
 const configStore = useConfigStore();
 
 const resolveImageUrl = (path: string | undefined | null): string => {
-    if (!path) return '';
-    if (path.startsWith('data:image/')) {
-        return path;
-    }
-    let resolved = path;
-    if (path.startsWith('/mascots/') && configStore.useServer) {
-        resolved = `http://${configStore.serverHost}:${configStore.serverPort}${path}`;
-    }
-    if (/^[a-zA-Z]:\\/.test(resolved)) {
-        return resolved;
-    }
-    const separator = resolved.includes('?') ? '&' : '?';
-    return `${resolved}${separator}v=${configStore.configVersion}`;
+    return resolveMascotImageUrl(path, {
+        serverHost: configStore.serverHost,
+        serverPort: configStore.serverPort,
+        absoluteMascotUrl: configStore.useServer
+    });
 };
 
 
@@ -254,8 +248,7 @@ const executeCrop = async () => {
             cropHeight.value
         );
         
-        const croppedBase64 = canvas.toDataURL('image/png');
-        emit('crop', croppedBase64);
+        emit('crop', await canvasToImageBlob(canvas));
     }
 };
 
@@ -351,6 +344,10 @@ const handleAutoDetectCropArea = async () => {
 onMounted(() => {
     // マウスアップイベントをグローバルで検知して安全にドラッグを終了する
     window.addEventListener('mouseup', onCropMouseUp);
+});
+
+onBeforeUnmount(() => {
+    window.removeEventListener('mouseup', onCropMouseUp);
 });
 </script>
 

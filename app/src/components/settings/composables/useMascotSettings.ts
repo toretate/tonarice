@@ -3,11 +3,21 @@ import { useConfigStore } from '../../../store/config';
 import { autoAlignBatch, CONFIDENCE_THRESHOLD } from '../../../skills/expression-alignment/auto-align-v2';
 import { isValidImageSource } from '../../../skills/expression-alignment/expression-auto-align';
 import { MascotImageSetBuilder } from '../../../mascots/MascotImageSetBuilder';
+import { resolveMascotImageUrl } from '../../../utils/mascot-image-url';
+import {
+    blobToDataUrl,
+    canvasToImageBlob,
+    getImageExtension,
+    MascotImageSource,
+    saveMascotImageSource,
+    selectMascotImage
+} from '../../../utils/mascot-image-upload';
 
 export interface MascotAsset {
     id: string;
     name: string;
     path: string;
+    nofacePath?: string;
     originalPath?: string;
     offsetX?: number;
     offsetY?: number;
@@ -37,12 +47,26 @@ export interface MascotData {
             irodori_voice?: string;
             irodori_model?: string;
         };
+        ttsDictionary?: Record<string, string>;
     };
     assets: {
         outfits: MascotAsset[];
         expressions: MascotAsset[];
         poses: MascotAsset[];
     };
+}
+
+export function selectOutfitPreviewExpression(
+    expressions: MascotAsset[] | undefined,
+    preferredId?: string,
+    preferredName?: string
+): MascotAsset | null {
+    const available = (expressions || []).filter(expression => !!expression?.path);
+    return available.find(expression => expression.id === preferredId)
+        || available.find(expression => expression.name === preferredName)
+        || available.find(expression => expression.name === '通常')
+        || available[0]
+        || null;
 }
 
 export function useMascotSettings(
@@ -75,19 +99,11 @@ export function useMascotSettings(
 
     // アセットURLの解決
     const resolveImageUrl = (path: string | undefined | null): string => {
-        if (!path) return '';
-        if (path.startsWith('data:image/')) {
-            return path;
-        }
-        let resolved = path;
-        if (path.startsWith('/mascots/') && configStore.useServer) {
-            resolved = `http://${configStore.serverHost}:${configStore.serverPort}${path}`;
-        }
-        if (/^[a-zA-Z]:\\/.test(resolved)) {
-            return resolved;
-        }
-        const separator = resolved.includes('?') ? '&' : '?';
-        return `${resolved}${separator}v=${configStore.configVersion}`;
+        return resolveMascotImageUrl(path, {
+            serverHost: configStore.serverHost,
+            serverPort: configStore.serverPort,
+            absoluteMascotUrl: configStore.useServer
+        });
     };
 
     // 28個の感情スロットの初期化保証
@@ -264,7 +280,10 @@ export function useMascotSettings(
         editingMascot.value = JSON.parse(JSON.stringify(mascot));
         const currentMascotOutfit = mascot.assets?.outfits?.find((o: any) => o.id === mascot.currentOutfitId) || mascot.assets?.outfits?.[0] || null;
         const currentMascotExpressions = currentMascotOutfit?.expressions || mascot.assets?.expressions || [];
-        activeExpression.value = currentMascotExpressions.find((e: any) => e.name === '通常') || currentMascotExpressions[0] || null;
+        activeExpression.value = selectOutfitPreviewExpression(
+            currentMascotExpressions,
+            mascot.defaultExpressionId
+        );
         activePreviewExpression.value = activeExpression.value;
         
         updateMascotPreview();
@@ -299,7 +318,10 @@ export function useMascotSettings(
             
             const currentMascotOutfit = editingMascot.value.assets?.outfits?.find((o: any) => o && o.id === editingMascot.value.currentOutfitId) || editingMascot.value.assets?.outfits?.[0] || null;
             const currentMascotExpressions = currentMascotOutfit?.expressions || editingMascot.value.assets?.expressions || [];
-            activeExpression.value = currentMascotExpressions.find((e: any) => e && e.name === '通常') || currentMascotExpressions[0] || null;
+            activeExpression.value = selectOutfitPreviewExpression(
+                currentMascotExpressions,
+                editingMascot.value.defaultExpressionId
+            );
             activePreviewExpression.value = activeExpression.value;
             loadMascotPrompts();
         }
@@ -309,13 +331,13 @@ export function useMascotSettings(
         const idx = configStore.mascots.findIndex(m => m.id === editingMascot.value.id);
         if (idx !== -1) {
             configStore.mascots.splice(idx, 1, JSON.parse(JSON.stringify(editingMascot.value)));
-            configStore.configVersion++;
             emit('live-update');
         }
     };
 
     const setDefaultExpression = (id: string) => {
         editingMascot.value.defaultExpressionId = id;
+        activePreviewExpression.value = currentExpressions.value.find(expression => expression.id === id) || null;
         updateMascotPreview();
         syncAndSave();
         emit('save-settings');
@@ -392,16 +414,26 @@ export function useMascotSettings(
         }
     };
 
-    const importFromSpriteSheet = async (importData?: string | { imagePath: string; importId: string }) => {
+    const importFromSpriteSheet = async (importData?: MascotImageSource | { imagePath: string; importId: string }) => {
         if (!window.electronAPI) return;
         
         let imagePath = '';
         let importId = '';
         let isBase64 = false;
         let originalSource = '';
+        let selectedSource: MascotImageSource | null = null;
+        let releaseSelectedSource: () => void = () => undefined;
         
         if (importData) {
-            if (typeof importData === 'string') {
+            if (importData instanceof Blob) {
+                selectedSource = importData;
+                const previewUrl = URL.createObjectURL(importData);
+                imagePath = previewUrl;
+                originalSource = imagePath;
+                releaseSelectedSource = () => URL.revokeObjectURL(previewUrl);
+                isBase64 = true;
+                importId = 'sheet_' + Date.now();
+            } else if (typeof importData === 'string') {
                 imagePath = importData;
                 originalSource = importData;
                 isBase64 = imagePath.startsWith('data:image/');
@@ -414,11 +446,13 @@ export function useMascotSettings(
                 isBase64 = imagePath.startsWith('data:image/');
             }
         } else {
-            const result = await window.electronAPI.selectLocalImage();
-            if (!result || !result.success) return;
-            imagePath = result.path;
-            originalSource = result.path;
-            isBase64 = imagePath.startsWith('data:image/');
+            const result = await selectMascotImage();
+            if (!result) return;
+            selectedSource = result.source;
+            imagePath = result.previewUrl;
+            originalSource = result.previewUrl;
+            releaseSelectedSource = result.release;
+            isBase64 = selectedSource instanceof Blob || imagePath.startsWith('data:image/');
             importId = 'sheet_' + Date.now();
         }
         
@@ -436,16 +470,19 @@ export function useMascotSettings(
             if (isBase64 && editingMascot.value?.id) {
                 try {
                     const sheetFilename = `expressions/working/${importId}/spritesheet_${importId}.png`;
-                    const saveResult = await window.electronAPI.saveMascotImage(
+                    const saveResult = await saveMascotImageSource(
                         editingMascot.value.id,
                         sheetFilename,
-                        imagePath
+                        selectedSource || imagePath
                     );
                     if (saveResult.success && saveResult.path) {
                         imagePath = saveResult.path;
                     }
                 } catch (saveErr) {
                     console.warn('[useMascotSettings] スプライトシート全体の保存に失敗しました:', saveErr);
+                    if (selectedSource instanceof Blob) {
+                        imagePath = await blobToDataUrl(selectedSource);
+                    }
                 }
             }
             
@@ -497,19 +534,19 @@ export function useMascotSettings(
                         height
                     );
                     
-                    const croppedBase64 = canvas.toDataURL('image/png');
+                    const croppedBlob = await canvasToImageBlob(canvas);
                     const rawLabel = label.trim();
                     const translatedLabel = emotionTranslationMap[rawLabel.toLowerCase()] || rawLabel;
                     
-                    let finalCroppedPath = croppedBase64;
-                    if (window.electronAPI?.saveMascotImage && editingMascot.value?.id) {
+                    let finalCroppedPath = '';
+                    if (editingMascot.value?.id) {
                         try {
                             const sanitizedLabel = translatedLabel.replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]/g, '_');
                             const filename = `expressions/working/${importId}/expr_${sanitizedLabel}.png`;
-                            const saveResult = await window.electronAPI.saveMascotImage(
+                            const saveResult = await saveMascotImageSource(
                                 editingMascot.value.id,
                                 filename,
-                                croppedBase64
+                                croppedBlob
                             );
                             if (saveResult.success && saveResult.path) {
                                 finalCroppedPath = saveResult.path;
@@ -517,6 +554,9 @@ export function useMascotSettings(
                         } catch (saveErr) {
                             console.warn(`[useMascotSettings] 表情 ${translatedLabel} の保存に失敗しました:`, saveErr);
                         }
+                    }
+                    if (!finalCroppedPath) {
+                        finalCroppedPath = await blobToDataUrl(croppedBlob);
                     }
                     
                     const currentMascotExpressions = activeOutfit.value?.expressions || editingMascot.value.assets?.expressions || [];
@@ -542,6 +582,7 @@ export function useMascotSettings(
             alert('解析に失敗しました: ' + e.message);
         } finally {
             isScanningSprite.value = false;
+            releaseSelectedSource();
         }
     };
 
@@ -586,6 +627,31 @@ export function useMascotSettings(
         scannedSprites,
         isAssigningEmotionsModal,
         importFromSpriteSheet,
-        closeAssigningEmotionsModal
+        closeAssigningEmotionsModal,
+        uploadImportedImage
     };
+}
+
+export async function uploadImportedImage(
+    mascotId: string,
+    assetType: 'outfits' | 'expressions' | 'poses' | 'avatar',
+    assetId: string,
+    source: MascotImageSource
+): Promise<string> {
+    if (!window.electronAPI?.saveMascotImage) {
+        throw new Error('electronAPI.saveMascotImage is not available');
+    }
+    if (typeof source === 'string' && !source.startsWith('data:image/') && !source.startsWith('blob:')) {
+        return source;
+    }
+    const ext = getImageExtension(source);
+    const filename = `${assetType}/${assetId}.${ext}`;
+
+    console.log(`[Upload] Uploading ${assetType} image to mascot ${mascotId}: ${filename}`);
+    const result = await saveMascotImageSource(mascotId, filename, source);
+    if (result && result.success && result.path) {
+        return result.path;
+    } else {
+        throw new Error(result?.error || 'Failed to save mascot image via API');
+    }
 }

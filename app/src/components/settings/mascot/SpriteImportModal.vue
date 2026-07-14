@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { onBeforeUnmount, ref, watch } from 'vue';
 import Button from 'primevue/button';
 import { useConfigStore } from '@/store/config';
+import { MascotImageSource, selectMascotImage } from '../../../utils/mascot-image-upload';
 
 const props = defineProps<{
     visible: boolean;
@@ -10,15 +11,24 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     (e: 'close'): void;
-    (e: 'import', base64Image: string): void;
+    (e: 'import', image: MascotImageSource): void;
 }>();
 
 const configStore = useConfigStore();
 const selectedImage = ref<string>('');
+const selectedImageSource = ref<MascotImageSource | null>(null);
+let releaseSelectedImage: () => void = () => undefined;
 const isDragOver = ref(false);
 const activeTab = ref<'upload' | 'history'>('upload');
 const generatedSheets = ref<{ url: string; timestamp: string; date: string }[]>([]);
 const isLoadingSheets = ref(false);
+
+const clearSelectedImage = () => {
+    releaseSelectedImage();
+    releaseSelectedImage = () => undefined;
+    selectedImage.value = '';
+    selectedImageSource.value = null;
+};
 
 const resolveImageUrl = (path: string | undefined | null): string => {
     if (!path) return '';
@@ -50,39 +60,25 @@ watch(
     () => props.visible,
     (newVal) => {
         if (newVal) {
-            selectedImage.value = '';
+            clearSelectedImage();
             isDragOver.value = false;
             activeTab.value = 'upload';
             generatedSheets.value = [];
             fetchGeneratedSheets();
+        } else {
+            clearSelectedImage();
         }
     }
 );
 
 // ファイル選択ハンドラー（Electronのダイアログを使用）
 const selectFile = async () => {
-    if (window.electronAPI?.selectLocalImage) {
-        const result = await window.electronAPI.selectLocalImage();
-        if (result && result.success) {
-            selectedImage.value = result.path;
-        }
-    } else {
-        // Webフォールバック用
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/*';
-        input.onchange = (e) => {
-            const file = (e.target as HTMLInputElement).files?.[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = () => {
-                    selectedImage.value = reader.result as string;
-                };
-                reader.readAsDataURL(file);
-            }
-        };
-        input.click();
-    }
+    const result = await selectMascotImage();
+    if (!result) return;
+    clearSelectedImage();
+    selectedImage.value = result.previewUrl;
+    selectedImageSource.value = result.source;
+    releaseSelectedImage = result.release;
 };
 
 // ドラッグ＆ドロップイベントハンドラー
@@ -100,24 +96,28 @@ const onDrop = (e: DragEvent) => {
     isDragOver.value = false;
     const file = e.dataTransfer?.files?.[0];
     if (file && file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = () => {
-            selectedImage.value = reader.result as string;
-        };
-        reader.readAsDataURL(file);
+        clearSelectedImage();
+        const previewUrl = URL.createObjectURL(file);
+        selectedImage.value = previewUrl;
+        selectedImageSource.value = file;
+        releaseSelectedImage = () => URL.revokeObjectURL(previewUrl);
     }
 };
 
 const selectGeneratedSheet = (url: string) => {
+    clearSelectedImage();
     selectedImage.value = resolveImageUrl(url);
+    selectedImageSource.value = selectedImage.value;
     activeTab.value = 'upload'; // プレビュー確認のためアップロード/表示タブに戻す
 };
 
 const handleImport = () => {
     if (!selectedImage.value) return;
-    emit('import', selectedImage.value);
+    emit('import', selectedImageSource.value || selectedImage.value);
     emit('close');
 };
+
+onBeforeUnmount(clearSelectedImage);
 </script>
 
 <template>

@@ -4,6 +4,7 @@ import { useConfigStore } from '../../../../store/config';
 import Button from 'primevue/button';
 import Slider from 'primevue/slider';
 import Dropdown from 'primevue/dropdown';
+import { resolveMascotImageUrl } from '../../../../utils/mascot-image-url';
 
 const configStore = useConfigStore();
 
@@ -11,6 +12,7 @@ interface MascotAsset {
     id: string;
     name: string;
     path: string;
+    nofacePath?: string;
     originalPath?: string;
     offsetX?: number;
     offsetY?: number;
@@ -105,25 +107,14 @@ const activeTool = ref<'brush' | 'eraser' | 'polygon'>('brush');
 const selectionPoints = ref<{ x: number; y: number }[]>([]);
 
 const resolveImageUrl = (path: string | undefined | null): string => {
-    if (!path) {
-        return '';
-    }
-    if (path.startsWith('data:image/')) {
-        return path;
-    }
-    let resolved = path;
-    if (path.startsWith('/mascots/') && configStore.useServer) {
-        resolved = `http://${configStore.serverHost}:${configStore.serverPort}${path}`;
-    }
-    if (/^[a-zA-Z]:\\/.test(resolved)) {
-        return resolved;
-    }
-    const separator = resolved.includes('?') ? '&' : '?';
-    return `${resolved}${separator}v=${configStore.configVersion}`;
+    return resolveMascotImageUrl(path, {
+        serverHost: configStore.serverHost,
+        serverPort: configStore.serverPort,
+        absoluteMascotUrl: configStore.useServer
+    });
 };
 
 const baseMascotImageUrl = computed(() => {
-    if (props.activePose?.path) return props.activePose.path;
     if (props.activeOutfit?.path) return props.activeOutfit.path;
     if (props.defaultFrontAvatar?.path) return props.defaultFrontAvatar.path;
     return props.editingMascot?.avatar || '';
@@ -234,7 +225,7 @@ const initCanvas = async (imagePath: string) => {
 
 const saveEditedNoface = async () => {
     const canvas = canvasRef.value;
-    if (!canvas) return;
+    if (!canvas || !props.activeOutfit?.id) return;
 
     isGeneratingNoface.value = true;
     try {
@@ -244,6 +235,8 @@ const saveEditedNoface = async () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 mascotId: props.editingMascot.id,
+                outfitId: props.activeOutfit.id,
+                sourcePath: props.activeOutfit.path,
                 imageBase64: imageBase64
             })
         });
@@ -267,7 +260,7 @@ defineExpose({
 
 const reprocessNoface = async (force: any = true) => {
     const forceFlag = typeof force === 'boolean' ? force : true;
-    if (isGeneratingNoface.value) return;
+    if (isGeneratingNoface.value || !props.activeOutfit?.id) return;
     isGeneratingNoface.value = true;
     try {
         const response = await fetch('/api/mascots/generate-noface', {
@@ -275,6 +268,7 @@ const reprocessNoface = async (force: any = true) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 mascotId: props.editingMascot.id,
+                outfitId: props.activeOutfit.id,
                 inputPath: baseMascotImageUrl.value,
                 detectMode: localDetectMode.value,
                 engine: localGenerateEngine.value,

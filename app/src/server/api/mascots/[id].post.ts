@@ -1,6 +1,7 @@
 import { defineEventHandler, readBody, createError } from 'h3';
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'node:crypto';
 import { USERS_DIR } from '../../utils/paths';
 import { safeWriteFileSync } from '../../utils/fs-helpers';
 
@@ -9,12 +10,15 @@ function getMascotConfigPath(userId: string, mascotId: string): string {
 }
 
 function saveBase64Image(base64Data: string, userId: string, mascotId: string, assetType: string, assetId: string): string {
-    const matches = base64Data.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
+    const matches = base64Data.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
     if (!matches || matches.length !== 3) {
         return base64Data;
     }
 
-    const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+    let ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+    if (ext === 'svg+xml') {
+        ext = 'svg';
+    }
     const dataBuffer = Buffer.from(matches[2], 'base64');
 
     const targetDir = path.join(USERS_DIR, userId, 'mascots', mascotId, assetType);
@@ -28,7 +32,7 @@ function saveBase64Image(base64Data: string, userId: string, mascotId: string, a
     fs.writeFileSync(filePath, dataBuffer);
     console.log(`[Server] Saved asset to ${filePath}`);
 
-    return `/mascots/users/${userId}/${mascotId}/${assetType}/${filename}`;
+    return `/mascots/users/${userId}/${mascotId}/${assetType}/${filename}?v=${randomUUID()}`;
 }
 
 function processMascotAssets(userId: string, mascot: any): any {

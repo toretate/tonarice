@@ -12,6 +12,7 @@ interface MascotAsset {
     id: string;
     name: string;
     path: string;
+    nofacePath?: string;
     originalPath?: string;
     offsetX?: number;
     offsetY?: number;
@@ -40,6 +41,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     (e: 'back-to-settings'): void;
+    (e: 'update-outfit-noface', payload: { outfitId: string; nofacePath: string }): void;
 }>();
 
 // ウィザードのステップ状態 (1: ベース顔確認, 2: 位置調整, 3: アニメ確認)
@@ -56,7 +58,7 @@ const step1Ref = ref<InstanceType<typeof Step1FaceGuide> | null>(null);
 const step2Ref = ref<InstanceType<typeof Step2NofaceEditor> | null>(null);
 
 // ステップ間で共有する状態
-const nofaceImagePath = ref<string | null>(null);
+const nofaceImagePath = ref<string | null>(props.activeOutfit?.nofacePath || null);
 const originalImagePath = ref<string | null>(null);
 const nofaceCacheQuery = ref(0);
 
@@ -86,20 +88,25 @@ const selectedCandidateIndex = ref<number | null>(null);
 const goToStep2 = () => {
     // 立ち絵画像の決定
     let originalPath = '';
-    if (props.activePose?.path) originalPath = props.activePose.path;
-    else if (props.activeOutfit?.path) originalPath = props.activeOutfit.path;
+    if (props.activeOutfit?.path) originalPath = props.activeOutfit.path;
     else if (props.defaultFrontAvatar?.path) originalPath = props.defaultFrontAvatar.path;
     else originalPath = props.editingMascot?.avatar || '';
 
     originalImagePath.value = originalPath;
-    // nofaceImagePath は最初は生成されていないので null
-    nofaceImagePath.value = null;
+    nofaceImagePath.value = props.activeOutfit?.nofacePath || null;
     nofaceCacheQuery.value = Date.now();
     currentStep.value = 2;
 };
 
 const onSaveCompleted = () => {
     emit('back-to-settings');
+};
+
+const updateNofaceImagePath = (path: string | null) => {
+    nofaceImagePath.value = path;
+    if (path && props.activeOutfit) {
+        emit('update-outfit-noface', { outfitId: props.activeOutfit.id, nofacePath: path });
+    }
 };
 
 const handleBack = () => {
@@ -164,7 +171,8 @@ const handleNext = async () => {
                 :active-pose="activePose"
                 :default-front-avatar="defaultFrontAvatar"
                 :gemini-api-key="geminiApiKey"
-                v-model:noface-image-path="nofaceImagePath"
+                :noface-image-path="nofaceImagePath"
+                @update:noface-image-path="updateNofaceImagePath"
                 v-model:original-image-path="originalImagePath"
                 v-model:noface-cache-query="nofaceCacheQuery"
                 v-model:generate-engine="generateEngine"

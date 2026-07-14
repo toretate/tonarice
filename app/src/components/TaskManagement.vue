@@ -358,21 +358,35 @@ const onElectronMouseUp = () => {
 // 統合モードと分離モードに応じたスタイルの計算
 const widgetStyle = computed(() => {
     const opacityValue = configStore.taskOpacity !== undefined ? configStore.taskOpacity : 1.0;
-    if (windowMode.value === 'integrated') {
+    const hash = window.location.hash;
+    
+    // 分離モードウィンドウとして起動している場合
+    if (hash === '#tasks') {
         return {
-            position: 'absolute' as const,
-            left: `${posX.value}px`,
-            top: `${posY.value}px`,
-            width: `${width.value}px`,
-            height: `${height.value}px`,
-            opacity: opacityValue,
-            zIndex: 100
+            width: '100%',
+            height: '100%',
+            opacity: opacityValue
         };
     }
+    
+    // コンパクトモードの枠内に埋め込まれている場合
+    if (hash === '#compact') {
+        return {
+            width: '100%',
+            height: '100%',
+            opacity: opacityValue
+        };
+    }
+    
+    // 統合モード等、デスクトップ/親コンテナ上でのフローティング表示の場合
     return {
-        width: '100%',
-        height: '100%',
-        opacity: opacityValue
+        position: 'absolute' as const,
+        left: `${posX.value}px`,
+        top: `${posY.value}px`,
+        width: `${width.value}px`,
+        height: `${height.value}px`,
+        opacity: opacityValue,
+        zIndex: 100
     };
 });
 
@@ -383,8 +397,21 @@ onMounted(() => {
     // ウィジェット位置の復元
     const savedX = localStorage.getItem('task_widget_pos_x');
     const savedY = localStorage.getItem('task_widget_pos_y');
-    if (savedX !== null) posX.value = parseInt(savedX, 10);
-    if (savedY !== null) posY.value = parseInt(savedY, 10);
+    
+    let xVal = parseInt(savedX || '', 10);
+    let yVal = parseInt(savedY || '', 10);
+    
+    if (!isNaN(xVal) && xVal >= 0 && xVal < window.innerWidth - 50) {
+        posX.value = xVal;
+    } else {
+        posX.value = window.innerWidth - 400;
+    }
+    
+    if (!isNaN(yVal) && yVal >= 0 && yVal < window.innerHeight - 50) {
+        posY.value = yVal;
+    } else {
+        posY.value = 80;
+    }
 
     // 現在時刻を30秒ごとに更新（タイムラインの期限切れ表示を追従させる）
     nowTimer = setInterval(() => { nowTs.value = Date.now(); }, 30000);
@@ -1308,7 +1335,7 @@ const saveTaskEditor = () => {
                 >
                     <div class="completed-date-header">
                         <span class="completed-date-label">{{ group.label }}</span>
-                        <span class="completed-date-count">{{ group.tasks.length }}</span>
+                        <span class="completed-date-count">{{ group.tasks.length }} 件</span>
                     </div>
                     <div class="completed-date-items">
                         <div
@@ -2555,6 +2582,35 @@ const saveTaskEditor = () => {
 }
 
 /* COMPビュー (完了済み一覧) */
+.completed-date-block {
+    margin-bottom: 12px;
+}
+
+.completed-date-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 8px;
+    background-color: #f1f5f9;
+    border-radius: 4px;
+    margin-bottom: 6px;
+}
+
+.completed-date-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #475569;
+}
+
+.completed-date-count {
+    font-size: 10px;
+    color: #64748b;
+    background-color: #e2e8f0;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-weight: 500;
+}
+
 .completed-view {
     display: flex;
     flex-direction: column;

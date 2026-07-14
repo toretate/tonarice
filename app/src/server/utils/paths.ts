@@ -82,9 +82,11 @@ export const HISTORY_TEMPLATE_PATH = path.join(PROJECT_ROOT, 'chat_history.json'
  * @param requestPath "/mascots/users/xxx/image.png" や "/mascots/mascot_xxx/image.png"
  */
 export function resolveMascotPath(requestPath: string): string {
-    const subpath = requestPath.startsWith('/mascots/')
-        ? requestPath.substring('/mascots/'.length)
-        : requestPath;
+    // アセット単位の版数クエリやフラグメントは物理パスへ含めない。
+    const pathOnly = requestPath.split(/[?#]/, 1)[0];
+    const subpath = pathOnly.startsWith('/mascots/')
+        ? pathOnly.substring('/mascots/'.length)
+        : pathOnly;
 
     const decodedSubpath = decodeURIComponent(subpath);
 

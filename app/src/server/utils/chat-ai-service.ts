@@ -1,8 +1,65 @@
-import { lmStudioTools } from '../skills/tool-use';
-import { generateText, ModelMessage, stepCountIs } from 'ai';
+import { filterEnabledTools } from '../skills/tool-use';
+import { generateText, ModelMessage, stepCountIs, ToolSet } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import { convertLmStudioToolToVercel } from './tool-adapter';
+
+// 共通ガイドラインテンプレートの読み込み
+import toolUseGuidelineTemplate from '@prompt/tool-use-guideline';
+
+function createLmStudioFetch(repetitionPenalty?: number, enableThinking?: boolean): typeof fetch {
+    return async (input, init) => {
+        if (!init?.body || typeof init.body !== 'string') {
+            return fetch(input, init);
+        }
+
+        try {
+            const body = JSON.parse(init.body) as Record<string, unknown>;
+            if (repetitionPenalty !== undefined) {
+                body.repetition_penalty = repetitionPenalty;
+            }
+            if (enableThinking === false) {
+                body.reasoning_format = 'none';
+                body.include_reasoning = false;
+            }
+            return fetch(input, { ...init, body: JSON.stringify(body) });
+        } catch {
+            // JSON以外の要求は加工せず、そのまま送信する。
+            return fetch(input, init);
+        }
+    };
+}
+
+function extractToolResultMessage(output: unknown): string | null {
+    if (typeof output === 'string') {
+        const trimmed = output.trim();
+        if (!trimmed) return null;
+        try {
+            return extractToolResultMessage(JSON.parse(trimmed));
+        } catch {
+            return trimmed;
+        }
+    }
+    if (!output || typeof output !== 'object') return null;
+
+    const result = output as Record<string, unknown>;
+    for (const key of ['message', 'error', 'result']) {
+        if (typeof result[key] === 'string' && result[key].trim()) {
+            return result[key].trim();
+        }
+    }
+    return null;
+}
+
+function buildToolResultFallback(
+    executedTools: Array<{ toolName: string; input: unknown; output: unknown }>
+): string | null {
+    const messages = executedTools
+        .map(tool => extractToolResultMessage(tool.output))
+        .filter((message): message is string => !!message);
+    const uniqueMessages = [...new Set(messages)];
+    return uniqueMessages.length > 0 ? uniqueMessages.join('\n') : null;
+}
 
 // 生成テキストのループ崩壊（リピート問題）を検知してカットするヘルパー
 function removeRepetitiveLoops(text: string): string {
@@ -45,6 +102,75 @@ function removeRepetitiveLoops(text: string): string {
     result = result.replace(repeatRegex, '$1');
 
     return result.trim();
+}
+
+// モデルがツールを実行せず、本文中に擬似的なツール呼び出し記法
+// （例: [manageTasks(action="delete", ...)] や manageTasks(...)）を書いてしまうことがある。
+// これは実際には何も実行されていない上にユーザーには無意味なので除去する。
+// 正規表現ではなく括弧の対応を走査することで、引数値に丸括弧を含むケース
+// （例: title="会議(定例)"）でも末尾が本文に残らないようにする。
+// 感情タグ [happy] やタイマータグ [TIMER:...] は「ツール名(」の形にならないため影響を受けない。
+function stripPseudoToolCalls(text: string, toolNames: string[]): string {
+    if (!text || toolNames.length === 0) return text;
+
+    // 開始位置（ツール名の直後に '(' が続く箇所）を探す正規表現
+    const namePattern = toolNames
+        .map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .join('|');
+    const startRegex = new RegExp(`(?:${namePattern})\\s*\\(`, 'gi');
+
+    // openIdx の '(' に対応する ')' の位置を返す（引用符内の括弧は無視）。見つからなければ -1
+    const findMatchingParen = (s: string, openIdx: number): number => {
+        let depth = 0;
+        let quote: string | null = null;
+        for (let i = openIdx; i < s.length; i++) {
+            const ch = s[i];
+            if (quote) {
+                if (ch === quote) quote = null;
+                continue;
+            }
+            if (ch === '"' || ch === "'") { quote = ch; continue; }
+            if (ch === '(') depth++;
+            else if (ch === ')') {
+                depth--;
+                if (depth === 0) return i;
+            }
+        }
+        return -1;
+    };
+
+    let out = '';
+    let lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = startRegex.exec(text)) !== null) {
+        const nameStart = m.index;
+        const parenStart = m.index + m[0].length - 1; // '(' の位置
+        const closeIdx = findMatchingParen(text, parenStart);
+        // 対応する ')' が無い場合は誤削除を避けてそのまま残す
+        if (closeIdx === -1) continue;
+
+        // 直前の空白と、それを跨いだ先頭の '[' を巻き込む
+        let from = nameStart;
+        let p = nameStart - 1;
+        while (p >= 0 && (text[p] === ' ' || text[p] === '\t')) p--;
+        if (p >= 0 && text[p] === '[') from = p;
+
+        // 末尾の空白と閉じ ']' を巻き込む
+        let to = closeIdx + 1;
+        while (to < text.length && (text[to] === ' ' || text[to] === '\t')) to++;
+        if (to < text.length && text[to] === ']') to++;
+        else to = closeIdx + 1; // ']' が無ければ空白は消さずに ')' の直後まで
+
+        out += text.slice(lastIndex, from);
+        lastIndex = to;
+        startRegex.lastIndex = to;
+    }
+    out += text.slice(lastIndex);
+
+    return out
+        .replace(/[ \t]+\n/g, '\n')   // 行末の余分な空白を除去
+        .replace(/\n{3,}/g, '\n\n')   // 除去後に生じる過剰な空行を2行までに圧縮
+        .trim();
 }
 
 // テキストファイルのデコード用ヘルパー
@@ -98,44 +224,61 @@ export class ChatAiService {
         const timeoutId = setTimeout(() => controller.abort(), 60000);
 
         try {
-            // システムプロンプトに現在のシステム日時を動的に注入する
-            const nowStr = new Date().toLocaleString('ja-JP');
+            // システムプロンプトに現在のシステム日時を動的に注入する。
+            // 秒を含めるとプロンプトキャッシュ（ローカルLLMのKVプレフィックスキャッシュ等）が
+            // 毎ターン無効化されるため、粒度は分単位に留める。
+            const nowStr = new Date().toLocaleString('ja-JP', {
+                year: 'numeric', month: 'numeric', day: 'numeric',
+                weekday: 'short', hour: '2-digit', minute: '2-digit'
+            });
             const timeInstruction = `\n\n[現在のシステム日時]\n${nowStr}`;
 
             // ツール有効・無効に基づくフィルタリング
-            const filteredTools = lmStudioTools.filter(tool => {
-                if (!tools) return true; // 設定がない場合はすべて有効
+            const filteredTools = filterEnabledTools(tools);
 
-                switch (tool.name) {
-                    case 'launchApp':
-                        return tools.toolsAppLauncher !== false;
-
-                    case 'getGPSLocation':
-                        return tools.toolsGpsLocation !== false;
-                    case 'adjustVolume':
-                        return tools.toolsVolume !== false;
-                    case 'getWeather':
-                        return tools.toolsWeather !== false;
-                    case 'searchWeb':
-                        return tools.toolsWebSearch !== false;
-                    default:
-                        return true;
-                }
-            });
+            const currentEngine = engine || 'gemini';
+            // native function-calling を信頼できるモデルか（cloud=true / ローカル弱モデル=false）。
+            // cloud は description + JSON スキーマで十分に誘導できるため、手書きの per-tool
+            // ガイドラインは注入しない。ローカル(lmstudio)は弱いため従来どおり注入する。
+            const preferNativeToolGuidance = currentEngine !== 'lmstudio';
 
             // ツール使用ガイドラインを動的に構成
             const activeToolDescriptions: string[] = [];
+            const activeToolPrompts: string[] = [];
+
             filteredTools.forEach(t => {
-                activeToolDescriptions.push(t.name);
+                activeToolDescriptions.push(t.tool.name);
+                activeToolPrompts.push(t.prompt.trim());
             });
+
             const toolListStr = activeToolDescriptions.join(', ');
-            const toolUseSection = activeToolDescriptions.length > 0
-                ? `- 以下のツールが使用可能です: ${toolListStr}\n- 現在の情報や天気、時間、アプリの起動、音量の調整、および【タスクや予定（スケジュール）の追加・登録・検索・更新・削除】について尋ねられたり依頼された場合は、絶対に自分で推測して会話だけで完了せず、必ず定義された対応するツール（manageTasks。追加時は action: "add" を指定し、期限付きの予定にする場合は scheduledAt も指定してください）を呼び出してください。`
-                : `- 利用可能なツールはありません。`;
+            let toolUseSection = '';
+            if (activeToolDescriptions.length === 0) {
+                toolUseSection = `- 利用可能なツールはありません。`;
+            } else {
+                const historyRule = `- 会話履歴中で既にツール実行または完了応答まで済んだ依頼を、重複して再実行しないでください。ただし、確認・追加情報の提示・承認など、最新のユーザーメッセージが未完了の依頼を継続する内容である場合は、履歴の文脈を踏まえて実行してください。`;
 
-            const toolUseGuideline = `\n\n# ツール使用ガイドライン\n${toolUseSection}\n- タスクやスケジュールの追加時には、ツールを呼び出した後に、ユーザーに「登録しました」と伝える応答を返してください。\n- 最終的な回答には、思考プロセス（Thinking Process）や、自己指示、"<|channel>thought" や "<|channel>" などの特殊なチャンネルタグ、メタコメント（"現在時刻を取得しました"、"ツールを実行します" など）を一切含めないでください。\n- 回答は日本語で、フレンドリーなマスコットキャラクターとしてユーザーに直接語りかけるように記述してください。出力するテキストは、自然なセリフ（発話内容）のみにしてください。`;
+                if (preferNativeToolGuidance) {
+                    // native モード（cloud）: 誘導は description + JSON スキーマに委ねる。
+                    // per-tool の日本語ガイドラインは注入しない。
+                    toolUseSection =
+                        `- 以下のツールが使用可能です: ${toolListStr}\n` +
+                        `- 適切な状況では推測で会話を完結させず、対応するツールを呼び出してください。\n` +
+                        historyRule;
+                } else {
+                    // prompted モード（ローカル弱モデル）: 従来どおり per-tool ガイドラインを連結
+                    toolUseSection =
+                        `- 以下のツールが使用可能です: ${toolListStr}\n` +
+                        activeToolPrompts.join('\n') + '\n' +
+                        historyRule;
+                }
+            }
 
-            const finalSystemPrompt = `${systemPrompt || ''}${timeInstruction}${toolUseGuideline}`;
+            // 置換値に $ が含まれても $& 等の特殊置換として解釈されないよう、関数形式で置換する
+            const toolUseGuideline = toolUseGuidelineTemplate.replace('{{toolUseSection}}', () => toolUseSection);
+
+            // 変動する時刻は静的部分（ペルソナ＋ガイドライン）の後ろに置き、プレフィックスのキャッシュ効率を保つ
+            const finalSystemPrompt = `${systemPrompt || ''}\n\n${toolUseGuideline}${timeInstruction}`;
 
             // 履歴のマッピング
             const messages: ModelMessage[] = [];
@@ -205,19 +348,19 @@ export class ChatAiService {
             });
 
             // ツール実行結果を確実に収集する一時配列
-            const executedTools: Array<{ toolName: string; input: any; output: any }> = [];
+            const executedTools: Array<{ toolName: string; input: unknown; output: unknown }> = [];
 
             // Vercel AI SDK 形式 of ツール定義に変換
-            const vercelTools: Record<string, any> = {};
+            const vercelTools: ToolSet = {};
             filteredTools.forEach(t => {
-                vercelTools[t.name] = convertLmStudioToolToVercel(
-                    t,
+                vercelTools[t.tool.name] = convertLmStudioToolToVercel(
+                    t.tool,
                     (input, output) => {
-                        executedTools.push({ toolName: t.name, input, output });
+                        executedTools.push({ toolName: t.tool.name, input, output });
                     },
                     async (args) => {
                         if (onToolExecute) {
-                            return await onToolExecute(t.name, args);
+                            return await onToolExecute(t.tool.name, args);
                         }
                         return null;
                     }
@@ -226,7 +369,6 @@ export class ChatAiService {
 
             // プロバイダーとモデルの設定
             let modelProvider: any;
-            const currentEngine = engine || 'gemini';
 
             if (currentEngine === 'lmstudio') {
                 const baseEndpoint = (lmstudioEndpoint || '').trim() || 'http://localhost:1234/v1';
@@ -239,20 +381,10 @@ export class ChatAiService {
                 const lmstudio = createOpenAI({
                     baseURL: finalEndpoint,
                     apiKey: 'not-needed',
-                    compatibility: 'compatible'
+                    name: 'lmstudio',
+                    fetch: createLmStudioFetch(repetitionPenalty, enableThinking)
                 });
-                const additionalBody: any = {};
-                if (repetitionPenalty !== undefined) {
-                    additionalBody.repetition_penalty = repetitionPenalty;
-                }
-                if (enableThinking === false) {
-                    additionalBody.reasoning_format = 'none';
-                    additionalBody.include_reasoning = false;
-                }
-                const chatSettings = Object.keys(additionalBody).length > 0 ? {
-                    additionalBody
-                } : {};
-                modelProvider = lmstudio.chat(model || 'unspecified', chatSettings);
+                modelProvider = lmstudio.chat(model || 'unspecified');
             } else if (currentEngine === 'gemini') {
                 const targetModel = model || 'gemini-1.5-flash';
                 console.log(`[ChatAiService] Routing to Gemini via Vercel AI SDK (Model: ${targetModel})`);
@@ -284,7 +416,8 @@ export class ChatAiService {
                 model: modelProvider,
                 system: finalSystemPrompt,
                 messages: messages,
-                temperature: temperature !== undefined ? temperature : 0.7,
+                // ツール有効時は tool-calling の安定性を優先して低温をデフォルトにする（ユーザー指定は常に優先）
+                temperature: temperature !== undefined ? temperature : (hasTools ? 0.2 : 0.7),
                 frequencyPenalty: frequencyPenalty !== undefined ? frequencyPenalty : 0.0,
                 maxOutputTokens: maxOutputTokens !== undefined ? maxOutputTokens : 2048,
                 abortSignal: controller.signal
@@ -320,6 +453,11 @@ export class ChatAiService {
 
                 if (isLmStudio && hasTools && isTemplateError) {
                     console.warn('[ChatAiService] LM Studio のプロンプトテンプレートエラーを検知しました。ツール呼び出しを無効化して再試行します。', firstTryError.message);
+                    // jinja テンプレートエラーの具体的な原因を追えるよう、レスポンス本文をそのまま出力する。
+                    // （ツールを無効化するとタスク／予定の追加・削除が実行されないため、根本原因の特定が重要）
+                    if (firstTryError.responseBody) {
+                        console.warn('[ChatAiService] テンプレートエラーの詳細(responseBody):', firstTryError.responseBody);
+                    }
                     const retryOptions = { ...generateOptions };
                     delete retryOptions.tools;
                     delete retryOptions.stopWhen;
@@ -338,7 +476,8 @@ export class ChatAiService {
                 toolResults: s.toolResults,
                 finishReason: s.finishReason
             })), null, 2));
-            let cleanedContent = response.text || '';
+            const rawContent = response.text || '';
+            let cleanedContent = rawContent;
 
             // 思考プロセス（Thinking Process や <think>, <thought> タグ、<|channel>thought タグ）のクレンジング
             if (cleanedContent.includes('</think>')) {
@@ -362,7 +501,33 @@ export class ChatAiService {
                 .replace(/^Thinking Process:[\s\S]*?(?=\n\n\S|$)/i, '')
                 .replace(/\nThinking Process:[\s\S]*?(?=\n\n\S|$)/g, '');
 
-            return removeRepetitiveLoops(cleanedContent);
+            // 本文に紛れ込んだ擬似的なツール呼び出し記法を除去する（引数内の丸括弧にも対応。詳細は stripPseudoToolCalls）
+            if (filteredTools.length > 0) {
+                cleanedContent = stripPseudoToolCalls(cleanedContent, filteredTools.map(t => t.tool.name));
+            }
+
+            const finalReply = removeRepetitiveLoops(cleanedContent);
+
+            // 応答が空になるケースへのフォールバック。
+            // 特にローカルモデルが思考(<|channel>thought 等)だけで maxOutputTokens を使い切り
+            // finishReason が "length" で打ち切られると、思考クレンジング後に本文が空になり、
+            // ツール呼び出しも発火しないまま UI が無反応になる。必ず何か発話を返す。
+            if (!finalReply.trim()) {
+                const finishReason = response.finishReason;
+                const emptyStage = rawContent.trim() ? 'クレンジング後の応答' : 'モデルの最終発話';
+                const toolResultFallback = buildToolResultFallback(executedTools);
+                if (toolResultFallback) {
+                    console.warn(`[ChatAiService] ${emptyStage}が空です (finishReason: ${finishReason})。成功済みツールの結果を最終発話として返します。`);
+                    return toolResultFallback;
+                }
+                console.warn(`[ChatAiService] ${emptyStage}が空です (finishReason: ${finishReason})。フォールバック応答を返します。`);
+                if (finishReason === 'length') {
+                    return 'うーん、考えているうちに言葉が長くなりすぎちゃったみたい…！ごめんね、もう一度お願いできる？（応答長の上限を上げると安定するよ）';
+                }
+                return 'ごめんね、うまく応答を作れなかったみたい…。もう一度話しかけてくれる？';
+            }
+
+            return finalReply;
 
         } catch (aiError: any) {
             clearTimeout(timeoutId);
