@@ -51,6 +51,35 @@ describe('normalizeTextForTts のユニットテスト', () => {
 
     test('2. リンク - マークダウン形式 of リンクが表示テキストのみに変換されること', () => {
         expect(normalizeTextForTts('[表示](https://example.com)')).toBe('表示');
+        expect(normalizeTextForTts('![構成図](https://example.com/image.png)')).toBe('構成図');
+    });
+
+    test('2-2. Markdown構造 - 見出し・表・箇条書き・水平線が自然な読み上げ文に変換されること', () => {
+        const text = [
+            '### 🌟 ざっくり言うと…？',
+            '',
+            '| ツール | 役割 | 特徴 |',
+            '|--------|------|------|',
+            '| **ESLint** | ルールチェック | リンター |',
+            '',
+            '---',
+            '- **設定管理が簡単**',
+            '1. 導入する'
+        ].join('\n');
+
+        expect(normalizeTextForTts(text)).toBe([
+            '🌟 ざっくり言うと…？',
+            'ツール、役割、特徴',
+            'イーエスリント、ルールチェック、リンター',
+            '設定管理が簡単',
+            '導入する'
+        ].join('\n'));
+    });
+
+    test('2-3. IT用語 - ログに含まれるツール名が日本語の読みに変換されること', () => {
+        expect(normalizeTextForTts('Biome、ESLint、Prettier、Type Inference、tsc、Oxc、Rust、CI/CD')).toBe(
+            'バイオーム、イーエスリント、プリティア、タイプインファレンス、ティーエスシー、オーエックスシー、ラスト、シーアイシーディー'
+        );
     });
 
     test('3. 時刻変換 - 適切な時刻コロン表記が日本語読みに変換され、全角数字は変換されないこと', () => {
@@ -289,6 +318,45 @@ describe('TTS正規化 統合・経路テスト', () => {
             '会議は 7月13日 11時 に ミーティング。',
             1,
             'http://localhost:50021',
+            true
+        );
+    });
+
+    test('3-2. TTS再送経路 - メッセージを文単位で合成し、複数音声を返すこと', async () => {
+        vi.mocked(VoiceAiService.synthesizeIrodori).mockClear();
+        vi.mocked(h3.readBody).mockResolvedValue({
+            action: 'synthesizeBatch',
+            engine: 'irodori',
+            text: '一文目。🌟\n二文目！',
+            endpoint: 'http://localhost:8088',
+            model: 'irodori-tts',
+            voice: 'default',
+            emotion: 'neutral',
+            ttsReadNarrative: true
+        });
+
+        const response = await ttsPostHandler({} as any);
+
+        expect(response).toEqual({
+            success: true,
+            audios: ['mock-audio-base64', 'mock-audio-base64']
+        });
+        expect(VoiceAiService.synthesizeIrodori).toHaveBeenNthCalledWith(
+            1,
+            '一文目。',
+            'http://localhost:8088',
+            'irodori-tts',
+            'default',
+            'neutral',
+            true
+        );
+        expect(VoiceAiService.synthesizeIrodori).toHaveBeenNthCalledWith(
+            2,
+            '二文目！',
+            'http://localhost:8088',
+            'irodori-tts',
+            'default',
+            'neutral',
             true
         );
     });

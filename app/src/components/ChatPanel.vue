@@ -24,6 +24,8 @@ const inputText = ref('');
 const messageListRef = ref<any>(null);
 const showTaskManagement = ref(false);
 const showMemoManagement = ref(false);
+const ttsDictionaryNotice = ref<{ type: 'loading' | 'success' | 'error'; message: string } | null>(null);
+let ttsDictionaryNoticeTimer: ReturnType<typeof setTimeout> | null = null;
 
 const configStore = useConfigStore();
 const mascotStore = useMascotStore();
@@ -185,6 +187,7 @@ const {
 const {
     isWsConnected,
     sendMessage,
+    retryMessage,
     connectWebSocket,
     disconnectWebSocket,
     handleKeyDown,
@@ -205,6 +208,133 @@ const activeImageUrl = ref<string | null>(null);
 
 const openImageModal = (url: string) => {
     activeImageUrl.value = url;
+};
+
+const showTtsDictionaryNotice = (type: 'loading' | 'success' | 'error', message: string) => {
+    ttsDictionaryNotice.value = { type, message };
+    if (ttsDictionaryNoticeTimer) clearTimeout(ttsDictionaryNoticeTimer);
+    if (type !== 'loading') {
+        ttsDictionaryNoticeTimer = setTimeout(() => {
+            ttsDictionaryNotice.value = null;
+            ttsDictionaryNoticeTimer = null;
+        }, 5000);
+    }
+};
+
+// 現在のチャットAIに選択語の読みを問い合わせ、マスコット個別辞書へ保存する
+const registerTtsReadings = async (text: string) => {
+    const mascot = activeMascot.value;
+    if (!mascot) {
+        showTtsDictionaryNotice('error', '登録先のマスコットが見つかりません。');
+        return;
+    }
+
+    const engine = configStore.selectedEngine || mascot.aiConfig?.chat?.engine || 'gemini';
+    const apiKey = engine === 'gemini'
+        ? configStore.googleAiStudioApiKey
+        : engine === 'openai'
+            ? configStore.openaiApiKey
+            : engine === 'anthropic'
+                ? configStore.anthropicApiKey
+                : '';
+    const model = engine === 'lmstudio'
+        ? (configStore.lmstudioModel || mascot.aiConfig?.chat?.model || '')
+        : engine === 'gemini'
+            ? (configStore.geminiModel || mascot.aiConfig?.chat?.model || '')
+            : engine === 'openai'
+                ? (configStore.openaiModel || mascot.aiConfig?.chat?.model || '')
+                : (configStore.anthropicModel || mascot.aiConfig?.chat?.model || '');
+
+    showTtsDictionaryNotice('loading', 'AIに英単語の読みを問い合わせています…');
+    try {
+        const response = await fetch('/api/tts-dictionary-suggestions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+                text,
+                engine,
+                model,
+                apiKey: apiKey || '',
+                lmstudioEndpoint: configStore.lmstudioEndpoint
+            })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.statusMessage || result.message || 'AIから読みを取得できませんでした。');
+        }
+
+        const entries = Array.isArray(result.entries) ? result.entries : [];
+        if (entries.length === 0) {
+            showTtsDictionaryNotice('error', '登録できる英単語が選択範囲にありませんでした。');
+            return;
+        }
+
+        const previousDictionary = mascot.aiConfig.ttsDictionary;
+        const dictionary = { ...(previousDictionary || {}) };
+        for (const entry of entries) {
+            dictionary[entry.term] = entry.reading;
+        }
+        mascot.aiConfig.ttsDictionary = dictionary;
+        const saved = await configStore.saveMascot(mascot.id);
+        if (!saved) {
+            mascot.aiConfig.ttsDictionary = previousDictionary;
+            throw new Error('マスコット設定を保存できませんでした。');
+        }
+
+        const summary = entries
+            .slice(0, 5)
+            .map((entry: { term: string; reading: string }) => `${entry.term}→${entry.reading}`)
+            .join('、');
+        const remainder = entries.length > 5 ? `、ほか${entries.length - 5}件` : '';
+        showTtsDictionaryNotice('success', `${entries.length}件の読みを登録しました: ${summary}${remainder}`);
+    } catch (error: any) {
+        showTtsDictionaryNotice('error', `読みの登録に失敗しました: ${error.message || error}`);
+    }
+};
+
+// AIメッセージを現在の音声設定でTTSへ再送し、受信音声を再生する
+const replayMessageTts = async (text: string) => {
+    const mascot = activeMascot.value;
+    if (!mascot || !text.trim()) return;
+
+    const engine = mascot.aiConfig?.voice?.engine || configStore.selectedVoiceEngine || 'voicevox';
+    const endpoint = engine === 'irodori'
+        ? (configStore.irodoriEndpoint || 'http://127.0.0.1:8088')
+        : (configStore.voicevoxEndpoint || 'http://localhost:50021');
+
+    playlist.stop();
+    showTtsDictionaryNotice('loading', 'TTSへメッセージを再送しています…');
+    try {
+        const response = await fetch('/api/tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+                action: 'synthesizeBatch',
+                engine,
+                text,
+                endpoint,
+                model: mascot.aiConfig?.voice?.irodori_model || configStore.irodoriModel,
+                voice: mascot.aiConfig?.voice?.irodori_voice || configStore.irodoriVoice,
+                speakerId: mascot.aiConfig?.voice?.speaker_id ?? configStore.voicevoxSpeaker,
+                emotion: 'neutral',
+                ttsDictionary: mascot.aiConfig?.ttsDictionary,
+                ttsReadNarrative: configStore.ttsReadNarrative,
+                showVoiceLog: configStore.showVoiceLog
+            })
+        });
+        const result = await response.json();
+        const audios = Array.isArray(result.audios) ? result.audios.filter((audio: unknown) => typeof audio === 'string' && audio) : [];
+        if (!response.ok || !result.success || audios.length === 0) {
+            throw new Error(result.error || '音声を合成できませんでした。');
+        }
+
+        for (const audio of audios) playlist.push(audio);
+        showTtsDictionaryNotice('success', 'TTSから受信した音声を再生します。');
+    } catch (error: any) {
+        showTtsDictionaryNotice('error', `TTS再送に失敗しました: ${error.message || error}`);
+    }
 };
 
 
@@ -503,6 +633,7 @@ const stopResize = () => {
 };
 
 onUnmounted(() => {
+    if (ttsDictionaryNoticeTimer) clearTimeout(ttsDictionaryNoticeTimer);
     window.removeEventListener('mousemove', handleChatMouseMove);
     disconnectWebSocket();
     if (unsubscribeConfig) {
@@ -550,6 +681,9 @@ const focusWindow = () => {
                 @open-image="openImageModal"
                 @use-i2i="useAsI2iSource"
                 @delete-message="deleteMessage"
+                @register-tts-readings="registerTtsReadings"
+                @replay-tts="replayMessageTts"
+                @retry-message="retryMessage"
             />
 
             <!-- 履歴スレッド一覧領域 -->
@@ -581,6 +715,11 @@ const focusWindow = () => {
 
         <!-- 画像拡大モーダル -->
         <AttachmentImageModal :url="activeImageUrl" @close="activeImageUrl = null" @use-i2i="useAsI2iSource" />
+
+        <div v-if="ttsDictionaryNotice" class="tts-dictionary-notice" :class="ttsDictionaryNotice.type">
+            <i :class="ttsDictionaryNotice.type === 'loading' ? 'pi pi-spin pi-spinner' : ttsDictionaryNotice.type === 'success' ? 'pi pi-check-circle' : 'pi pi-exclamation-circle'"></i>
+            <span>{{ ttsDictionaryNotice.message }}</span>
+        </div>
 
         <!-- リサイズ用ハンドル -->
         <div class="resize-handle right" @mousedown="initResize($event, 'right')"></div>
@@ -692,5 +831,33 @@ const focusWindow = () => {
     overflow: hidden;
     height: 0;
 }
-</style>
 
+.tts-dictionary-notice {
+    position: absolute;
+    right: 14px;
+    bottom: 64px;
+    z-index: 10000;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    max-width: min(420px, calc(100% - 28px));
+    padding: 10px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.96);
+    color: #334155;
+    font-size: 12px;
+    line-height: 1.5;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.16);
+}
+
+.tts-dictionary-notice.success {
+    border-color: #86efac;
+    color: #166534;
+}
+
+.tts-dictionary-notice.error {
+    border-color: #fca5a5;
+    color: #991b1b;
+}
+</style>

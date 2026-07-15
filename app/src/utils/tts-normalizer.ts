@@ -1,15 +1,58 @@
 import itOverrides from '../assets/tts-it-overrides.json';
 import customOverrides from '../assets/tts-custom-overrides.json';
+import { isValidTtsDictionaryValue } from './tts-dictionary';
 
-// 値として許可される文字種（ひらがな、カタカナ、漢字、長音符、中点、空白、句読点）
-const ALLOWED_VALUE_REGEX = /^[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3400-\u4DBF\uF900-\uFAFF\u3005\u3006\u3007ー・\s、。！？]*$/;
+const MARKDOWN_TABLE_SEPARATOR_REGEX = /^\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?$/;
+const MARKDOWN_THEMATIC_BREAK_REGEX = /^(?:-{3,}|_{3,}|\*{3,})$/;
+
+/**
+ * Markdown の行構造を、記号名を読まずに自然な間で読み上げられるテキストへ変換します。
+ */
+function normalizeMarkdownStructureForTts(text: string): string {
+    const speechLines: string[] = [];
+    let insideCodeFence = false;
+
+    for (const sourceLine of text.replace(/\r\n?/g, '\n').split('\n')) {
+        let line = sourceLine.trim();
+
+        if (/^\s*(```|~~~)/.test(line)) {
+            insideCodeFence = !insideCodeFence;
+            continue;
+        }
+
+        if (!line || MARKDOWN_TABLE_SEPARATOR_REGEX.test(line) || MARKDOWN_THEMATIC_BREAK_REGEX.test(line)) {
+            continue;
+        }
+
+        if (!insideCodeFence) {
+            line = line.replace(/^(?:>\s*)+/, '');
+            line = line.replace(/^#{1,6}\s+/, '');
+            line = line.replace(/^(?:[-+*]|\d+[.)])\s+(?:\[[ xX]\]\s*)?/, '');
+
+            const pipeCount = (line.match(/\|/g) || []).length;
+            if (pipeCount >= 2 && (line.startsWith('|') || line.endsWith('|'))) {
+                const cells = line
+                    .replace(/^\|/, '')
+                    .replace(/\|$/, '')
+                    .split('|')
+                    .map(cell => cell.trim())
+                    .filter(Boolean);
+                line = cells.join('、');
+            }
+        }
+
+        line = line.trim();
+        if (line) speechLines.push(line);
+    }
+
+    return speechLines.join('\n');
+}
 
 /**
  * 辞書値のバリデーションを行います。
  */
 function isValidDictValue(value: any): boolean {
-    if (typeof value !== 'string') return false;
-    return ALLOWED_VALUE_REGEX.test(value);
+    return isValidTtsDictionaryValue(value);
 }
 
 /**
@@ -165,7 +208,7 @@ export function createTtsNormalizer(defaultDict: Record<string, string> = {}) {
             const escapedMulti = multiWordKeys.map(escapeRegExp).join('|');
             patternStr = `(?<![a-zA-Z0-9])(?:${escapedMulti})(?![a-zA-Z0-9])|`;
         }
-        patternStr += `[a-zA-Z][a-zA-Z0-9+#.'-]*`;
+        patternStr += `[a-zA-Z][a-zA-Z0-9+#./'-]*`;
 
         cachedRegex = new RegExp(patternStr, 'gi');
         lastMergedDict = mergedDict;
@@ -177,9 +220,10 @@ export function createTtsNormalizer(defaultDict: Record<string, string> = {}) {
     function normalizeTextForTts(text: string, customDict?: Record<string, string>): string {
         if (!text) return '';
 
-        let cleanText = text;
+        let cleanText = normalizeMarkdownStructureForTts(text);
 
         // 1. マークダウンマーカー除去
+        cleanText = cleanText.replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1'); // 画像 ![代替テキスト](url) -> 代替テキスト
         cleanText = cleanText.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1'); // リンク [表示](url) -> 表示
         cleanText = cleanText.replace(/\*\*([^*]+)\*\*/g, '$1');       // **bold** -> bold
         cleanText = cleanText.replace(/__([^_]+)__/g, '$1');           // __bold__ -> bold
