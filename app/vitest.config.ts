@@ -1,4 +1,5 @@
-import { defineConfig, loadEnv } from 'vite';
+import { loadEnv } from 'vite';
+import { configDefaults, defineConfig } from 'vitest/config';
 import vue from '@vitejs/plugin-vue';
 import { fileURLToPath, URL } from 'node:url';
 import path from 'node:path';
@@ -86,5 +87,8 @@ export default defineConfig({
     },
     optimizeDeps: {
         exclude: ['@desktop-ai-mascot/expression-alignment'],
+    },
+    test: {
+        exclude: [...configDefaults.exclude, '**/*.browser.test.ts'],
     },
 });
