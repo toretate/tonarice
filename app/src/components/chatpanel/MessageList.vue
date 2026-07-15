@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref, nextTick } from 'vue';
+import MarkdownMessage from './MarkdownMessage.vue';
 
 const props = defineProps<{
     messages: Array<{
         id: number;
         sender: 'user' | 'mascot';
         text: string;
+        deliveryStatus?: 'sending' | 'failed';
+        deliveryError?: string;
         attachments?: Array<{
             type: 'image' | 'file';
             name: string;
@@ -20,6 +23,9 @@ const emit = defineEmits<{
     (e: 'open-image', url: string): void;
     (e: 'use-i2i', url: string): void;
     (e: 'delete-message', id: number): void;
+    (e: 'register-tts-readings', text: string): void;
+    (e: 'replay-tts', text: string): void;
+    (e: 'retry-message', id: number): void;
 }>();
 
 const messageContainer = ref<HTMLElement | null>(null);
@@ -57,15 +63,17 @@ const contextMenuVisible = ref(false);
 const contextMenuX = ref(0);
 const contextMenuY = ref(0);
 const selectedMessage = ref<any>(null);
+const selectedText = ref('');
 const contextMenuRef = ref<HTMLElement | null>(null);
 let touchTimeout: any = null;
 let isTouchMoving = false;
 
 // メニューを開く
-const openMenu = (x: number, y: number, msg: any) => {
+const openMenu = (x: number, y: number, msg: any, text = '') => {
     contextMenuX.value = x;
     contextMenuY.value = y;
     selectedMessage.value = msg;
+    selectedText.value = text.trim() || msg.text;
     contextMenuVisible.value = true;
     
     nextTick(() => {
@@ -106,10 +114,30 @@ const closeMenu = () => {
     }
 };
 
+const getSelectedMessageText = (event: MouseEvent, msg: any): string => {
+    const bubble = event.currentTarget as HTMLElement;
+    const selection = window.getSelection();
+    const hasSelectionInBubble = selection
+        && !selection.isCollapsed
+        && selection.anchorNode
+        && selection.focusNode
+        && bubble.contains(selection.anchorNode)
+        && bubble.contains(selection.focusNode);
+    return hasSelectionInBubble ? selection.toString() : msg.text;
+};
+
 // 右クリックハンドラ
 const handleContextMenu = (event: MouseEvent, msg: any) => {
     event.preventDefault();
-    openMenu(event.clientX, event.clientY, msg);
+    event.stopPropagation();
+    openMenu(event.clientX, event.clientY, msg, getSelectedMessageText(event, msg));
+};
+
+// Electron側で contextmenu 発火が抑止される場合の右ボタンフォールバック
+const handlePointerDown = (event: PointerEvent, msg: any) => {
+    if (event.button !== 2) return;
+    event.stopPropagation();
+    openMenu(event.clientX, event.clientY, msg, getSelectedMessageText(event, msg));
 };
 
 // 長押し（Touch）ハンドラ
@@ -153,6 +181,14 @@ const copyMessageText = async () => {
     }
     closeMenu();
 };
+
+// AIに読みを問い合わせるため、選択部分（未選択時はメッセージ全体）を親へ渡す
+const registerTtsReadings = () => {
+    if (selectedMessage.value?.sender === 'mascot' && selectedText.value.trim()) {
+        emit('register-tts-readings', selectedText.value.trim());
+    }
+    closeMenu();
+};
 </script>
 
 <template>
@@ -165,17 +201,19 @@ const copyMessageText = async () => {
             v-for="msg in messages" 
             :key="msg.id" 
             class="message-row"
-            :class="msg.sender"
+            :class="[msg.sender, { 'delivery-failed': msg.deliveryStatus === 'failed', 'delivery-sending': msg.deliveryStatus === 'sending' }]"
         >
             <div class="bubble-wrapper">
                 <div 
                     class="bubble"
-                    @contextmenu="handleContextMenu($event, msg)"
+                    @pointerdown="handlePointerDown($event, msg)"
+                    @contextmenu.stop.prevent="handleContextMenu($event, msg)"
                     @touchstart="handleTouchStart($event, msg)"
                     @touchend="handleTouchEnd"
                     @touchmove="handleTouchMove"
                 >
-                    <div class="message-text">{{ msg.text }}</div>
+                    <MarkdownMessage v-if="msg.sender === 'mascot'" class="message-text" :text="msg.text" />
+                    <div v-else class="message-text">{{ msg.text }}</div>
                     
                     <!-- 添付ファイル・画像一覧 -->
                     <div v-if="msg.attachments && msg.attachments.length > 0" class="attachments-wrapper">
@@ -200,26 +238,57 @@ const copyMessageText = async () => {
                         </div>
                     </div>
                 </div>
-                <button type="button" class="delete-msg-btn" @click="emit('delete-message', msg.id)" title="メッセージを削除">
-                    <i class="pi pi-trash"></i>
-                </button>
+                <div class="message-action-buttons">
+                    <button
+                        v-if="msg.sender === 'user' && msg.deliveryStatus === 'failed'"
+                        type="button"
+                        class="message-action-btn retry-message-btn"
+                        @click="emit('retry-message', msg.id)"
+                        title="メッセージを再送"
+                    >
+                        <i class="pi pi-refresh"></i>
+                    </button>
+                    <button
+                        v-if="msg.sender === 'mascot'"
+                        type="button"
+                        class="message-action-btn replay-tts-btn"
+                        @click="emit('replay-tts', msg.text)"
+                        title="TTSへ再送して読み上げ"
+                    >
+                        <i class="pi pi-play"></i>
+                    </button>
+                    <button type="button" class="message-action-btn delete-msg-btn" @click="emit('delete-message', msg.id)" title="メッセージを削除">
+                        <i class="pi pi-trash"></i>
+                    </button>
+                </div>
+                <span v-if="msg.sender === 'user' && msg.deliveryStatus === 'failed'" class="delivery-error-label" :title="msg.deliveryError">
+                    送信失敗
+                </span>
             </div>
         </div>
     </div>
 
-    <!-- カスタムコンテキストメニュー -->
-    <div 
-        v-if="contextMenuVisible" 
-        ref="contextMenuRef"
-        class="custom-context-menu" 
-        :style="{ top: contextMenuY + 'px', left: contextMenuX + 'px' }"
-        @click.stop
-    >
-        <div class="menu-item" @click="copyMessageText">
-            <i class="pi pi-copy"></i>
-            <span>コピー</span>
+    <!-- overflow:hidden や backdrop-filter の影響を避けるため body 直下へ表示する -->
+    <Teleport to="body">
+        <div
+            v-if="contextMenuVisible"
+            ref="contextMenuRef"
+            class="custom-context-menu"
+            :class="{ 'secret-mode': isSecretMode }"
+            :style="{ top: contextMenuY + 'px', left: contextMenuX + 'px' }"
+            @click.stop
+            @contextmenu.stop.prevent
+        >
+            <div class="menu-item" @click="copyMessageText">
+                <i class="pi pi-copy"></i>
+                <span>コピー</span>
+            </div>
+            <div v-if="selectedMessage?.sender === 'mascot'" class="menu-item" @click="registerTtsReadings">
+                <i class="pi pi-volume-up"></i>
+                <span>英単語読みを辞書登録</span>
+            </div>
         </div>
-    </div>
+    </Teleport>
 </template>
 
 <style scoped>
@@ -231,6 +300,7 @@ const copyMessageText = async () => {
     display: flex;
     flex-direction: column;
     gap: 12px;
+    -webkit-app-region: no-drag;
 }
 
 /* スクロールバーのカスタマイズ */
@@ -261,6 +331,7 @@ const copyMessageText = async () => {
 .bubble-wrapper {
     position: relative;
     max-width: 85%;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -274,7 +345,15 @@ const copyMessageText = async () => {
     flex-direction: row;
 }
 
-.delete-msg-btn {
+.message-action-buttons {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.message-action-btn {
     background: transparent;
     border: none;
     color: #94a3b8;
@@ -284,14 +363,14 @@ const copyMessageText = async () => {
     display: flex;
     align-items: center;
     justify-content: center;
-    opacity: 0;
     transition: all 0.2s ease;
     flex-shrink: 0;
     width: 28px;
     height: 28px;
 }
 
-.bubble-wrapper:hover .delete-msg-btn {
+.bubble-wrapper:hover .message-action-buttons,
+.message-action-buttons:focus-within {
     opacity: 1;
 }
 
@@ -300,12 +379,45 @@ const copyMessageText = async () => {
     color: #ef4444;
 }
 
+.replay-tts-btn:hover {
+    background: rgba(124, 58, 237, 0.1);
+    color: #7c3aed;
+}
+
+.retry-message-btn {
+    color: #dc2626;
+}
+
+.retry-message-btn:hover {
+    background: rgba(239, 68, 68, 0.12);
+    color: #b91c1c;
+}
+
+.message-row.delivery-failed .message-action-buttons {
+    opacity: 1;
+}
+
+.delivery-error-label {
+    color: #dc2626;
+    font-size: 10px;
+    white-space: nowrap;
+}
+
 .bubble {
     padding: 10px 14px;
     border-radius: 12px;
     font-size: 13px;
     line-height: 1.4;
     word-break: break-all;
+    min-width: 0;
+    max-width: 100%;
+    -webkit-app-region: no-drag;
+}
+
+.message-text {
+    cursor: text;
+    user-select: text;
+    -webkit-user-select: text;
 }
 
 .user .bubble {
@@ -313,6 +425,17 @@ const copyMessageText = async () => {
     color: #581c87;
     border-bottom-right-radius: 2px;
     box-shadow: 0 2px 8px rgba(168, 85, 247, 0.08);
+}
+
+.message-row.user.delivery-failed .bubble {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.16);
+}
+
+.message-row.user.delivery-sending .bubble {
+    opacity: 0.72;
 }
 
 .mascot .bubble {
@@ -440,6 +563,13 @@ const copyMessageText = async () => {
     box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
 }
 
+.message-container.secret-mode .message-row.user.delivery-failed .bubble {
+    background: rgba(127, 29, 29, 0.9);
+    color: #fecaca;
+    border: 1px solid #ef4444;
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.24);
+}
+
 .message-container.secret-mode .message-row.mascot .bubble {
     background: rgba(46, 37, 84, 0.8);
     color: #e9d5ff;
@@ -450,7 +580,7 @@ const copyMessageText = async () => {
 /* カスタムコンテキストメニュー */
 .custom-context-menu {
     position: fixed;
-    z-index: 9999;
+    z-index: 2147483647;
     background: #ffffff;
     border: 1px solid #e2e8f0;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
@@ -458,6 +588,7 @@ const copyMessageText = async () => {
     padding: 4px 0;
     min-width: 120px;
     user-select: none;
+    -webkit-app-region: no-drag;
 }
 
 .custom-context-menu .menu-item {
@@ -481,17 +612,17 @@ const copyMessageText = async () => {
 }
 
 /* シークレットモードでのコンテキストメニュー */
-.secret-mode .custom-context-menu {
+.custom-context-menu.secret-mode {
     background: #1e1e2f;
     border-color: #2d2d3f;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
-.secret-mode .custom-context-menu .menu-item {
+.custom-context-menu.secret-mode .menu-item {
     color: #cbd5e1;
 }
 
-.secret-mode .custom-context-menu .menu-item:hover {
+.custom-context-menu.secret-mode .menu-item:hover {
     background: #2d2d3f;
     color: #a78bfa;
 }

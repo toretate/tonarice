@@ -345,12 +345,13 @@ export default defineWebSocketHandler({
                     const targetSpeechText = stripResidualAsterisks(dialogueFiltered);
 
                     if (targetSpeechText.trim()) {
-                        const processedSentences = splitSentences(targetSpeechText);
+                        const processedSentences = splitSentences(targetSpeechText)
+                            .map(sentence => voiceEngine === 'irodori' ? sanitizeForIrodoriTTS(sentence).trim() : sentence)
+                            .filter(sentence => sentence.length > 0);
 
                         const synthPromises = processedSentences.map(sentence => {
                             if (voiceEngine === 'irodori') {
-                                const cleanSentence = sanitizeForIrodoriTTS(sentence);
-                                return VoiceAiService.synthesizeIrodori(cleanSentence, irodoriUrl, irodoriModelName, irodoriVoiceName, detectedEmotion, showVoiceLog !== false);
+                                return VoiceAiService.synthesizeIrodori(sentence, irodoriUrl, irodoriModelName, irodoriVoiceName, detectedEmotion, showVoiceLog !== false);
                             } else {
                                 return VoiceAiService.synthesize(sentence, speaker, baseUrl, showVoiceLog !== false);
                             }

@@ -29,6 +29,7 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
         // WebSocketのモック設定
         originalWebSocket = global.WebSocket;
         class MockWebSocket {
+            static OPEN = 1;
             send = vi.fn();
             close = vi.fn();
             readyState = 1;
@@ -90,15 +91,16 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
                 event: 'task-action',
                 data: {
                     action: 'addSchedule',
-                    args: {
+                    task: {
+                        id: 'task_private',
                         title: '今日の予定（未定）',
                         scheduledAt: '2026-07-06T18:00:00+09:00',
                         priority: 'normal',
-                        categoryId: 'private'
+                        categoryId: 'private',
+                        completed: false,
+                        steps: []
                     },
-                    result: {
-                        success: true
-                    }
+                    categories: taskStore.categories
                 }
             })
         };
@@ -150,15 +152,16 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
                 event: 'task-action',
                 data: {
                     action: 'addSchedule',
-                    args: {
+                    task: {
+                        id: 'task_work',
                         title: '会議',
                         scheduledAt: '2026-07-06T18:00:00+09:00',
                         priority: 'normal',
-                        categoryId: 'Work'
+                        categoryId: 'default',
+                        completed: false,
+                        steps: []
                     },
-                    result: {
-                        success: true
-                    }
+                    categories: taskStore.categories
                 }
             })
         };
@@ -200,21 +203,26 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
 
         connection.connectWebSocket();
         const onMessageCallback = (mockWebSocket as any).onmessage;
+        const updatedCategories = [
+            ...taskStore.categories,
+            { id: 'cat_study', name: '勉強', order: 2 }
+        ];
 
         const mockWsEvent = {
             data: JSON.stringify({
                 event: 'task-action',
                 data: {
                     action: 'addSchedule',
-                    args: {
+                    task: {
+                        id: 'task_study',
                         title: '勉強',
                         scheduledAt: '2026-07-06T19:00:00+09:00',
                         priority: 'normal',
-                        categoryId: '勉強'
+                        categoryId: 'cat_study',
+                        completed: false,
+                        steps: []
                     },
-                    result: {
-                        success: true
-                    }
+                    categories: updatedCategories
                 }
             })
         };
@@ -229,5 +237,63 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
         // 検証2: タスクがその新しく追加されたカテゴリIDに紐づけられていること
         expect(taskStore.tasks.length).toBe(1);
         expect(taskStore.tasks[0].categoryId).toBe(newCat.id);
+    });
+
+    it('sendMessage - WebSocket未接続時にユーザーバブルを失敗表示にすること', async () => {
+        const messages = ref<any[]>([]);
+        const saveHistory = vi.fn().mockResolvedValue(undefined);
+        const connection = useChatConnection({
+            messages,
+            activeSessionId: ref('session_1'),
+            sessions: ref([]),
+            inputText: ref('再送テスト'),
+            saveHistory,
+            runCompaction: vi.fn().mockResolvedValue(undefined),
+            scrollToBottom: vi.fn()
+        });
+
+        await connection.sendMessage();
+
+        const userMessage = messages.value.find(message => message.sender === 'user');
+        expect(userMessage).toMatchObject({
+            text: '再送テスト',
+            deliveryStatus: 'failed'
+        });
+        expect(userMessage.deliveryError).toContain('サーバーに接続されていません');
+        expect(saveHistory).toHaveBeenCalled();
+    });
+
+    it('retryMessage - 失敗したバブルを複製せず再送し、成功時に失敗表示を解除すること', async () => {
+        const messages = ref<any[]>([]);
+        const connection = useChatConnection({
+            messages,
+            activeSessionId: ref('session_1'),
+            sessions: ref([]),
+            inputText: ref('もう一度送る'),
+            saveHistory: vi.fn().mockResolvedValue(undefined),
+            runCompaction: vi.fn().mockResolvedValue(undefined),
+            scrollToBottom: vi.fn()
+        });
+
+        // 初回は未接続のため失敗し、内部で再接続用WebSocketが作成される
+        await connection.sendMessage();
+        const failedMessage = messages.value.find(message => message.sender === 'user');
+
+        await connection.retryMessage(failedMessage.id);
+        expect(mockWebSocket.send).toHaveBeenCalledOnce();
+        expect(messages.value.filter(message => message.sender === 'user')).toHaveLength(1);
+        expect(failedMessage.deliveryStatus).toBe('sending');
+
+        await mockWebSocket.onmessage({
+            data: JSON.stringify({
+                event: 'chat-response',
+                data: { text: '再送に成功しました。', emotion: 'happy' }
+            })
+        });
+
+        expect(failedMessage.deliveryStatus).toBeUndefined();
+        expect(failedMessage.deliveryError).toBeUndefined();
+        expect(messages.value.filter(message => message.sender === 'mascot')).toHaveLength(1);
+        expect(messages.value.find(message => message.sender === 'mascot')?.text).toBe('再送に成功しました。');
     });
 });

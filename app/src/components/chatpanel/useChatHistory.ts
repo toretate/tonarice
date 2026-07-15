@@ -15,6 +15,11 @@ export interface Message {
     sender: 'user' | 'mascot';
     text: string;
     attachments?: MessageAttachment[];
+    /** ユーザーメッセージの送信状態。成功後は未設定に戻す。 */
+    deliveryStatus?: 'sending' | 'failed';
+    deliveryError?: string;
+    /** 再送時に同じAI応答バブルを再利用するためのID */
+    responseMessageId?: number;
 }
 
 export interface ChatSession {

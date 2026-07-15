@@ -832,7 +832,7 @@ export const useConfigStore = defineStore('config', () => {
     // 特定のマスコットのみを個別保存するアクション
     const saveMascot = async (mascotId: string) => {
         const mascot = mascots.value.find(m => m.id === mascotId);
-        if (!mascot) return;
+        if (!mascot) return false;
 
         try {
             console.log(`[Config] Saving mascot ${mascotId} to Nitro API...`);
@@ -846,9 +846,13 @@ export const useConfigStore = defineStore('config', () => {
             });
             if (response.ok) {
                 console.log(`[Config] Mascot ${mascotId} successfully saved to Nitro API`);
+                return true;
             }
+            console.warn(`[Config] Failed to save mascot ${mascotId} to Nitro API: HTTP ${response.status}`);
+            return false;
         } catch (e: any) {
             console.warn(`[Config] Failed to save mascot ${mascotId} to Nitro API:`, e.message);
+            return false;
         }
     };
 

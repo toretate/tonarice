@@ -72,15 +72,53 @@ export function useChatConnection(params: {
 
     let socket: WebSocket | null = null;
     const isWsConnected = ref(false);
+    let pendingUserMessageId: number | null = null;
+    let pendingAssistantMessageId: number | null = null;
 
-    // mascot側メッセージの最後の一つを更新するヘルパー
-    const updateLastMascotMessage = (text: string) => {
+    // 現在の送信に対応するAI応答バブルを更新する
+    const updatePendingMascotMessage = (text: string) => {
+        if (pendingAssistantMessageId !== null) {
+            const pendingMessage = messages.value.find(message => message.id === pendingAssistantMessageId);
+            if (pendingMessage) {
+                pendingMessage.text = text;
+                return;
+            }
+        }
         for (let i = messages.value.length - 1; i >= 0; i--) {
             if (messages.value[i].sender === 'mascot') {
                 messages.value[i].text = text;
                 break;
             }
         }
+    };
+
+    const completePendingMessage = async () => {
+        if (pendingUserMessageId !== null) {
+            const userMessage = messages.value.find(message => message.id === pendingUserMessageId);
+            if (userMessage) {
+                userMessage.deliveryStatus = undefined;
+                userMessage.deliveryError = undefined;
+            }
+        }
+        pendingUserMessageId = null;
+        pendingAssistantMessageId = null;
+        await saveHistory();
+    };
+
+    const failPendingMessage = async (errorMessage: string) => {
+        if (pendingUserMessageId !== null) {
+            const userMessage = messages.value.find(message => message.id === pendingUserMessageId);
+            if (userMessage) {
+                userMessage.deliveryStatus = 'failed';
+                userMessage.deliveryError = errorMessage;
+            }
+        }
+        updatePendingMascotMessage(`接続エラー: ${errorMessage}`);
+        pendingUserMessageId = null;
+        pendingAssistantMessageId = null;
+        mascotStore.setLoading(false);
+        mascotStore.setSpeaking(false);
+        await saveHistory();
     };
 
     const connectWebSocket = () => {
@@ -113,7 +151,7 @@ export function useChatConnection(params: {
                 } else if (wsEvent === 'chat-response') {
                     const { text, emotion } = data;
 
-                    updateLastMascotMessage(text);
+                    updatePendingMascotMessage(text);
                     
                     // 会話終了後、30秒間無操作が続いた場合にバックグラウンドで要約＆長期記憶マージを実行
                     if (compactionTimer) {
@@ -140,6 +178,7 @@ export function useChatConnection(params: {
                     }
 
                     mascotStore.setLoading(false);
+                    await completePendingMessage();
                     await nextTick();
                     scrollToBottom();
                 } else if (wsEvent === 'chat-audio') {
@@ -190,10 +229,7 @@ export function useChatConnection(params: {
                         }
                     }
                 } else if (wsEvent === 'chat-error') {
-                    updateLastMascotMessage(`接続エラー: ${data.message}`);
-                    await saveHistory();
-                    mascotStore.setLoading(false);
-                    mascotStore.setSpeaking(false);
+                    await failPendingMessage(data.message);
                 }
             } catch (e: any) {
                 console.error('[useChatConnection] WebSocket message parsing error:', e.message);
@@ -204,12 +240,18 @@ export function useChatConnection(params: {
             console.log('[useChatConnection] WebSocket disconnected');
             isWsConnected.value = false;
             socket = null;
+            if (pendingUserMessageId !== null) {
+                void failPendingMessage('WebSocket接続が切断されました。');
+            }
             // 常に再接続を試みる
             setTimeout(connectWebSocket, 5000);
         };
 
         socket.onerror = (err) => {
             console.error('[useChatConnection] WebSocket connection error:', err);
+            if (pendingUserMessageId !== null) {
+                void failPendingMessage('WebSocket通信でネットワークエラーが発生しました。');
+            }
         };
     };
 
@@ -249,8 +291,12 @@ export function useChatConnection(params: {
         pendingAttachments.value.splice(index, 1);
     };
 
-    const sendMessage = async (isActiveTalk: boolean = false) => {
-        if (!isActiveTalk && !inputText.value.trim() && pendingAttachments.value.length === 0) return;
+    const sendMessage = async (isActiveTalk: boolean = false, retryMessageId?: number) => {
+        const retryTarget = retryMessageId !== undefined
+            ? messages.value.find(message => message.id === retryMessageId && message.sender === 'user')
+            : undefined;
+        if (retryMessageId !== undefined && (!retryTarget || retryTarget.deliveryStatus !== 'failed')) return;
+        if (!isActiveTalk && !retryTarget && !inputText.value.trim() && pendingAttachments.value.length === 0) return;
         if (isAiResponding.value) return;
 
         // 会話継続のため、予定されていた要約処理タイマーをクリアして延期する
@@ -266,8 +312,8 @@ export function useChatConnection(params: {
         // 「リスナーが黙り込んでいる＝不機嫌／気まずい」と否定的に解釈し、マスコットが
         // 不安がってしまう。そこで沈黙を咎めない前向きな進行キューを送る。
         const ACTIVE_TALK_CUE = '（ラジオの生放送中です。今はリスナーからの投稿が届いていない静かな時間帯です。リスナーが黙っているのは番組を楽しく聴いてくれているからで、不機嫌でも気まずいわけでもありません。不安がらず、ラジオパーソナリティとして明るく前向きにトークを続けてください。）';
-        const userQuery = isActiveTalk ? ACTIVE_TALK_CUE : inputText.value;
-        if (!isActiveTalk) {
+        const userQuery = isActiveTalk ? ACTIVE_TALK_CUE : (retryTarget?.text || inputText.value);
+        if (!isActiveTalk && !retryTarget) {
             inputText.value = '';
         }
 
@@ -283,23 +329,36 @@ export function useChatConnection(params: {
             }
         }
 
-        const attachments = isActiveTalk ? [] : [...pendingAttachments.value];
-        if (!isActiveTalk) {
+        const attachments = isActiveTalk ? [] : retryTarget
+            ? [...(retryTarget.attachments || [])]
+            : [...pendingAttachments.value];
+        if (!isActiveTalk && !retryTarget) {
             pendingAttachments.value = [];
         }
 
+        let userMessage: Message | null = null;
         if (!isActiveTalk) {
-            messages.value.push({
-                id: Date.now(),
-                sender: 'user',
-                text: userQuery,
-                attachments: attachments.length > 0 ? attachments : undefined
-            });
+            if (retryTarget) {
+                userMessage = retryTarget;
+                userMessage.deliveryStatus = 'sending';
+                userMessage.deliveryError = undefined;
+            } else {
+                userMessage = {
+                    id: Date.now(),
+                    sender: 'user',
+                    text: userQuery,
+                    attachments: attachments.length > 0 ? attachments : undefined,
+                    deliveryStatus: 'sending'
+                };
+                messages.value.push(userMessage);
+            }
         }
 
-        const historyBase = isActiveTalk ? messages.value : messages.value.slice(0, -1);
+        const historyBase = isActiveTalk
+            ? messages.value
+            : messages.value.filter(message => message.id !== userMessage?.id && message.id !== userMessage?.responseMessageId);
         const historyToSend = historyBase
-            .filter(m => m.sender === 'user' || (m.sender === 'mascot' && m.text !== '考え中...' && !m.text.startsWith('接続に失敗しました') && !m.text.startsWith('サーバーに接続されていません') && !m.text.startsWith('接続エラー')))
+            .filter(m => (m.sender === 'user' && !m.deliveryStatus) || (m.sender === 'mascot' && m.text !== '考え中...' && !m.text.startsWith('接続に失敗しました') && !m.text.startsWith('サーバーに接続されていません') && !m.text.startsWith('接続エラー')))
             .slice(-10)
             .map(m => ({ sender: m.sender, text: m.text }));
 
@@ -402,29 +461,39 @@ export function useChatConnection(params: {
             systemPrompt += `\n\n# Previous Conversation Summary\n以下はこれまでのマスターとの会話履歴の要約です。この文脈を考慮して返答してください。\n${currentSession.summary}\n`;
         }
 
-        const aiMessageId = Date.now() + 1;
-        messages.value.push({
-            id: aiMessageId,
-            sender: 'mascot',
-            text: '考え中...'
-        });
+        let aiMessage = retryTarget?.responseMessageId !== undefined
+            ? messages.value.find(message => message.id === retryTarget.responseMessageId && message.sender === 'mascot')
+            : undefined;
+        if (aiMessage) {
+            aiMessage.text = '考え中...';
+        } else {
+            aiMessage = {
+                id: Date.now() + 1,
+                sender: 'mascot',
+                text: '考え中...'
+            };
+            messages.value.push(aiMessage);
+        }
+        const aiMessageId = aiMessage.id;
+        if (userMessage) {
+            userMessage.responseMessageId = aiMessageId;
+            pendingUserMessageId = userMessage.id;
+        }
+        pendingAssistantMessageId = aiMessageId;
 
         await nextTick();
         scrollToBottom();
 
         if (!socket || socket.readyState !== WebSocket.OPEN) {
             connectWebSocket();
-            const errorMsg = messages.value.find(m => m.id === aiMessageId);
-            if (errorMsg) {
-                errorMsg.text = 'サーバーに接続されていません。再接続を試みています。もう一度送信してください。';
-            }
-            mascotStore.setLoading(false);
+            await failPendingMessage('サーバーに接続されていません。再接続後に再送してください。');
             return;
         }
 
-        socket.send(JSON.stringify({
-            event: 'chat-send',
-            data: {
+        try {
+            socket.send(JSON.stringify({
+                event: 'chat-send',
+                data: {
                 message: userQuery,
                 apiKey: apiKey,
                 systemPrompt: systemPrompt,
@@ -457,9 +526,17 @@ export function useChatConnection(params: {
                     toolsAppLauncher: toolsAppLauncher.value,
                     toolsWebSearch: toolsWebSearch.value
                 }
-            }
-        }));
+                }
+            }));
+        } catch (error: any) {
+            await failPendingMessage(error.message || 'メッセージの送信に失敗しました。');
+            return;
+        }
         await saveHistory();
+    };
+
+    const retryMessage = async (messageId: number) => {
+        await sendMessage(false, messageId);
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -494,6 +571,7 @@ export function useChatConnection(params: {
     return {
         isWsConnected,
         sendMessage,
+        retryMessage,
         connectWebSocket,
         disconnectWebSocket,
         handleKeyDown,
