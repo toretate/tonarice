@@ -136,13 +136,13 @@ export async function authenticateUserToken(token: string): Promise<User> {
 
 export default defineEventHandler(async (event) => {
     // リクエストURIを取得して、APIリクエストでなければスキップ（例: /_nuxt/ など静的ファイルやWEBフロントエンドページへのアクセス）
-    const url = event.path || '';
+    const url = (event.path || '').split('?')[0];
     if (!url.startsWith('/api/')) {
         return;
     }
 
-    // ping エンドポイントは認証スキップ
-    if (url === '/api/ping') {
+    // 認証開始・OAuthコールバック・pingは未認証でアクセスできる必要がある。
+    if (url === '/api/ping' || url === '/api/auth/login' || url === '/api/auth/callback') {
         return;
     }
 

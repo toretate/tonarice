@@ -68,4 +68,11 @@ describe('認証ミドルウェア', () => {
     it('認証ミドルウェア_pingは認証バイパス設定にかかわらず許可すること', async () => {
         await expect(authMiddleware(createEvent('/api/ping'))).resolves.toBeUndefined();
     });
+
+    it.each(['/api/auth/login', '/api/auth/callback', '/api/auth/callback?code=test-code'])(
+        '認証ミドルウェア_%sは未認証でも許可すること',
+        async (path) => {
+            await expect(authMiddleware(createEvent(path))).resolves.toBeUndefined();
+        }
+    );
 });

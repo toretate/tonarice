@@ -65,7 +65,7 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
     window.electronAPI = {
         isWeb: true,
         loginWithGoogle: () => {
-            alert('GoogleログインはWeb版では現在サポートされていません。設定画面で直接APIキーをご登録ください。');
+            window.location.assign('/api/auth/login');
         },
         toggleChat: () => {
             console.log('[Polyfill] toggleChat triggered');
@@ -112,7 +112,7 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
         },
         getAppConfig: async () => {
             try {
-                const response = await fetch('http://localhost:3000/api/config');
+                const response = await fetch('/api/config');
                 if (response.ok) {
                     const resJson = await response.json();
                     if (resJson.success && resJson.config && Object.keys(resJson.config).length > 0) {
@@ -129,7 +129,7 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
         },
         updateAppConfig: async (config: any) => {
             try {
-                const response = await fetch('http://localhost:3000/api/config', {
+                const response = await fetch('/api/config', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -269,7 +269,7 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
         },
         getChatHistory: async () => {
             try {
-                const response = await fetch('http://localhost:3000/api/history');
+                const response = await fetch('/api/history');
                 if (response.ok) {
                     const resJson = await response.json();
                     if (resJson.success && resJson.history) {
@@ -292,7 +292,7 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
         },
         saveChatHistory: async (history: any) => {
             try {
-                const response = await fetch('http://localhost:3000/api/history', {
+                const response = await fetch('/api/history', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
