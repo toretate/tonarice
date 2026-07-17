@@ -7,12 +7,20 @@ interface MascotAsset {
     scale?: number;
 }
 
+export interface MusicFolderResult {
+    success: boolean;
+    folderPath?: string;
+    files?: Array<{ name: string; relativePath: string; size: number; lastModified: number; url: string }>;
+    error?: string;
+}
+
 export interface IElectronAPI {
     isWeb?: boolean;
     loginWithGoogle: () => void;
     toggleChat: () => void;
     toggleTasks: () => void;
     toggleMemo: () => void;
+    toggleMusic: () => void;
     resizeChatWindow: (size: { width: number; height: number }) => void;
     resizeWindow: (size: { width: number; height: number }) => void;
     openSettings: () => void;
@@ -48,6 +56,9 @@ export interface IElectronAPI {
     alignExpression?: (basePath: string, expressionPath: string, detectMode?: string) => Promise<{ success: boolean; offsetX: number; offsetY: number; scale: number; exprMidX: number; exprMidY: number; exprOvalCX: number; exprOvalCY: number; exprEyeDist: number; exprOvalW: number; baseWidth?: number; baseHeight?: number; exprWidth?: number; exprHeight?: number; fallback?: boolean; method?: string; error?: string }>;
     detectBaseFace?: (imagePath: string, detectMode?: string) => Promise<{ success: boolean; fallback: boolean; faceX: number; faceY: number; faceWidth: number; faceHeight: number; baseWidth: number; baseHeight: number; candidates?: { faceX: number; faceY: number; faceWidth: number; faceHeight: number }[]; error?: string }>;
     selectLocalImage: () => Promise<{ success: boolean; path: string; name: string } | null>;
+    selectMusicFolder?: () => Promise<MusicFolderResult | null>;
+    loadLastMusicFolder?: () => Promise<MusicFolderResult | null>;
+    clearLastMusicFolder?: () => Promise<{ success: boolean }>;
     saveMascotImage?: (mascotId: string, filename: string, base64Data: string) => Promise<{ success: boolean; path?: string; error?: string }>;
     saveMascotVoice: (mascotId: string, base64Data: string, extension: string) => Promise<{ success: boolean; path?: string; error?: string }>;
     previewMascotState: (previewState: any) => void;

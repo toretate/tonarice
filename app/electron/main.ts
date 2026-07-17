@@ -5,6 +5,7 @@ import { ForgeConnector } from '../src/connector/forge-connector';
 import { AiExpressionService } from '../src/skills/expression-service/expression-service';
 import { alignExpression, detectBaseFace } from '../src/server/utils/expression-edit-service';
 import { registerSelectLocalImageHandler } from './ipc-handlers/select-local-image-handler';
+import { registerMusicFolderHandlers, registerMusicProtocolScheme } from './ipc-handlers/music-folder-handler';
 import { registerLmStudioHandlers } from './ipc-handlers/lmstudio-handler';
 import { registerVoicevoxHandlers } from './ipc-handlers/voicevox-handler';
 import { registerIrodoriHandlers } from './ipc-handlers/irodori-handler';
@@ -23,7 +24,10 @@ import { initIntegratedWindow, createIntegratedWindow, getIntegratedWindow } fro
 import { initCompactWindow, createCompactWindow, getCompactWindow } from './window/compact-window';
 import { initTasksWindow, toggleTasksWindow } from './window/task-window';
 import { initMemoWindow, toggleMemoWindow } from './window/memo-window';
+import { initMusicWindow, toggleMusicWindow } from './window/music-window';
 import { AppConfig, ConfigData } from './app-config';
+
+registerMusicProtocolScheme();
 
 // AiExpressionService にプラットフォーム依存モジュールを注入
 AiExpressionService.setAdapter({
@@ -149,6 +153,7 @@ function createWindows() {
     initCompactWindow(config, isDev);
     initTasksWindow(config, isDev);
     initMemoWindow();
+    initMusicWindow();
     const configData = config.get();
 
     // 開発用：設定画面のみ直接起動するモードの処理
@@ -209,6 +214,7 @@ app.whenReady().then(async () => {
 
     createWindows();
     registerSelectLocalImageHandler();
+    registerMusicFolderHandlers();
     registerLmStudioHandlers();
     registerVoicevoxHandlers(config);
     registerIrodoriHandlers(config);
@@ -245,6 +251,10 @@ app.whenReady().then(async () => {
 
     ipcMain.on('toggle-memo-window', () => {
         toggleMemoWindow();
+    });
+
+    ipcMain.on('toggle-music-window', () => {
+        toggleMusicWindow();
     });
 
 

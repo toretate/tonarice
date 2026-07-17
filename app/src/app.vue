@@ -7,6 +7,7 @@ import IntegratedLayout from './components/layouts/IntegratedLayout.vue';
 import CompactLayout from './components/layouts/CompactLayout.vue';
 import TaskManagement from './components/TaskManagement.vue';
 import MemoWidget from './components/MemoWidget.vue';
+import MusicWidget from './components/MusicWidget.vue';
 
 // 起動時の初期ハッシュを即座に退避（Nuxtルーターによるハッシュ消去対策）
 const initialHash = typeof window !== 'undefined' ? window.location.hash : '';
@@ -37,6 +38,7 @@ onUnmounted(() => {
         <SettingsWindow v-else-if="currentHash === '#settings'" />
         <TaskManagement v-else-if="currentHash === '#tasks'" />
         <MemoWidget v-else-if="currentHash === '#memo'" />
+        <MusicWidget v-else-if="currentHash === '#music'" />
         <IntegratedLayout v-else-if="currentHash === '#integrated' || currentHash === '' || currentHash === '#/' || currentHash === '#web'" />
         <CompactLayout v-else-if="currentHash === '#compact'" />
         <div v-else class="fallback-view">

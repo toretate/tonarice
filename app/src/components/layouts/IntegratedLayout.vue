@@ -7,12 +7,15 @@ import { useConfigStore } from '../../store/config';
 import { useTaskStore } from '../../store/task';
 import { useMemoStore } from '../../store/memo';
 import MemoWidget from '../MemoWidget.vue';
+import MusicWidget from '../MusicWidget.vue';
+import { useMusicStore } from '../../store/music';
 import { storeToRefs } from 'pinia';
 import { resolveMascotImageUrl } from '../../utils/mascot-image-url';
 
 const configStore = useConfigStore();
 const taskStore = useTaskStore();
 const memoStore = useMemoStore();
+const musicStore = useMusicStore();
 const { 
     windowMode,
     integratedBackgroundColor,
@@ -28,6 +31,7 @@ const {
 
 const { showTaskWidget } = storeToRefs(taskStore);
 const { showMemoWidget } = storeToRefs(memoStore);
+const { showMusicWidget, playlistExpanded } = storeToRefs(musicStore);
 
 // チャット欄の幅比率の調整（スプリッターのドラッグ）
 const MIN_CHAT_RATIO = 0.2;
@@ -147,7 +151,15 @@ const integratedBackgroundStyle = computed(() => {
             @pointerdown="onSplitterPointerDown"
         ></div>
         <!-- チャット表示エリア -->
-        <div class="chat-section" :class="{ 'is-compact': windowMode === 'compact' }" :style="chatSectionStyle">
+        <div
+            class="chat-section"
+            :class="{
+                'is-compact': windowMode === 'compact',
+                'has-music-widget': showMusicWidget,
+                'has-expanded-music-playlist': showMusicWidget && playlistExpanded
+            }"
+            :style="chatSectionStyle"
+        >
             <ChatPanel />
         </div>
         
@@ -158,6 +170,9 @@ const integratedBackgroundStyle = computed(() => {
 
             <!-- メモ管理フローティングウィジェット -->
             <MemoWidget v-if="showMemoWidget" />
+
+            <!-- ローカル音楽再生フローティングウィジェット -->
+            <MusicWidget v-if="showMusicWidget" />
         </div>
     </div>
 </template>
@@ -232,6 +247,15 @@ const integratedBackgroundStyle = computed(() => {
 .chat-section.is-compact {
     flex: 1;
     padding: 0;
+}
+
+/* 下部プレイヤーの表示中はチャット入力欄まで含めて重ならない高さに収める */
+.chat-section.has-music-widget:not(.is-compact) {
+    padding-bottom: 100px;
+}
+
+.chat-section.has-expanded-music-playlist:not(.is-compact) {
+    padding-bottom: 220px;
 }
 
 /* 子コンポーネントの調整：MascotViewer が画面いっぱいに広がるようにする */

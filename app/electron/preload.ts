@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // メモウィンドウの表示・非表示のトグルを送信
     toggleMemo: () => ipcRenderer.send('toggle-memo-window'),
+
+    // 音楽プレイヤーウィンドウの表示・非表示を切り替える
+    toggleMusic: () => ipcRenderer.send('toggle-music-window'),
     
     // チャットウィンドウのサイズ変更を送信
     resizeChatWindow: (size: { width: number; height: number }) => ipcRenderer.send('resize-chat-window', size),
@@ -127,6 +130,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // ローカルPCの画像ファイルを選択し、Base64データURLとして取得する
     selectLocalImage: () =>
         ipcRenderer.invoke('select-local-image'),
+
+    // ローカル音楽フォルダの選択と、前回選択したフォルダの再読み込み
+    selectMusicFolder: () => ipcRenderer.invoke('select-music-folder'),
+    loadLastMusicFolder: () => ipcRenderer.invoke('load-last-music-folder'),
+    clearLastMusicFolder: () => ipcRenderer.invoke('clear-last-music-folder'),
 
     // 画像データを mascots/<mascotId> に保存する
     saveMascotImage: (mascotId: string, filename: string, base64Data: string) =>

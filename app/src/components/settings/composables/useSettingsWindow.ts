@@ -1,4 +1,4 @@
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { useConfigStore } from '../../../store/config';
 import { storeToRefs } from 'pinia';
 
@@ -41,6 +41,16 @@ export function useSettingsWindow() {
     const activeMenu = ref('mascot');
     const saveStatus = ref('設定を保存');
     const isSaving = ref(false);
+    const settingsMenuValues = new Set(['mascot', 'chat', 'chatwindow', 'music', 'voice', 'image', 'video', 'tool', 'apikey']);
+
+    const applyRequestedMenu = () => {
+        const requestedMenu = localStorage.getItem('desktop-mascot-settings-menu');
+        if (requestedMenu && settingsMenuValues.has(requestedMenu)) activeMenu.value = requestedMenu;
+    };
+
+    const handleSettingsMenuStorage = (event: StorageEvent) => {
+        if (event.key === 'desktop-mascot-settings-menu') applyRequestedMenu();
+    };
 
     // 28個の感情スロットの初期化保証
     const ensure28Expressions = (expressions: any[]): any[] => {
@@ -79,6 +89,8 @@ export function useSettingsWindow() {
 
     // 設定データのロード
     onMounted(async () => {
+        applyRequestedMenu();
+        window.addEventListener('storage', handleSettingsMenuStorage);
         await configStore.loadConfig();
 
         if (mascots.value.length === 0) {
@@ -111,6 +123,10 @@ export function useSettingsWindow() {
         if (mascots.value.length > 0 && !activeMascotId.value) {
             activeMascotId.value = mascots.value[0].id;
         }
+    });
+
+    onUnmounted(() => {
+        window.removeEventListener('storage', handleSettingsMenuStorage);
     });
 
     const handleLiveUpdate = () => {
@@ -187,6 +203,7 @@ export function useSettingsWindow() {
         { name: 'マスコット', value: 'mascot', icon: 'pi pi-user' },
         { name: 'チャットAI', value: 'chat', icon: 'pi pi-comments' },
         { name: 'ウィンドウ設定', value: 'chatwindow', icon: 'pi pi-window-maximize' },
+        { name: '音楽ウィジェット', value: 'music', icon: 'pi pi-headphones' },
         { name: '音声AI', value: 'voice', icon: 'pi pi-volume-up' },
         { name: '画像AI', value: 'image', icon: 'pi pi-image' },
         { name: '動画AI', value: 'video', icon: 'pi pi-video' },

@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import IntegratedLayout from '../IntegratedLayout.vue';
 import { useConfigStore } from '../../../store/config';
+import { useMusicStore } from '../../../store/music';
 
 // PixiJS のモック
 vi.mock('pixi.js', () => {
@@ -117,6 +118,24 @@ describe('IntegratedLayout.vue - 統合ウィンドウのテスト', () => {
         expect(configStore.integratedMascotYRatio).toBeCloseTo(0.5);
         expect(saveSpy).not.toHaveBeenCalled();
         expect(window.electronAPI!.toggleChat).toHaveBeenCalledTimes(1);
+    });
+
+    it('音楽ウィジェット表示中はチャット欄にプレイヤー分の高さを確保すること', async () => {
+        const configStore = useConfigStore();
+        const musicStore = useMusicStore();
+        configStore.windowMode = 'integrated';
+        musicStore.isLoaded = true;
+        musicStore.showMusicWidget = true;
+
+        const wrapper = mount(IntegratedLayout);
+        const chatSection = wrapper.get('.chat-section');
+
+        expect(chatSection.classes()).toContain('has-music-widget');
+        expect(chatSection.classes()).not.toContain('has-expanded-music-playlist');
+
+        musicStore.playlistExpanded = true;
+        await wrapper.vm.$nextTick();
+        expect(chatSection.classes()).toContain('has-expanded-music-playlist');
     });
 
     describe('チャット欄の幅調整スプリッター', () => {

@@ -19,11 +19,14 @@ import TaskManagement from './TaskManagement.vue';
 import { useTaskStore } from '../store/task';
 import MemoWidget from './MemoWidget.vue';
 import { useMemoStore } from '../store/memo';
+import MusicWidget from './MusicWidget.vue';
+import { useMusicStore } from '../store/music';
 
 const inputText = ref('');
 const messageListRef = ref<any>(null);
 const showTaskManagement = ref(false);
 const showMemoManagement = ref(false);
+const showMusicPlayer = ref(false);
 const ttsDictionaryNotice = ref<{ type: 'loading' | 'success' | 'error'; message: string } | null>(null);
 let ttsDictionaryNoticeTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -31,6 +34,7 @@ const configStore = useConfigStore();
 const mascotStore = useMascotStore();
 const taskStore = useTaskStore();
 const memoStore = useMemoStore();
+const musicStore = useMusicStore();
 
 // タスク管理ウィジェット表示のトグル制御
 watch(showTaskManagement, (newVal) => {
@@ -66,6 +70,22 @@ watch(showMemoManagement, (newVal) => {
 watch(() => memoStore.showMemoWidget, (newVal) => {
     if (showMemoManagement.value !== newVal) {
         showMemoManagement.value = newVal;
+    }
+});
+
+// 音楽プレイヤー表示のトグル制御
+watch(showMusicPlayer, (newVal) => {
+    if (musicStore.showMusicWidget !== newVal) {
+        musicStore.showMusicWidget = newVal;
+    }
+    if (configStore.windowMode !== 'integrated' && configStore.windowMode !== 'compact') {
+        window.electronAPI?.toggleMusic?.();
+    }
+});
+
+watch(() => musicStore.showMusicWidget, (newVal) => {
+    if (showMusicPlayer.value !== newVal) {
+        showMusicPlayer.value = newVal;
     }
 });
 
@@ -423,6 +443,10 @@ onMounted(async () => {
         await memoStore.loadFromLocalStorage();
     }
 
+    if (!musicStore.isLoaded) {
+        musicStore.loadFromLocalStorage();
+    }
+
     // 設定更新イベントの購読
     if (window.electronAPI && window.electronAPI.onConfigUpdated) {
         unsubscribeConfig = window.electronAPI.onConfigUpdated((newConfig) => {
@@ -663,9 +687,13 @@ const focusWindow = () => {
             v-model:showHistoryList="showHistoryList"
             v-model:showTaskManagement="showTaskManagement"
             v-model:showMemoManagement="showMemoManagement"
+            v-model:showMusicPlayer="showMusicPlayer"
             @clear-history="clearHistory"
             @open-image-gen-dialog="imageGenDialogVisible = true"
         />
+
+        <!-- コンパクトモードでは操作パネル直下に1行ミニプレイヤーを重ねる -->
+        <MusicWidget v-if="showMusicPlayer && windowMode === 'compact'" />
 
         <!-- コンパクト表示かつタスク表示ONのときは画面切り替え -->
         <div v-if="showTaskManagement && windowMode === 'compact'" class="task-management-section">
@@ -674,7 +702,6 @@ const focusWindow = () => {
         <div v-else-if="showMemoManagement && windowMode === 'compact'" class="task-management-section">
             <MemoWidget />
         </div>
-
         <template v-else>
             <!-- メッセージスクロール領域 -->
             <MessageList
