@@ -131,6 +131,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     selectLocalImage: () =>
         ipcRenderer.invoke('select-local-image'),
 
+    // ローカル音楽フォルダの選択と、前回選択したフォルダの再読み込み
+    selectMusicFolder: () => ipcRenderer.invoke('select-music-folder'),
+    loadLastMusicFolder: () => ipcRenderer.invoke('load-last-music-folder'),
+    clearLastMusicFolder: () => ipcRenderer.invoke('clear-last-music-folder'),
+
     // 画像データを mascots/<mascotId> に保存する
     saveMascotImage: (mascotId: string, filename: string, base64Data: string) =>
         ipcRenderer.invoke('save-mascot-image', mascotId, filename, base64Data),

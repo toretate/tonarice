@@ -5,6 +5,7 @@ import { ForgeConnector } from '../src/connector/forge-connector';
 import { AiExpressionService } from '../src/skills/expression-service/expression-service';
 import { alignExpression, detectBaseFace } from '../src/server/utils/expression-edit-service';
 import { registerSelectLocalImageHandler } from './ipc-handlers/select-local-image-handler';
+import { registerMusicFolderHandlers, registerMusicProtocolScheme } from './ipc-handlers/music-folder-handler';
 import { registerLmStudioHandlers } from './ipc-handlers/lmstudio-handler';
 import { registerVoicevoxHandlers } from './ipc-handlers/voicevox-handler';
 import { registerIrodoriHandlers } from './ipc-handlers/irodori-handler';
@@ -25,6 +26,8 @@ import { initTasksWindow, toggleTasksWindow } from './window/task-window';
 import { initMemoWindow, toggleMemoWindow } from './window/memo-window';
 import { initMusicWindow, toggleMusicWindow } from './window/music-window';
 import { AppConfig, ConfigData } from './app-config';
+
+registerMusicProtocolScheme();
 
 // AiExpressionService にプラットフォーム依存モジュールを注入
 AiExpressionService.setAdapter({
@@ -211,6 +214,7 @@ app.whenReady().then(async () => {
 
     createWindows();
     registerSelectLocalImageHandler();
+    registerMusicFolderHandlers();
     registerLmStudioHandlers();
     registerVoicevoxHandlers(config);
     registerIrodoriHandlers(config);

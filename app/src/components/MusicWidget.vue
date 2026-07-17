@@ -3,19 +3,53 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useConfigStore } from '../store/config';
 import { useMusicStore } from '../store/music';
-import { formatPlaybackTime, getNextTrackIndex, parseMusicTrackLabel } from '../utils/music-player';
+import type { MusicRestoreMode } from '../store/music';
+import { formatPlaybackTime, getNextTrackIndex, parseMusicTrackLabel, shouldPersistPlaybackPosition } from '../utils/music-player';
+import {
+    clearMusicDirectoryHandle,
+    loadMusicDirectoryHandle,
+    saveMusicDirectoryHandle,
+    scanMusicDirectory,
+    supportsMusicDirectoryPicker,
+    type MusicDirectoryHandle
+} from '../utils/music-directory-handle';
 
 interface MusicTrack {
     id: string;
     url: string;
     title: string;
     artist: string;
+    key: string;
+    size: number;
+    lastModified: number;
 }
+
+interface ElectronMusicFolderResult {
+    success: boolean;
+    folderPath?: string;
+    files?: Array<{ name: string; relativePath: string; size: number; lastModified: number; url: string }>;
+    error?: string;
+}
+
+type RestoreStatus = 'idle' | 'checking' | 'permission-required' | 'reselect-required';
 
 const configStore = useConfigStore();
 const musicStore = useMusicStore();
 const { windowMode } = storeToRefs(configStore);
-const { volume, repeatMode, shuffle, opacity, playlistExpanded } = storeToRefs(musicStore);
+const {
+    volume,
+    repeatMode,
+    shuffle,
+    opacity,
+    playlistExpanded,
+    muted,
+    restoreMode,
+    folderName,
+    trackKey,
+    trackSize,
+    trackLastModified,
+    playbackPosition
+} = storeToRefs(musicStore);
 
 const audioRef = ref<HTMLAudioElement | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
@@ -25,7 +59,15 @@ const isPlaying = ref(false);
 const currentTime = ref(0);
 const duration = ref(0);
 const playbackError = ref('');
+const restoreStatus = ref<RestoreStatus>('idle');
+const loadedFolderName = ref('');
+const loadedRestoreMode = ref<MusicRestoreMode>('none');
 let shouldAutoplayAfterLoad = false;
+let pendingSeekTime: number | null = null;
+let lastPositionSavedAt = 0;
+let activeDirectoryHandle: MusicDirectoryHandle | null = null;
+
+const AUDIO_FILE_PATTERN = /\.(mp3|m4a|aac|wav|ogg|oga|flac|opus|webm)$/i;
 
 const currentTrack = computed(() => tracks.value[currentIndex.value] ?? null);
 const isStandalone = computed(() => window.location.hash === '#music');
@@ -36,6 +78,29 @@ const repeatTitle = computed(() => ({
     all: '全曲リピート',
     one: '1曲リピート'
 }[repeatMode.value]));
+const progressPercentage = computed(() => {
+    if (!duration.value || !Number.isFinite(duration.value)) return 0;
+    return Math.min(100, Math.max(0, (currentTime.value / duration.value) * 100));
+});
+const restoreActionLabel = computed(() => {
+    if (restoreStatus.value === 'checking') return '前回のフォルダを確認中...';
+    if (restoreStatus.value === 'permission-required') return '前回のフォルダを再開';
+    if (restoreStatus.value === 'reselect-required') return `前回のフォルダ「${folderName.value}」を再選択`;
+    return 'フォルダを選択';
+});
+
+const persistCurrentTrack = (position = currentTime.value) => {
+    const track = currentTrack.value;
+    if (!track || loadedRestoreMode.value === 'none') return;
+    musicStore.setRestoreTarget({
+        mode: loadedRestoreMode.value,
+        folderName: loadedFolderName.value,
+        trackKey: track.key,
+        size: track.size,
+        lastModified: track.lastModified,
+        position
+    });
+};
 
 const setMediaSessionMetadata = () => {
     if (!currentTrack.value || !('mediaSession' in navigator) || !('MediaMetadata' in window)) return;
@@ -48,6 +113,13 @@ const setMediaSessionMetadata = () => {
 const handleLoadedMetadata = () => {
     const loadedDuration = audioRef.value?.duration ?? 0;
     duration.value = Number.isFinite(loadedDuration) ? loadedDuration : 0;
+    if (pendingSeekTime !== null && audioRef.value) {
+        const restoredTime = Math.min(Math.max(0, pendingSeekTime), duration.value || pendingSeekTime);
+        audioRef.value.currentTime = restoredTime;
+        currentTime.value = restoredTime;
+        pendingSeekTime = null;
+        persistCurrentTrack(restoredTime);
+    }
     setMediaSessionMetadata();
     if (shouldAutoplayAfterLoad) {
         shouldAutoplayAfterLoad = false;
@@ -68,20 +140,24 @@ const play = async () => {
     }
 };
 
-const selectTrack = async (index: number, autoplay = true) => {
+const selectTrack = async (index: number, autoplay = true, restoreTime = 0) => {
     if (index < 0 || index >= tracks.value.length) return;
     shouldAutoplayAfterLoad = autoplay;
-    currentTime.value = 0;
+    pendingSeekTime = restoreTime;
+    currentTime.value = restoreTime;
     duration.value = 0;
 
     if (currentIndex.value === index) {
         const audio = audioRef.value;
-        if (audio) audio.currentTime = 0;
+        if (audio) audio.currentTime = restoreTime;
+        pendingSeekTime = null;
+        persistCurrentTrack(restoreTime);
         if (autoplay) await play();
         return;
     }
 
     currentIndex.value = index;
+    persistCurrentTrack(restoreTime);
     await nextTick();
     audioRef.value?.load();
 };
@@ -101,29 +177,213 @@ const togglePlayback = () => {
     else void play();
 };
 
+const releaseTrackUrl = (url: string) => {
+    if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+};
+
+const resetPlaylist = () => {
+    audioRef.value?.pause();
+    tracks.value.forEach(track => releaseTrackUrl(track.url));
+    tracks.value = [];
+    currentIndex.value = -1;
+    isPlaying.value = false;
+    currentTime.value = 0;
+    duration.value = 0;
+    pendingSeekTime = null;
+    playbackError.value = '';
+};
+
+const restoreOrSelectFirstTrack = (autoplayForNewFolder: boolean) => {
+    if (tracks.value.length === 0) {
+        playbackError.value = '選択したフォルダに対応する音声ファイルがありません。';
+        return;
+    }
+
+    const isSameFolder = folderName.value === loadedFolderName.value && restoreMode.value === loadedRestoreMode.value;
+    const restoredIndex = isSameFolder && trackKey.value
+        ? tracks.value.findIndex(track => track.key === trackKey.value)
+        : -1;
+    if (restoredIndex >= 0) {
+        const restoredTrack = tracks.value[restoredIndex];
+        const fileUnchanged = restoredTrack.size === trackSize.value && restoredTrack.lastModified === trackLastModified.value;
+        void selectTrack(restoredIndex, false, fileUnchanged ? playbackPosition.value : 0);
+        return;
+    }
+    void selectTrack(0, isSameFolder ? false : autoplayForNewFolder, 0);
+};
+
+const createBrowserTrack = (file: File, key: string, index: number): MusicTrack => ({
+    id: `${key}-${file.size}-${file.lastModified}-${index}`,
+    key,
+    size: file.size,
+    lastModified: file.lastModified,
+    url: URL.createObjectURL(file),
+    ...parseMusicTrackLabel(file.name)
+});
+
+const applyBrowserFiles = (
+    files: Array<{ file: File; relativePath: string }>,
+    selectedFolderName: string,
+    mode: Extract<MusicRestoreMode, 'file-system-access' | 'directory-input'>,
+    autoplayForNewFolder: boolean
+) => {
+    resetPlaylist();
+    loadedFolderName.value = selectedFolderName;
+    loadedRestoreMode.value = mode;
+    tracks.value = files
+        .filter(({ file }) => file.type.startsWith('audio/') || AUDIO_FILE_PATTERN.test(file.name))
+        .sort((left, right) => left.relativePath.localeCompare(right.relativePath, 'ja', { numeric: true, sensitivity: 'base' }))
+        .map(({ file, relativePath }, index) => createBrowserTrack(file, relativePath, index));
+    restoreStatus.value = 'idle';
+    restoreOrSelectFirstTrack(autoplayForNewFolder);
+};
+
 const handleFiles = (event: Event) => {
     const input = event.target as HTMLInputElement;
-    const selectedFiles = Array.from(input.files ?? []).filter(file => file.type.startsWith('audio/') || /\.(mp3|m4a|aac|wav|ogg|oga|flac|opus|webm)$/i.test(file.name));
+    const selectedFiles = Array.from(input.files ?? []).filter(file => file.type.startsWith('audio/') || AUDIO_FILE_PATTERN.test(file.name));
     if (selectedFiles.length === 0) return;
 
-    clearPlaylist();
-    const addedTracks = selectedFiles.map((file, index) => {
-        const label = parseMusicTrackLabel(file.name);
-        return {
-            id: `${file.name}-${file.size}-${file.lastModified}-${index}`,
-            url: URL.createObjectURL(file),
-            ...label
-        };
+    const firstRelativePath = (selectedFiles[0] as File & { webkitRelativePath?: string }).webkitRelativePath || selectedFiles[0].name;
+    const firstParts = firstRelativePath.split('/').filter(Boolean);
+    const selectedFolderName = firstParts.length > 1 ? firstParts[0] : '選択した音楽';
+    const files = selectedFiles.map(file => {
+        const webkitRelativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+        const parts = webkitRelativePath.split('/').filter(Boolean);
+        return { file, relativePath: parts.length > 1 ? parts.slice(1).join('/') : file.name };
     });
-    tracks.value.push(...addedTracks);
     input.value = '';
-    void selectTrack(0, true);
+    applyBrowserFiles(files, selectedFolderName, 'directory-input', true);
+};
+
+const applyElectronFolder = (result: ElectronMusicFolderResult, autoplay: boolean) => {
+    if (!result.success) {
+        playbackError.value = result.error || '音楽フォルダの読み込みに失敗しました。';
+        return;
+    }
+
+    resetPlaylist();
+    const selectedFolderName = result.folderPath?.split(/[\\/]/).filter(Boolean).at(-1) || '音楽フォルダ';
+    loadedFolderName.value = selectedFolderName;
+    loadedRestoreMode.value = 'electron';
+    const loadedTracks = (result.files ?? []).map((file, index) => ({
+        id: `${file.relativePath || file.name}-${file.size}-${file.lastModified}-${index}`,
+        key: file.relativePath || file.name,
+        size: file.size,
+        lastModified: file.lastModified,
+        url: file.url,
+        ...parseMusicTrackLabel(file.name)
+    }));
+    tracks.value.push(...loadedTracks);
+    restoreStatus.value = 'idle';
+    restoreOrSelectFirstTrack(autoplay);
+};
+
+const applyDirectoryHandle = async (handle: MusicDirectoryHandle, autoplayForNewFolder: boolean) => {
+    restoreStatus.value = 'checking';
+    const files = await scanMusicDirectory(handle);
+    activeDirectoryHandle = handle;
+    applyBrowserFiles(files, handle.name, 'file-system-access', autoplayForNewFolder);
+};
+
+const openFolderPicker = async () => {
+    if (window.electronAPI?.selectMusicFolder && !window.electronAPI.isWeb) {
+        const result = await window.electronAPI.selectMusicFolder();
+        if (result) applyElectronFolder(result, true);
+        return;
+    }
+    if (supportsMusicDirectoryPicker()) {
+        try {
+            const handle = await window.showDirectoryPicker?.({ id: 'music-library', mode: 'read' });
+            if (!handle) return;
+            try {
+                await saveMusicDirectoryHandle(handle);
+            } catch (error) {
+                console.warn('音楽フォルダのハンドルを保存できませんでした:', error);
+            }
+            await applyDirectoryHandle(handle, true);
+        } catch (error) {
+            if ((error as DOMException).name !== 'AbortError') {
+                console.warn('音楽フォルダを選択できませんでした:', error);
+                playbackError.value = 'フォルダを選択できませんでした。';
+            }
+        }
+        return;
+    }
+    fileInputRef.value?.click();
+};
+
+const resumePreviousFolder = async () => {
+    if (!supportsMusicDirectoryPicker()) {
+        fileInputRef.value?.click();
+        return;
+    }
+
+    try {
+        const handle = activeDirectoryHandle ?? await loadMusicDirectoryHandle();
+        if (!handle) {
+            restoreStatus.value = 'idle';
+            playbackError.value = '前回選択したフォルダ情報が見つかりません。';
+            return;
+        }
+        activeDirectoryHandle = handle;
+        const permission = handle.queryPermission ? await handle.queryPermission({ mode: 'read' }) : 'prompt';
+        const granted = permission === 'granted'
+            || (handle.requestPermission && await handle.requestPermission({ mode: 'read' }) === 'granted');
+        if (!granted) {
+            restoreStatus.value = 'permission-required';
+            playbackError.value = '前回のフォルダを開く権限がありません。';
+            return;
+        }
+        await applyDirectoryHandle(handle, false);
+    } catch (error) {
+        console.warn('前回の音楽フォルダを再開できませんでした:', error);
+        restoreStatus.value = 'idle';
+        playbackError.value = '前回のフォルダを再開できませんでした。';
+    }
+};
+
+const handleEmptyAction = () => {
+    if (restoreStatus.value === 'permission-required') {
+        void resumePreviousFolder();
+    } else if (restoreStatus.value !== 'checking') {
+        void openFolderPicker();
+    }
+};
+
+const initializeWebRestore = async () => {
+    if (!folderName.value || restoreMode.value === 'none' || restoreMode.value === 'electron') return;
+
+    if (restoreMode.value === 'file-system-access' && supportsMusicDirectoryPicker()) {
+        restoreStatus.value = 'checking';
+        try {
+            const handle = await loadMusicDirectoryHandle();
+            if (!handle) {
+                restoreStatus.value = 'idle';
+                playbackError.value = '前回選択したフォルダ情報が見つかりません。';
+                return;
+            }
+            activeDirectoryHandle = handle;
+            const permission = handle.queryPermission ? await handle.queryPermission({ mode: 'read' }) : 'prompt';
+            if (permission === 'granted') {
+                await applyDirectoryHandle(handle, false);
+            } else {
+                restoreStatus.value = 'permission-required';
+            }
+        } catch (error) {
+            console.warn('保存した音楽フォルダを確認できませんでした:', error);
+            restoreStatus.value = 'idle';
+            playbackError.value = '前回のフォルダ情報を読み込めませんでした。';
+        }
+        return;
+    }
+
+    restoreStatus.value = 'reselect-required';
 };
 
 const removeTrack = (index: number) => {
     const track = tracks.value[index];
     if (!track) return;
-    URL.revokeObjectURL(track.url);
+    releaseTrackUrl(track.url);
 
     const removingCurrent = index === currentIndex.value;
     const resumePlayback = removingCurrent && isPlaying.value;
@@ -144,14 +404,18 @@ const removeTrack = (index: number) => {
 };
 
 const clearPlaylist = () => {
-    audioRef.value?.pause();
-    tracks.value.forEach(track => URL.revokeObjectURL(track.url));
-    tracks.value = [];
-    currentIndex.value = -1;
-    isPlaying.value = false;
-    currentTime.value = 0;
-    duration.value = 0;
-    playbackError.value = '';
+    resetPlaylist();
+    loadedFolderName.value = '';
+    loadedRestoreMode.value = 'none';
+    activeDirectoryHandle = null;
+    restoreStatus.value = 'idle';
+    musicStore.clearRestoreState();
+    if (window.electronAPI?.clearLastMusicFolder && !window.electronAPI.isWeb) {
+        void window.electronAPI.clearLastMusicFolder();
+    }
+    if (typeof indexedDB !== 'undefined') {
+        void clearMusicDirectoryHandle().catch(error => console.warn('音楽フォルダの保存情報を削除できませんでした:', error));
+    }
 };
 
 const handleEnded = () => {
@@ -172,11 +436,39 @@ const handleEnded = () => {
 const seek = (event: Event) => {
     const audio = audioRef.value;
     if (!audio) return;
-    audio.currentTime = Number((event.target as HTMLInputElement).value);
+    const nextTime = Number((event.target as HTMLInputElement).value);
+    audio.currentTime = nextTime;
+    currentTime.value = nextTime;
+    persistCurrentTrack(nextTime);
 };
+
+const toggleMute = () => {
+    muted.value = !muted.value;
+    if (audioRef.value) audioRef.value.muted = muted.value;
+};
+
+const handleTimeUpdate = () => {
+    currentTime.value = audioRef.value?.currentTime ?? 0;
+    const now = Date.now();
+    if (shouldPersistPlaybackPosition(lastPositionSavedAt, now)) {
+        lastPositionSavedAt = now;
+        persistCurrentTrack();
+    }
+};
+
+const handlePause = () => {
+    isPlaying.value = false;
+    persistCurrentTrack();
+};
+
+const handleBeforeUnload = () => persistCurrentTrack();
 
 watch(volume, value => {
     if (audioRef.value) audioRef.value.volume = value;
+});
+
+watch(muted, value => {
+    if (audioRef.value) audioRef.value.muted = value;
 });
 
 const closeWidget = () => {
@@ -230,7 +522,15 @@ const stopElectronDrag = () => {
 const widgetStyle = computed(() => {
     const transparentStyle = { opacity: String(opacity.value) };
     if (isIntegrated.value) {
-        return { ...transparentStyle, left: '12px', right: '12px', bottom: '12px', top: 'auto', width: 'auto', height: 'auto' };
+        return {
+            ...transparentStyle,
+            left: '12px',
+            right: '12px',
+            bottom: '12px',
+            top: 'auto',
+            width: 'auto',
+            height: playlistExpanded.value ? '196px' : '76px'
+        };
     }
     if (isCompact.value) {
         return { ...transparentStyle, left: '8px', right: '8px', top: '52px', width: 'auto', height: '38px' };
@@ -243,9 +543,20 @@ const openMusicSettings = () => {
     window.electronAPI?.openSettings?.();
 };
 
-onMounted(() => {
+onMounted(async () => {
     if (!musicStore.isLoaded) musicStore.loadFromLocalStorage();
-    if (audioRef.value) audioRef.value.volume = volume.value;
+    if (audioRef.value) {
+        audioRef.value.volume = volume.value;
+        audioRef.value.muted = muted.value;
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    if (window.electronAPI?.loadLastMusicFolder && !window.electronAPI.isWeb) {
+        const result = await window.electronAPI.loadLastMusicFolder();
+        if (result) applyElectronFolder(result, false);
+    } else {
+        await initializeWebRestore();
+    }
 
     if ('mediaSession' in navigator) {
         try {
@@ -260,10 +571,12 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+    persistCurrentTrack();
     audioRef.value?.pause();
-    tracks.value.forEach(track => URL.revokeObjectURL(track.url));
+    tracks.value.forEach(track => releaseTrackUrl(track.url));
     window.removeEventListener('mousemove', handleElectronDrag);
     window.removeEventListener('mouseup', stopElectronDrag);
+    window.removeEventListener('beforeunload', handleBeforeUnload);
     stopElectronDrag();
     if ('mediaSession' in navigator) {
         navigator.mediaSession.metadata = null;
@@ -279,11 +592,11 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <section class="music-widget" :class="{ integrated: isIntegrated, compact: isCompact }" :style="widgetStyle">
+    <section class="music-widget" :class="{ integrated: isIntegrated, compact: isCompact, 'playlist-expanded': isIntegrated && playlistExpanded }" :style="widgetStyle">
         <header v-if="!isCompact" class="widget-header" @mousedown="startWidgetDrag">
             <div class="widget-title"><i class="pi pi-headphones"></i><span>MUSIC PLAYER</span></div>
             <div class="header-actions">
-                <button type="button" title="音楽フォルダを選択" @click="fileInputRef?.click()"><i class="pi pi-folder-open"></i></button>
+                <button type="button" title="フォルダを選択" @click="openFolderPicker"><i class="pi pi-folder-open"></i></button>
                 <button type="button" title="音楽ウィジェット設定" @click="openMusicSettings"><i class="pi pi-cog"></i></button>
                 <button type="button" title="閉じる" @click="closeWidget"><i class="pi pi-times"></i></button>
             </div>
@@ -302,9 +615,9 @@ onUnmounted(() => {
             ref="audioRef"
             :src="currentTrack?.url"
             @loadedmetadata="handleLoadedMetadata"
-            @timeupdate="currentTime = audioRef?.currentTime ?? 0"
+            @timeupdate="handleTimeUpdate"
             @play="isPlaying = true"
-            @pause="isPlaying = false"
+            @pause="handlePause"
             @ended="handleEnded"
             @error="playbackError = currentTrack ? 'この音声ファイルを再生できませんでした。' : ''"
         ></audio>
@@ -313,11 +626,11 @@ onUnmounted(() => {
             <button
                 type="button"
                 class="compact-track-title"
-                :title="currentTrack ? currentTrack.title : '音楽フォルダを選択'"
-                @click="!currentTrack && fileInputRef?.click()"
+                :title="currentTrack ? currentTrack.title : restoreActionLabel"
+                @click="!currentTrack && handleEmptyAction()"
             >
                 <i class="pi pi-music"></i>
-                <span>{{ currentTrack?.title || '音楽フォルダを選択' }}</span>
+                <span>{{ currentTrack?.title || restoreActionLabel }}</span>
             </button>
             <button type="button" class="compact-control" :title="isPlaying ? '一時停止' : '再生'" :disabled="!currentTrack" @click="togglePlayback">
                 <i :class="isPlaying ? 'pi pi-pause' : 'pi pi-play'"></i>
@@ -334,13 +647,13 @@ onUnmounted(() => {
                 <span :title="currentTrack.artist">{{ currentTrack.artist || 'ローカル音源' }}</span>
             </div>
         </div>
-        <button v-else-if="!isCompact" type="button" class="empty-state" @click="fileInputRef?.click()">
+        <button v-else-if="!isCompact" type="button" class="empty-state" :disabled="restoreStatus === 'checking'" @click="handleEmptyAction">
             <i class="pi pi-folder-open"></i>
-            <span>音楽フォルダを選択</span>
-            <small>フォルダ内の対応音源を読み込みます</small>
+            <span>{{ restoreActionLabel }}</span>
+            <small>{{ restoreStatus === 'reselect-required' ? '同じフォルダを選ぶと前回位置を復元します' : 'フォルダ内の対応音源を読み込みます' }}</small>
         </button>
 
-        <div v-if="!isCompact" class="progress-row">
+        <div v-if="!isCompact && !isIntegrated" class="progress-row">
             <span>{{ formatPlaybackTime(currentTime) }}</span>
             <input type="range" min="0" :max="duration || 0" step="0.1" :value="currentTime" :disabled="!currentTrack" aria-label="再生位置" @input="seek" />
             <span>{{ formatPlaybackTime(duration) }}</span>
@@ -355,7 +668,16 @@ onUnmounted(() => {
         </div>
 
         <div v-if="!isCompact" class="volume-row">
-            <i :class="volume === 0 ? 'pi pi-volume-off' : 'pi pi-volume-up'"></i>
+            <button
+                type="button"
+                class="mute-button"
+                :class="{ active: muted }"
+                :title="muted ? 'ミュートを解除' : 'ミュート'"
+                :aria-pressed="muted"
+                @click="toggleMute"
+            >
+                <i :class="muted || volume === 0 ? 'pi pi-volume-off' : 'pi pi-volume-up'"></i>
+            </button>
             <input v-model.number="volume" type="range" min="0" max="1" step="0.01" aria-label="音量" />
             <span>{{ Math.round(volume * 100) }}%</span>
         </div>
@@ -363,11 +685,26 @@ onUnmounted(() => {
         <p v-if="playbackError && !isCompact" class="error-message">{{ playbackError }}</p>
 
         <div v-if="!isCompact" class="playlist-header">
+            <div
+                v-if="isIntegrated"
+                class="integrated-progress"
+                role="progressbar"
+                aria-label="再生位置"
+                :aria-valuemin="0"
+                :aria-valuemax="Math.round(duration)"
+                :aria-valuenow="Math.round(currentTime)"
+            >
+                <span>{{ formatPlaybackTime(currentTime) }}</span>
+                <span class="integrated-progress-track" aria-hidden="true">
+                    <span :style="{ width: `${progressPercentage}%` }"></span>
+                </span>
+                <span>{{ formatPlaybackTime(duration) }}</span>
+            </div>
             <button type="button" class="playlist-toggle" :aria-expanded="playlistExpanded" @click="playlistExpanded = !playlistExpanded">
                 <i :class="playlistExpanded ? 'pi pi-chevron-down' : 'pi pi-chevron-right'"></i>
                 <span>PLAYLIST <small>{{ tracks.length }}</small></span>
             </button>
-            <button v-if="tracks.length" type="button" @click="clearPlaylist">すべて削除</button>
+            <button v-if="tracks.length" type="button" @click="clearPlaylist()">すべて削除</button>
         </div>
         <ol v-if="playlistExpanded && !isCompact" class="playlist">
             <li v-for="(track, index) in tracks" :key="track.id" :class="{ current: index === currentIndex }">
@@ -433,6 +770,8 @@ button { border: 0; color: inherit; cursor: pointer; }
 .volume-row { gap: 8px; padding: 0 18px 8px; color: #94a3b8; font-size: 10px; }
 .volume-row input { flex: 1; accent-color: #8b5cf6; }
 .volume-row span { width: 30px; text-align: right; }
+.mute-button { display: grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; padding: 0; border-radius: 6px; background: transparent; color: #94a3b8; }
+.mute-button:hover, .mute-button.active { background: #f3e8ff; color: #7c3aed; }
 .error-message { margin: 0 16px 6px; color: #e11d48; font-size: 11px; }
 .playlist-header { justify-content: space-between; padding: 8px 16px 5px; border-top: 1px solid #e2e8f0; background: #f8fafc; color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; }
 .playlist-header small { padding: 1px 5px; border-radius: 999px; background: #e2e8f0; color: #64748b; }
@@ -464,44 +803,174 @@ input[type="range"] { height: 4px; }
 .music-widget.integrated {
     z-index: 20;
     display: grid;
-    grid-template-columns: minmax(180px, 0.9fr) minmax(220px, 1.4fr) auto minmax(150px, 0.7fr);
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 1fr) minmax(0, 1fr);
+    grid-template-rows: 54px 20px;
     align-items: center;
-    max-height: min(360px, calc(100vh - 24px));
+    max-height: min(196px, calc(100vh - 24px));
 }
 
-.integrated .widget-header,
 .integrated .playlist-header,
 .integrated .playlist,
 .integrated .error-message {
     grid-column: 1 / -1;
 }
 
+.integrated .widget-header {
+    position: absolute;
+    z-index: 2;
+    top: 2px;
+    right: 6px;
+    min-height: 28px;
+    padding: 0;
+    border-bottom: 0;
+    cursor: default;
+}
+
+.integrated .widget-title {
+    display: none;
+}
+
+.integrated .header-actions {
+    gap: 0;
+}
+
+.integrated .header-actions button,
+.integrated .player-controls button {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    font-size: 12px;
+}
+
 .integrated .now-playing {
+    grid-column: 1;
+    grid-row: 1;
     min-width: 0;
-    padding: 10px 14px;
+    gap: 8px;
+    padding: 5px 10px;
+}
+
+.integrated .cover {
+    flex-basis: 36px;
+    height: 36px;
+    border-radius: 7px;
+    font-size: 14px;
+}
+
+.integrated .track-text {
+    gap: 1px;
+}
+
+.integrated .track-text strong {
+    font-size: 12px;
+}
+
+.integrated .track-text span {
+    font-size: 10px;
 }
 
 .integrated .empty-state {
-    min-height: 58px;
-    margin: 10px 14px;
+    grid-column: 1;
+    grid-row: 1;
+    min-height: 38px;
+    margin: 5px 10px;
+    gap: 0;
+    font-size: 11px;
+}
+
+.integrated .empty-state i {
+    font-size: 13px;
+}
+
+.integrated .empty-state small {
+    font-size: 9px;
 }
 
 .integrated .progress-row {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: start;
     min-width: 0;
-    padding: 8px 14px;
+    padding: 3px 8px 0;
+    font-size: 9px;
 }
 
 .integrated .player-controls {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: end;
+    justify-self: stretch;
+    gap: 4px;
+    padding: 0 6px 2px;
     white-space: nowrap;
 }
 
+.integrated .player-controls .play-button {
+    width: 32px;
+    height: 32px;
+    font-size: 13px;
+}
+
 .integrated .volume-row {
+    grid-column: 3;
+    grid-row: 1;
+    align-self: end;
     min-width: 0;
-    padding: 8px 16px;
+    padding: 0 12px 8px;
+}
+
+.integrated .playlist-header {
+    position: relative;
+    grid-row: 2;
+    height: 20px;
+    padding: 1px 12px;
+    box-sizing: border-box;
+}
+
+.integrated-progress {
+    position: absolute;
+    top: -7px;
+    left: 12px;
+    right: 12px;
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) 28px;
+    align-items: center;
+    gap: 6px;
+    height: 12px;
+    color: #94a3b8;
+    font-size: 8px;
+    font-weight: 500;
+    letter-spacing: normal;
+}
+
+.integrated-progress > span:first-child,
+.integrated-progress > span:last-child {
+    background: #f8fafc;
+    text-align: center;
+}
+
+.integrated-progress-track {
+    height: 2px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #dbe2ea;
+}
+
+.integrated-progress-track > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: #8b5cf6;
+    transition: width 0.15s linear;
 }
 
 .integrated .playlist {
-    max-height: 160px;
+    grid-row: 3;
+    max-height: 120px;
+}
+
+.music-widget.integrated.playlist-expanded {
+    grid-template-rows: 54px 20px minmax(0, 1fr);
 }
 
 /* コンパクトモードではチャットヘッダー直下の1行だけを表示する */
@@ -570,12 +1039,11 @@ input[type="range"] { height: 4px; }
 
 @media (max-width: 760px) {
     .music-widget.integrated {
-        grid-template-columns: minmax(150px, 1fr) auto;
+        grid-template-columns: minmax(140px, 1fr) minmax(210px, 1.2fr);
     }
 
-    .integrated .progress-row,
     .integrated .volume-row {
-        grid-column: 1 / -1;
+        display: none;
     }
 }
 </style>

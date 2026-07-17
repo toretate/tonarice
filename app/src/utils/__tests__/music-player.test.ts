@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatPlaybackTime, getNextTrackIndex, parseMusicTrackLabel } from '../music-player';
+import { formatPlaybackTime, getNextTrackIndex, parseMusicTrackLabel, shouldPersistPlaybackPosition } from '../music-player';
 
 describe('parseMusicTrackLabel', () => {
     it('parseMusicTrackLabel_アーティスト区切りを含むファイル名を解析できること', () => {
@@ -41,5 +41,12 @@ describe('formatPlaybackTime', () => {
 
     it('formatPlaybackTime_不正な値をゼロとして表示すること', () => {
         expect(formatPlaybackTime(Number.NaN)).toBe('0:00');
+    });
+});
+
+describe('shouldPersistPlaybackPosition', () => {
+    it('shouldPersistPlaybackPosition_1秒未満の連続保存を抑止すること', () => {
+        expect(shouldPersistPlaybackPosition(1000, 1500)).toBe(false);
+        expect(shouldPersistPlaybackPosition(1000, 2000)).toBe(true);
     });
 });

@@ -45,3 +45,7 @@ export const formatPlaybackTime = (seconds: number): string => {
     const remainder = wholeSeconds % 60;
     return `${minutes}:${remainder.toString().padStart(2, '0')}`;
 };
+
+export const shouldPersistPlaybackPosition = (lastSavedAt: number, now: number, intervalMs = 1000): boolean => (
+    now - lastSavedAt >= intervalMs
+);
