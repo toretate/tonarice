@@ -10,6 +10,7 @@ const props = defineProps<{
     showHistoryList: boolean;
     showTaskManagement: boolean;
     showMemoManagement: boolean;
+    showMusicPlayer: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -17,6 +18,7 @@ const emit = defineEmits<{
     (e: 'update:showHistoryList', value: boolean): void;
     (e: 'update:showTaskManagement', value: boolean): void;
     (e: 'update:showMemoManagement', value: boolean): void;
+    (e: 'update:showMusicPlayer', value: boolean): void;
     (e: 'clear-history'): void;
     (e: 'open-image-gen-dialog'): void;
 }>();
@@ -172,6 +174,9 @@ onUnmounted(() => {
             </button>
             <button class="icon-btn" @click="emit('update:showMemoManagement', !showMemoManagement)" :class="{ 'active-btn': showMemoManagement, 'secret-mode': isSecretMode }" title="メモ ON/OFF">
                 <i class="pi pi-file-edit"></i>
+            </button>
+            <button class="icon-btn" @click="emit('update:showMusicPlayer', !showMusicPlayer)" :class="{ 'active-btn': showMusicPlayer, 'secret-mode': isSecretMode }" title="音楽プレイヤー ON/OFF">
+                <i class="pi pi-headphones"></i>
             </button>
             <button class="icon-btn" @click="emit('update:showTaskManagement', !showTaskManagement)" :class="{ 'active-btn': showTaskManagement, 'secret-mode': isSecretMode }" title="タスク管理 ON/OFF">
                 <i class="pi pi-check-square"></i>

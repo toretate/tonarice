@@ -7,12 +7,15 @@ import { useConfigStore } from '../../store/config';
 import { useTaskStore } from '../../store/task';
 import { useMemoStore } from '../../store/memo';
 import MemoWidget from '../MemoWidget.vue';
+import MusicWidget from '../MusicWidget.vue';
+import { useMusicStore } from '../../store/music';
 import { storeToRefs } from 'pinia';
 import { resolveMascotImageUrl } from '../../utils/mascot-image-url';
 
 const configStore = useConfigStore();
 const taskStore = useTaskStore();
 const memoStore = useMemoStore();
+const musicStore = useMusicStore();
 const { 
     windowMode,
     integratedBackgroundColor,
@@ -28,6 +31,7 @@ const {
 
 const { showTaskWidget } = storeToRefs(taskStore);
 const { showMemoWidget } = storeToRefs(memoStore);
+const { showMusicWidget } = storeToRefs(musicStore);
 
 // チャット欄の幅比率の調整（スプリッターのドラッグ）
 const MIN_CHAT_RATIO = 0.2;
@@ -158,6 +162,9 @@ const integratedBackgroundStyle = computed(() => {
 
             <!-- メモ管理フローティングウィジェット -->
             <MemoWidget v-if="showMemoWidget" />
+
+            <!-- ローカル音楽再生フローティングウィジェット -->
+            <MusicWidget v-if="showMusicWidget" />
         </div>
     </div>
 </template>

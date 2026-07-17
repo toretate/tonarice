@@ -21,6 +21,8 @@ function withSetup<T>(composable: () => T) {
 
 describe('useSettingsWindow', () => {
     beforeEach(() => {
+        vi.clearAllMocks();
+        localStorage.clear();
         setActivePinia(createPinia());
         
         // window.electronAPI のモックを設定
@@ -41,6 +43,20 @@ describe('useSettingsWindow', () => {
             ok: true,
             json: async () => ({ success: true, config: {} })
         }));
+    });
+
+    it('activeMenu - 音楽ウィジェット設定の指定を起動時に反映すること', () => {
+        localStorage.setItem('desktop-mascot-settings-menu', 'music');
+
+        const [setupResult, app] = withSetup(() => useSettingsWindow());
+
+        expect(setupResult.activeMenu.value).toBe('music');
+        expect(setupResult.menuItems.value).toContainEqual({
+            name: '音楽ウィジェット',
+            value: 'music',
+            icon: 'pi pi-headphones'
+        });
+        app.unmount();
     });
 
     it('addMascot - 新しいマスコットを追加したときにリストにマスコットが追加され、アクティブIDが更新されること', () => {

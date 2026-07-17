@@ -76,6 +76,9 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
         toggleMemo: () => {
             console.log('[Polyfill] toggleMemo triggered');
         },
+        toggleMusic: () => {
+            console.log('[Polyfill] toggleMusic triggered');
+        },
         resizeChatWindow: (size: { width: number; height: number }) => {
             console.log(`[Polyfill] resizeChatWindow: ${size.width}x${size.height}`);
         },

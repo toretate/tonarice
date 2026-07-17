@@ -23,6 +23,7 @@ import { initIntegratedWindow, createIntegratedWindow, getIntegratedWindow } fro
 import { initCompactWindow, createCompactWindow, getCompactWindow } from './window/compact-window';
 import { initTasksWindow, toggleTasksWindow } from './window/task-window';
 import { initMemoWindow, toggleMemoWindow } from './window/memo-window';
+import { initMusicWindow, toggleMusicWindow } from './window/music-window';
 import { AppConfig, ConfigData } from './app-config';
 
 // AiExpressionService にプラットフォーム依存モジュールを注入
@@ -149,6 +150,7 @@ function createWindows() {
     initCompactWindow(config, isDev);
     initTasksWindow(config, isDev);
     initMemoWindow();
+    initMusicWindow();
     const configData = config.get();
 
     // 開発用：設定画面のみ直接起動するモードの処理
@@ -245,6 +247,10 @@ app.whenReady().then(async () => {
 
     ipcMain.on('toggle-memo-window', () => {
         toggleMemoWindow();
+    });
+
+    ipcMain.on('toggle-music-window', () => {
+        toggleMusicWindow();
     });
 
 

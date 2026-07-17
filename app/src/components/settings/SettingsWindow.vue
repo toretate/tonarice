@@ -11,6 +11,7 @@ import ToolPanel from './ToolPanel.vue';
 import ApiKeySettingsPanel from './ApiKeySettingsPanel.vue';
 import ChatGenSettingsPanel from './ChatGenSettingsPanel.vue';
 import WindowSettingsPanel from './WindowSettingsPanel.vue';
+import MusicWidgetSettingsPanel from './MusicWidgetSettingsPanel.vue';
 import { useSettingsWindow } from './composables/useSettingsWindow';
 
 const {
@@ -67,6 +68,11 @@ const {
                 <!-- パネル2.5: ウィンドウ・ディスプレイ設定 -->
                 <div v-else-if="activeMenu === 'chatwindow'" class="panel-section">
                     <WindowSettingsPanel />
+                </div>
+
+                <!-- 音楽再生ウィジェット設定 -->
+                <div v-else-if="activeMenu === 'music'" class="panel-section">
+                    <MusicWidgetSettingsPanel />
                 </div>
 
                 <!-- パネル3: 音声AI -->

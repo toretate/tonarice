@@ -13,6 +13,7 @@ export interface IElectronAPI {
     toggleChat: () => void;
     toggleTasks: () => void;
     toggleMemo: () => void;
+    toggleMusic: () => void;
     resizeChatWindow: (size: { width: number; height: number }) => void;
     resizeWindow: (size: { width: number; height: number }) => void;
     openSettings: () => void;

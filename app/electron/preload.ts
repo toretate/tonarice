@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // メモウィンドウの表示・非表示のトグルを送信
     toggleMemo: () => ipcRenderer.send('toggle-memo-window'),
+
+    // 音楽プレイヤーウィンドウの表示・非表示を切り替える
+    toggleMusic: () => ipcRenderer.send('toggle-music-window'),
     
     // チャットウィンドウのサイズ変更を送信
     resizeChatWindow: (size: { width: number; height: number }) => ipcRenderer.send('resize-chat-window', size),
