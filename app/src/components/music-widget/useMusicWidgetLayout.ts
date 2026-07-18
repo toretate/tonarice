@@ -6,6 +6,7 @@ import { useMusicStore } from '../../store/music';
 interface MusicWidgetLayoutOptions {
     opacity: Ref<number>;
     playlistExpanded: Ref<boolean>;
+    secondaryPanelExpanded?: Ref<boolean>;
     pausePlayback: () => void;
 }
 
@@ -69,7 +70,7 @@ export function useMusicWidgetLayout(options: MusicWidgetLayoutOptions) {
                 bottom: '12px',
                 top: 'auto',
                 width: 'auto',
-                height: options.playlistExpanded.value || showInlineSettings.value ? '196px' : '76px'
+                height: options.playlistExpanded.value || showInlineSettings.value || options.secondaryPanelExpanded?.value ? '196px' : '76px'
             };
         }
         if (isCompact.value) {

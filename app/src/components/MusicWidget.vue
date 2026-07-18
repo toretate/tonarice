@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useMusicStore } from '../store/music';
 import MusicWidgetSettingsPanel from './settings/MusicWidgetSettingsPanel.vue';
@@ -7,10 +7,14 @@ import { formatPlaybackTime } from '../utils/music-player';
 import { useMusicLibrary } from './music-widget/useMusicLibrary';
 import { useMusicPlayback } from './music-widget/useMusicPlayback';
 import { useMusicWidgetLayout } from './music-widget/useMusicWidgetLayout';
+import { useAmbientSoundMixer } from './music-widget/useAmbientSoundMixer';
+import AmbientSoundMixer from './music-widget/AmbientSoundMixer.vue';
 
 const musicStore = useMusicStore();
-const { opacity } = storeToRefs(musicStore);
+const { opacity, contentPanelExpanded } = storeToRefs(musicStore);
+const showAmbientMixer = ref(false);
 const playback = useMusicPlayback();
+const ambientMixer = useAmbientSoundMixer();
 const {
     audioRef,
     tracks,
@@ -65,17 +69,37 @@ const {
 } = useMusicWidgetLayout({
     opacity,
     playlistExpanded,
-    pausePlayback: () => audioRef.value?.pause()
+    secondaryPanelExpanded: contentPanelExpanded,
+    pausePlayback: () => {
+        audioRef.value?.pause();
+        ambientMixer.disposeMixer();
+    }
 });
 
+const toggleSettingsPanel = () => {
+    showAmbientMixer.value = false;
+    toggleMusicSettings();
+    contentPanelExpanded.value = showInlineSettings.value;
+};
+
+const toggleAmbientPanel = () => {
+    if (!showAmbientMixer.value && showInlineSettings.value) toggleMusicSettings();
+    showAmbientMixer.value = !showAmbientMixer.value;
+    contentPanelExpanded.value = showAmbientMixer.value;
+};
+
 onMounted(async () => {
+    contentPanelExpanded.value = false;
     initializePlayback();
+    ambientMixer.initializeMixer();
     await initializeLibrary();
 });
 
 onUnmounted(() => {
+    contentPanelExpanded.value = false;
     disposeLayout();
     disposePlayback();
+    ambientMixer.disposeMixer();
 });
 </script>
 
@@ -87,10 +111,17 @@ onUnmounted(() => {
                 <button type="button" title="フォルダを選択" @click="openFolderPicker"><i class="pi pi-folder-open"></i></button>
                 <button
                     type="button"
+                    :class="{ active: showAmbientMixer || ambientMixer.isRunning.value }"
+                    :title="showAmbientMixer ? '環境音ミキサーを閉じる' : '環境音ミキサー'"
+                    :aria-expanded="showAmbientMixer"
+                    @click="toggleAmbientPanel"
+                ><i class="pi pi-sliders-h"></i></button>
+                <button
+                    type="button"
                     :class="{ active: showInlineSettings }"
                     :title="showInlineSettings ? '設定を閉じる' : '音楽ウィジェット設定'"
                     :aria-expanded="showInlineSettings"
-                    @click="toggleMusicSettings"
+                    @click="toggleSettingsPanel"
                 ><i class="pi pi-cog"></i></button>
                 <button type="button" title="閉じる" @click="closeWidget"><i class="pi pi-times"></i></button>
             </div>
@@ -120,7 +151,21 @@ onUnmounted(() => {
             <MusicWidgetSettingsPanel embedded />
         </div>
 
-        <template v-if="!showInlineSettings">
+        <AmbientSoundMixer
+            v-if="showAmbientMixer && !isCompact"
+            v-model:master-volume="ambientMixer.masterVolume.value"
+            v-model:muted="ambientMixer.muted.value"
+            :selected-channels="ambientMixer.selectedChannels.value"
+            :channel-volumes="ambientMixer.channelVolumes.value"
+            :is-running="ambientMixer.isRunning.value"
+            :available-count="ambientMixer.availableCount.value"
+            :playback-error="ambientMixer.playbackError.value"
+            @select-channel="ambientMixer.setChannelSelected"
+            @update-channel-volume="ambientMixer.setChannelVolume"
+            @toggle-running="ambientMixer.toggleRunning"
+        />
+
+        <template v-if="!showInlineSettings && !showAmbientMixer">
         <div v-if="isCompact" class="compact-player-row">
             <button
                 type="button"
@@ -136,6 +181,16 @@ onUnmounted(() => {
             </button>
             <button type="button" class="compact-control" title="次の曲" :disabled="!currentTrack" @click="moveTrack(1)">
                 <i class="pi pi-step-forward"></i>
+            </button>
+            <button
+                type="button"
+                class="compact-control ambient-compact-control"
+                :class="{ active: ambientMixer.isRunning.value }"
+                :title="ambientMixer.isRunning.value ? '環境音を停止' : '環境音を再生'"
+                :disabled="ambientMixer.playableSelectionCount.value === 0"
+                @click="ambientMixer.toggleRunning"
+            >
+                <i class="pi pi-sliders-h"></i>
             </button>
         </div>
 
@@ -326,6 +381,12 @@ input[type="range"] { height: 4px; }
     padding: 30px 10px 8px;
 }
 
+.integrated :deep(.ambient-mixer) {
+    position: absolute;
+    inset: 28px 0 0;
+    z-index: 2;
+}
+
 .integrated .warning-message {
     position: absolute;
     z-index: 3;
@@ -510,7 +571,7 @@ input[type="range"] { height: 4px; }
 
 .compact-player-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 34px 34px;
+    grid-template-columns: minmax(0, 1fr) 34px 34px 34px;
     align-items: center;
     height: 100%;
     padding: 2px 5px 2px 10px;
@@ -556,6 +617,12 @@ input[type="range"] { height: 4px; }
 .compact-control:hover:not(:disabled) {
     background: #f3e8ff;
     color: #7c3aed;
+}
+
+.compact-control.active,
+.ambient-compact-control.active {
+    background: #e0f2fe;
+    color: #0284c7;
 }
 
 .compact-control:disabled {
