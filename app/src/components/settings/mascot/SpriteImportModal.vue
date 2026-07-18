@@ -124,7 +124,7 @@ onBeforeUnmount(clearSelectedImage);
         <div class="custom-modal-card sprite-import-card">
             <div class="modal-header flex justify-content-between align-items-center pb-2 border-bottom border-gray-200">
                 <h2 class="text-base font-bold flex align-items-center gap-2 m-0 text-slate-800">
-                    <i class="pi pi-file-import text-purple-600 text-sm"></i>
+                    <i class="pi pi-file-import text-brand-600 text-sm"></i>
                     <span>AIスプライトインポート (スプライトシートから切り出し)</span>
                 </h2>
                 <Button icon="pi pi-times" class="p-button-rounded p-button-text p-button-secondary" style="width: 28px; height: 28px; padding: 0;" @click="emit('close')" />
@@ -134,7 +134,7 @@ onBeforeUnmount(clearSelectedImage);
             <div class="flex border-bottom border-gray-200 mt-2 mb-1">
                 <button 
                     class="py-2 px-3 font-semibold text-xs border-bottom-2 transition-all cursor-pointer bg-transparent border-transparent"
-                    :class="activeTab === 'upload' ? 'border-purple-500 text-purple-600 font-bold border-solid' : 'text-slate-500 hover:text-slate-700'"
+                    :class="activeTab === 'upload' ? 'border-brand-500 text-brand-600 font-bold border-solid' : 'text-slate-500 hover:text-slate-700'"
                     style="border-bottom-width: 2px;"
                     @click="activeTab = 'upload'"
                 >
@@ -142,12 +142,12 @@ onBeforeUnmount(clearSelectedImage);
                 </button>
                 <button 
                     class="py-2 px-3 font-semibold text-xs border-bottom-2 transition-all cursor-pointer bg-transparent border-transparent flex align-items-center gap-1"
-                    :class="activeTab === 'history' ? 'border-purple-500 text-purple-600 font-bold border-solid' : 'text-slate-500 hover:text-slate-700'"
+                    :class="activeTab === 'history' ? 'border-brand-500 text-brand-600 font-bold border-solid' : 'text-slate-500 hover:text-slate-700'"
                     style="border-bottom-width: 2px;"
                     @click="activeTab = 'history'"
                 >
                     <span>生成履歴から選択</span>
-                    <span v-if="generatedSheets.length > 0" class="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full text-xxs font-bold">
+                    <span v-if="generatedSheets.length > 0" class="bg-brand-100 text-brand-700 px-1.5 py-0.5 rounded-full text-xxs font-bold">
                         {{ generatedSheets.length }}
                     </span>
                 </button>
@@ -159,7 +159,7 @@ onBeforeUnmount(clearSelectedImage);
                     v-if="activeTab === 'upload'"
                     class="flex-1 border-2 border-round flex flex-column align-items-center justify-content-center relative overflow-hidden transition-all"
                     :class="{
-                        'border-purple-400 bg-purple-50/20': isDragOver,
+                        'border-brand-400 bg-theme-alpha-05': isDragOver,
                         'border-dashed border-gray-300 bg-slate-50 hover:bg-slate-100/50': !isDragOver && !selectedImage,
                         'border-solid border-gray-200 checkerboard-bg': selectedImage
                     }"
@@ -181,7 +181,7 @@ onBeforeUnmount(clearSelectedImage);
                 <!-- タブ2: 生成履歴 -->
                 <div v-else-if="activeTab === 'history'" class="flex-1 overflow-y-auto min-h-0 bg-slate-50 border-round border-1 border-gray-200 p-3">
                     <div v-if="isLoadingSheets" class="flex flex-column align-items-center justify-content-center py-5">
-                        <i class="pi pi-spin pi-spinner text-2xl text-purple-600 mb-2"></i>
+                        <i class="pi pi-spin pi-spinner text-2xl text-brand-600 mb-2"></i>
                         <span class="text-xs font-medium text-slate-500">履歴を取得中...</span>
                     </div>
                     <div v-else-if="generatedSheets.length === 0" class="flex flex-column align-items-center justify-content-center py-5 text-slate-400">
@@ -292,7 +292,7 @@ onBeforeUnmount(clearSelectedImage);
     gap: 8px;
 }
 .sheet-card:hover {
-    border-color: #9333ea;
+    border-color: var(--color-primary-hover);
     box-shadow: 0 4px 6px -1px rgba(147, 51, 234, 0.1);
 }
 .sheet-thumbnail-container {

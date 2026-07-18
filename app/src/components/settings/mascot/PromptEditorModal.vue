@@ -86,7 +86,7 @@ const handleSave = async () => {
         <div class="custom-modal-card prompt-edit-modal-card">
             <div class="modal-header flex justify-content-between align-items-center pb-2 border-bottom border-gray-200">
                 <h2 class="text-base font-bold flex align-items-center gap-2 m-0 text-slate-800">
-                    <i class="pi pi-user-edit text-purple-500 text-sm"></i>
+                    <i class="pi pi-user-edit text-brand-500 text-sm"></i>
                     <span>詳細プロンプト設定 (OpenClawフォーマット)</span>
                 </h2>
                 <Button icon="pi pi-times" class="p-button-rounded p-button-text p-button-secondary" style="width: 28px; height: 28px; padding: 0;" @click="emit('close')" />
@@ -107,7 +107,7 @@ const handleSave = async () => {
                         v-model="identity" 
                         placeholder="# Mascot Identity&#10;- 名前: ココ&#10;- 種族: 電子の妖精&#10;- 目的: マスターの作業をサポートすること。" 
                         rows="4" 
-                        class="w-full p-2 bg-white border-1 border-gray-300 border-round text-gray-800 text-sm focus:border-purple-400 focus:outline-none font-mono"
+                        class="w-full p-2 bg-white border-1 border-gray-300 border-round text-gray-800 text-sm focus:border-brand-400 focus:outline-none font-mono"
                     ></textarea>
                 </div>
 
@@ -124,7 +124,7 @@ const handleSave = async () => {
                         v-model="soul" 
                         placeholder="# Mascot Soul&#10;- 口調: 少し甘えん坊で親しみやすい口調。&#10;- 語尾: 「〜だよ」「〜だね」を多く使う。&#10;- 一人称: 「わたし」" 
                         rows="4" 
-                        class="w-full p-2 bg-white border-1 border-gray-300 border-round text-gray-800 text-sm focus:border-purple-400 focus:outline-none font-mono"
+                        class="w-full p-2 bg-white border-1 border-gray-300 border-round text-gray-800 text-sm focus:border-brand-400 focus:outline-none font-mono"
                     ></textarea>
                 </div>
 
@@ -141,7 +141,7 @@ const handleSave = async () => {
                         v-model="userPrompt" 
                         placeholder="# User Context&#10;- ユーザーの呼び方: 「マスター」&#10;- 関係性: 常にマスターに懐いており、役に立ちたいと思っている。" 
                         rows="4" 
-                        class="w-full p-2 bg-white border-1 border-gray-300 border-round text-gray-800 text-sm focus:border-purple-400 focus:outline-none font-mono"
+                        class="w-full p-2 bg-white border-1 border-gray-300 border-round text-gray-800 text-sm focus:border-brand-400 focus:outline-none font-mono"
                     ></textarea>
                 </div>
 
@@ -158,7 +158,7 @@ const handleSave = async () => {
                         v-model="agents" 
                         placeholder="# Mascot Agents & Rules&#10;- ルール: 暴力的、または公序良俗に反する発言は避ける。&#10;- 判断基準: 常にマスターの味方として肯定的に接すること。" 
                         rows="4" 
-                        class="w-full p-2 bg-white border-1 border-gray-300 border-round text-gray-800 text-sm focus:border-purple-400 focus:outline-none font-mono"
+                        class="w-full p-2 bg-white border-1 border-gray-300 border-round text-gray-800 text-sm focus:border-brand-400 focus:outline-none font-mono"
                     ></textarea>
                 </div>
 
@@ -175,7 +175,7 @@ const handleSave = async () => {
                         v-model="memory" 
                         placeholder="# Mascot Long-term Memory&#10;- 合意事項: 毎週土曜日はマスターと一緒にゲームをする約束をした。&#10;- マスターの情報: コーヒーはブラック派。" 
                         rows="4" 
-                        class="w-full p-2 bg-white border-1 border-gray-300 border-round text-gray-800 text-sm focus:border-purple-400 focus:outline-none font-mono"
+                        class="w-full p-2 bg-white border-1 border-gray-300 border-round text-gray-800 text-sm focus:border-brand-400 focus:outline-none font-mono"
                     ></textarea>
                 </div>
 

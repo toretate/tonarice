@@ -106,7 +106,7 @@ const handleApply = () => {
         <div class="custom-modal-card remove-bg-card">
             <div class="modal-header flex justify-content-between align-items-center pb-2 border-bottom border-gray-200">
                 <h2 class="text-base font-bold flex align-items-center gap-2 m-0 text-slate-800">
-                    <i class="pi pi-eraser text-purple-500"></i>
+                    <i class="pi pi-eraser text-brand-500"></i>
                     <span>立ち絵の背景削除</span>
                 </h2>
                 <Button icon="pi pi-times" class="p-button-rounded p-button-text p-button-secondary" style="width: 28px; height: 28px; padding: 0;" @click="emit('close')" :disabled="isProcessing" />

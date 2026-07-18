@@ -543,7 +543,7 @@ const handleBackgroundRemovalDone = async (newBase64: string) => {
                         title="表情一覧を開く"
                     />
                     <h2 class="text-base font-bold flex align-items-center gap-2 m-0 text-slate-800">
-                        <i class="pi pi-sliders-h text-purple-500 text-sm header-icon"></i>
+                        <i class="pi pi-sliders-h text-brand-500 text-sm header-icon"></i>
                         <span>表情エディタ & 位置調整</span>
                     </h2>
                 </div>
@@ -682,7 +682,7 @@ const handleBackgroundRemovalDone = async (newBase64: string) => {
                             <div class="flex-1 flex flex-column gap-1">
                                 <div class="flex justify-content-between align-items-center">
                                     <label class="text-xs font-semibold text-slate-700 select-none">横位置調整 (X)</label>
-                                    <span class="text-xxs text-purple-600 font-mono font-bold">{{ selectedModalExpression.offsetX || 0 }}px</span>
+                                    <span class="text-xxs text-brand-600 font-mono font-bold">{{ selectedModalExpression.offsetX || 0 }}px</span>
                                 </div>
                                 <Slider v-model="selectedModalExpression.offsetX" :min="-250" :max="250" :step="1" @change="handleLiveUpdate" />
                             </div>
@@ -691,17 +691,17 @@ const handleBackgroundRemovalDone = async (newBase64: string) => {
                             <div class="flex-1 flex flex-column gap-1">
                                 <div class="flex justify-content-between align-items-center">
                                     <label class="text-xs font-semibold text-slate-700 select-none">拡大率 / スケール (S)</label>
-                                    <div class="flex align-items-center gap-1 bg-purple-50 border-round px-2 py-0.5 border-1 border-purple-200 select-none">
-                                        <span class="text-xxs text-purple-600 font-mono font-bold">{{ (selectedModalExpression.scale || 1.0).toFixed(2) }}倍</span>
+                                    <div class="flex align-items-center gap-1 bg-brand-50 border-round px-2 py-0.5 border-1 border-brand-200 select-none">
+                                        <span class="text-xxs text-brand-600 font-mono font-bold">{{ (selectedModalExpression.scale || 1.0).toFixed(2) }}倍</span>
                                         <div class="flex flex-column gap-0" style="line-height: 0.8;">
                                             <i
-                                                class="pi pi-chevron-up text-purple-400 hover:text-purple-600 cursor-pointer"
+                                                class="pi pi-chevron-up text-brand-400 hover:text-brand-600 cursor-pointer"
                                                 style="font-size: 8px; padding: 1px;"
                                                 @click="adjustScale(0.01)"
                                                 title="拡大率を0.01増やす"
                                             ></i>
                                             <i
-                                                class="pi pi-chevron-down text-purple-400 hover:text-purple-600 cursor-pointer"
+                                                class="pi pi-chevron-down text-brand-400 hover:text-brand-600 cursor-pointer"
                                                 style="font-size: 8px; padding: 1px;"
                                                 @click="adjustScale(-0.01)"
                                                 title="拡大率を0.01減らす"
@@ -905,17 +905,17 @@ const handleBackgroundRemovalDone = async (newBase64: string) => {
     max-height: 560px !important;
     overflow-y: auto !important;
     scrollbar-width: thin;
-    scrollbar-color: rgba(168, 85, 247, 0.4) transparent;
+    scrollbar-color: var(--color-primary-alpha-40) transparent;
 }
 .expression-vertical-list::-webkit-scrollbar {
     width: 6px;
 }
 .expression-vertical-list::-webkit-scrollbar-thumb {
-    background: rgba(168, 85, 247, 0.4);
+    background: var(--color-primary-alpha-40);
     border-radius: 3px;
 }
 .expression-vertical-list::-webkit-scrollbar-thumb:hover {
-    background: rgba(168, 85, 247, 0.7);
+    background: var(--color-primary-alpha-70);
 }
 
 .expression-vertical-item {
@@ -928,9 +928,9 @@ const handleBackgroundRemovalDone = async (newBase64: string) => {
     border-color: #cbd5e1;
 }
 .expression-vertical-item.active {
-    background: #f5f3ff !important; /* 薄い紫背景 */
-    border-color: #a855f7 !important;
-    box-shadow: 0 0 12px rgba(168, 85, 247, 0.15);
+    background: var(--color-primary-subtle) !important; /* 薄い紫背景 */
+    border-color: var(--color-primary) !important;
+    box-shadow: 0 0 12px var(--color-primary-alpha-15);
 }
 .expression-vertical-item.empty {
     border-style: dashed;

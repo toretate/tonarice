@@ -356,7 +356,7 @@ onBeforeUnmount(() => {
         <div class="custom-modal-card crop-modal-card">
             <div class="modal-header flex justify-content-between align-items-center pb-2 border-bottom border-gray-200">
                 <h2 class="text-base font-bold flex align-items-center gap-2 m-0 text-slate-800">
-                    <i class="pi pi-scissors text-purple-500"></i>
+                    <i class="pi pi-scissors text-brand-500"></i>
                     <span>表情画像のトリミング・切り抜き</span>
                 </h2>
                 <Button icon="pi pi-times" class="p-button-rounded p-button-text p-button-secondary" style="width: 28px; height: 28px; padding: 0;" @click="emit('close')" />
@@ -387,7 +387,7 @@ onBeforeUnmount(() => {
                         <!-- 切り出し枠 (基準が画像の実表示領域になるため完全に一致します) -->
                         <div 
                             v-if="cropImageWidth > 0 && cropImageRef"
-                            class="crop-box absolute border-2 border-purple-500 cursor-move"
+                            class="crop-box absolute border-2 border-brand-500 cursor-move"
                             :style="{
                                 width: ((cropWidth / cropImageWidth) * 100) + '%',
                                 height: ((cropHeight / cropImageHeight) * 100) + '%',
@@ -504,7 +504,7 @@ onBeforeUnmount(() => {
     position: absolute;
     width: 10px;
     height: 10px;
-    background: #a855f7;
+    background: var(--color-primary);
     border: 1px solid white;
     z-index: 10;
 }
