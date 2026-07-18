@@ -178,10 +178,6 @@
     background: #ffffff;
 }
 
-.flex-grow-1 {
-    flex-grow: 1;
-}
-
 .task-input-field {
     border-color: #cbd5e1;
     height: 30px;
@@ -209,7 +205,7 @@
     padding: 0 !important;
 }
 
-/* 開始・終了・カレンダー関連 */
+/* カレンダー関連 */
 .action-icon-btn {
     background: transparent;
     border: none;
@@ -229,22 +225,6 @@
 .action-icon-btn:hover {
     background: #f1f5f9;
     color: #334155;
-}
-
-.start-task-btn {
-    color: #10b981; /* 緑 */
-}
-.start-task-btn:hover {
-    background: #ecfdf5;
-    color: #059669;
-}
-
-.complete-task-btn {
-    color: #ef4444; /* 赤 */
-}
-.complete-task-btn:hover {
-    background: #fef2f2;
-    color: #dc2626;
 }
 
 .calendar-set-btn {
