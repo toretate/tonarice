@@ -211,12 +211,3 @@ const handleApply = () => {
     background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
 }
 </style>
-
-<style>
-/* 自前ダイアログの前面にドロップダウンパネルを表示させるためのグローバル上書き */
-.p-select-overlay,
-.p-select-panel,
-.p-dropdown-panel {
-    z-index: 9999 !important;
-}
-</style>
