@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue';
 import { useConfigStore } from '@/store/config';
 import Button from 'primevue/button';
+import AppModalShell from '../../common/AppModalShell.vue';
 import { resolveMascotImageUrl } from '../../../utils/mascot-image-url';
 import { saveMascotImageSource } from '../../../utils/mascot-image-upload';
 
@@ -336,11 +337,22 @@ const importGeneratedSprite = () => {
 </script>
 
 <template>
-    <div v-if="visible" class="custom-modal-overlay ai-generator-overlay">
-        <div class="custom-modal-card ai-generator-card">
-            <!-- 高級感のあるヘッダー -->
-            <div class="modal-header flex justify-content-between align-items-center pb-2 border-bottom border-gray-200">
-                <h2 class="text-base font-bold flex align-items-center gap-2 m-0 text-slate-800">
+    <AppModalShell
+        :visible="visible"
+        title-id="ai-expression-generator-modal-title"
+        :close-disabled="isGenerating"
+        backdrop="light"
+        :z-index="2000"
+        width="90vw"
+        max-width="1040px"
+        height="90vh"
+        max-height="780px"
+        padding="10px 20px 16px"
+        @close="emit('close')"
+    >
+        <!-- 高級感のあるヘッダー -->
+        <div class="modal-header flex justify-content-between align-items-center pb-2 border-bottom border-gray-200">
+            <h2 id="ai-expression-generator-modal-title" class="text-base font-bold flex align-items-center gap-2 m-0 text-slate-800">
                     <i class="pi pi-sparkles text-brand-600 text-sm animate-pulse"></i>
                     <span>AI表情スプライト自動生成 (Gemini Vision + Imagen 3)</span>
                 </h2>
@@ -585,46 +597,15 @@ const importGeneratedSprite = () => {
 
             </div>
 
-            <!-- フッター -->
-            <div class="modal-footer flex justify-content-end gap-2 pt-3 border-top border-gray-200 mt-3 no-drag">
-                <Button label="閉じる" icon="pi pi-times" class="p-button-secondary px-4 p-button-sm" @click="emit('close')" :disabled="isGenerating" />
-            </div>
+        <!-- フッター -->
+        <div class="modal-footer flex justify-content-end gap-2 pt-3 border-top border-gray-200 mt-3 no-drag">
+            <Button label="閉じる" icon="pi pi-times" class="p-button-secondary px-4 p-button-sm" @click="emit('close')" :disabled="isGenerating" />
         </div>
-    </div>
+    </AppModalShell>
 </template>
 
 <style scoped>
 /* モーダル用CSS */
-.ai-generator-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    background: rgba(241, 245, 249, 0.8) !important;
-    backdrop-filter: blur(12px) !important;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2000;
-}
-
-.ai-generator-card {
-    background: #ffffff !important;
-    border: 1px solid rgba(0, 0, 0, 0.08) !important;
-    width: 90vw !important;
-    max-width: 1040px !important;
-    height: 90vh !important;
-    max-height: 780px !important;
-    display: flex;
-    flex-direction: column;
-    color: #1e293b;
-    overflow: hidden !important;
-    padding: 10px 20px 16px 20px !important;
-    border-radius: 12px;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-}
-
 .border-bottom {
     border-bottom: 1px solid #e2e8f0 !important;
 }

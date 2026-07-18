@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import Button from 'primevue/button';
+import AppModalShell from '../../common/AppModalShell.vue';
 import { useConfigStore } from '../../../store/config';
 import { resolveMascotImageUrl } from '../../../utils/mascot-image-url';
 
@@ -95,10 +96,20 @@ const onSpriteDrop = (event: DragEvent, slot: MascotAsset) => {
 </script>
 
 <template>
-    <div v-if="visible" class="custom-modal-overlay expression-edit-modal-overlay">
-        <div class="custom-modal-card expression-edit-modal-card max-width-lg">
-            <div class="modal-header flex justify-content-between align-items-center pb-2 border-bottom border-gray-200">
-                <h2 class="text-base font-bold flex align-items-center gap-2 m-0 text-slate-800">
+    <AppModalShell
+        :visible="visible"
+        title-id="emotion-assignment-modal-title"
+        backdrop="light"
+        :z-index="2000"
+        width="90vw"
+        max-width="960px"
+        height="90vh"
+        max-height="680px"
+        padding="10px 20px 16px"
+        @close="emit('close')"
+    >
+        <div class="modal-header flex justify-content-between align-items-center pb-2 border-bottom border-gray-200">
+            <h2 id="emotion-assignment-modal-title" class="text-base font-bold flex align-items-center gap-2 m-0 text-slate-800">
                     <i class="pi pi-sparkles text-brand-500"></i>
                     <span>AI表情スプライト - 感情割り当て設定</span>
                 </h2>
@@ -166,50 +177,14 @@ const onSpriteDrop = (event: DragEvent, slot: MascotAsset) => {
                 </div>
             </div>
 
-            <div class="modal-footer flex justify-content-end gap-2 pt-3 border-top border-gray-200 mt-3">
-                <Button label="割り当てを完了する" icon="pi pi-check" class="p-button-primary px-4 p-button-sm" @click="emit('close')" />
-            </div>
+        <div class="modal-footer flex justify-content-end gap-2 pt-3 border-top border-gray-200 mt-3">
+            <Button label="割り当てを完了する" icon="pi pi-check" class="p-button-primary px-4 p-button-sm" @click="emit('close')" />
         </div>
-    </div>
+    </AppModalShell>
 </template>
 
 <style scoped>
 /* 白基調の感情割り当てモーダル用CSS */
-.expression-edit-modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    background: rgba(241, 245, 249, 0.8) !important;
-    backdrop-filter: blur(12px) !important;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2000;
-}
-
-.expression-edit-modal-card {
-    background: #ffffff !important;
-    border: 1px solid rgba(0, 0, 0, 0.08) !important;
-    width: 90vw !important;
-    max-width: 1040px !important;
-    height: 90vh !important;
-    max-height: 780px !important;
-    display: flex;
-    flex-direction: column;
-    color: #1e293b;
-    overflow: hidden !important;
-    padding: 10px 20px 16px 20px !important;
-    border-radius: 12px;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-}
-
-.max-width-lg {
-    max-width: 960px !important;
-    max-height: 680px !important;
-}
-
 .border-bottom {
     border-bottom: 1px solid #e2e8f0 !important;
 }
