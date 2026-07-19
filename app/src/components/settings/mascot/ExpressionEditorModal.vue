@@ -875,12 +875,12 @@ const handleBackgroundRemovalDone = async (newBase64: string) => {
 
 /* 縦スリムリスト (高さを512pxに固定し、スクロールバーを紫に) */
 .expression-vertical-list {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 8px !important;
-    height: 560px !important;
-    max-height: 560px !important;
-    overflow-y: auto !important;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 560px;
+    max-height: 560px;
+    overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--color-primary-alpha-40) transparent;
 }
@@ -962,11 +962,11 @@ const handleBackgroundRemovalDone = async (newBase64: string) => {
     width: 40px;
 }
 .preview-slider-wrapper {
-    display: flex !important;
-    flex-direction: row !important;
-    flex-wrap: nowrap !important;
-    align-items: center !important;
-    justify-content: center !important;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: center;
 }
 
 .mascot-composite-preview {
@@ -1080,7 +1080,7 @@ const handleBackgroundRemovalDone = async (newBase64: string) => {
 @media (max-width: 768px) {
     /* モバイル時のヘッダー調整 */
     .sidebar-toggle-btn {
-        display: inline-flex !important;
+        display: inline-flex;
     }
     
     .header-icon {
