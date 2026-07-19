@@ -430,7 +430,7 @@ const updateOutfitNofacePath = ({ outfitId, nofacePath }: { outfitId: string; no
                     @click="activeMascotSubTab = 'expression'"
                     title="表情"
                 >
-                    <img :src="mascotEmotionIcon" class="subtab-icon" style="margin-right: 4px; object-fit: contain; border-radius: 2px;" />
+                    <img :src="mascotEmotionIcon" class="subtab-icon" />
                     <span class="subtab-label">表情</span>
                 </Button>
                 <Button 
@@ -439,7 +439,7 @@ const updateOutfitNofacePath = ({ outfitId, nofacePath }: { outfitId: string; no
                     @click="activeMascotSubTab = 'outfit'"
                     title="立ち絵"
                 >
-                    <img :src="mascotOutfitIcon" class="subtab-icon" style="margin-right: 4px; object-fit: contain; border-radius: 2px;" />
+                    <img :src="mascotOutfitIcon" class="subtab-icon" />
                     <span class="subtab-label">立ち絵</span>
                 </Button>
                 <Button 
@@ -448,7 +448,7 @@ const updateOutfitNofacePath = ({ outfitId, nofacePath }: { outfitId: string; no
                     @click="activeMascotSubTab = 'profile'"
                     title="プロフィール"
                 >
-                    <img :src="mascotProfileIcon" class="subtab-icon" style="margin-right: 4px; object-fit: contain; border-radius: 2px;" />
+                    <img :src="mascotProfileIcon" class="subtab-icon" />
                     <span class="subtab-label">プロフィール</span>
                 </Button>
             </div>
@@ -762,6 +762,9 @@ const updateOutfitNofacePath = ({ outfitId, nofacePath }: { outfitId: string; no
 .subtab-icon {
     width: 48px !important;
     height: 48px !important;
+    margin-right: 4px;
+    object-fit: contain;
+    border-radius: 2px;
 }
 
 .mobile-text {
