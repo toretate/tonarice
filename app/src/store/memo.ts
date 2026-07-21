@@ -38,6 +38,10 @@ export const useMemoStore = defineStore('memo', () => {
         try {
             const res = await fetch('/api/memos', { credentials: 'include' });
             if (res.ok) {
+                const contentType = res.headers.get('content-type') ?? '';
+                if (!contentType.includes('application/json')) {
+                    throw new Error(`メモAPIがJSON以外を返しました (${contentType || 'Content-Typeなし'})`);
+                }
                 const resJson = await res.json();
                 if (resJson.success) {
                     const serverMemos = Array.isArray(resJson.memos) ? resJson.memos : [];

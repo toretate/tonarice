@@ -287,7 +287,7 @@ const integratedBackgroundStyle = computed(() => {
     pointer-events: auto;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 768px) and (hover: none) and (pointer: coarse) {
     .integrated-container {
         padding-top: env(safe-area-inset-top, 0px);
         padding-right: env(safe-area-inset-right, 0px);
@@ -300,7 +300,7 @@ const integratedBackgroundStyle = computed(() => {
     }
 }
 
-@media (max-width: 768px) and (orientation: portrait) {
+@media (max-width: 768px) and (orientation: portrait) and (hover: none) and (pointer: coarse) {
     .integrated-container {
         flex-direction: column;
     }

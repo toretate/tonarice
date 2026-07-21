@@ -8,10 +8,12 @@ import InputText from 'primevue/inputtext';
 import Textarea from 'primevue/textarea';
 import { useResizableFrame } from '../composables/useResizableFrame';
 import WidgetFrame from './common/WidgetFrame.vue';
+import { useSmartphoneLayout } from '../composables/useSmartphoneLayout';
 
 const memoStore = useMemoStore();
 const configStore = useConfigStore();
 const { windowMode } = storeToRefs(configStore);
+const { isSmartphoneLayout } = useSmartphoneLayout();
 
 // 新規メモ追加
 const newMemoContent = ref('');
@@ -171,7 +173,7 @@ const widgetStyle = computed(() => {
         };
     }
     
-    if (hash === '#compact') {
+    if (hash === '#compact' || windowMode.value === 'compact' || isSmartphoneLayout.value) {
         return {
             width: '100%',
             height: '100%',
@@ -192,7 +194,9 @@ const widgetStyle = computed(() => {
 
 const isCompactView = computed(() => {
     if (typeof window === 'undefined') return false;
-    return window.location.hash === '#compact';
+    return windowMode.value === 'compact' ||
+        window.location.hash === '#compact' ||
+        isSmartphoneLayout.value;
 });
 
 onMounted(() => {
