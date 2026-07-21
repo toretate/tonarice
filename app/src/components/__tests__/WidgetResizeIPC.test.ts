@@ -14,6 +14,12 @@ describe('Widget Resize IPC Behavior', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        localStorage.clear();
+        window.matchMedia = vi.fn().mockImplementation(() => ({
+            matches: false,
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn()
+        }));
         setActivePinia(createPinia());
 
         mockResizeWindow = vi.fn();
@@ -26,6 +32,78 @@ describe('Widget Resize IPC Behavior', () => {
     });
 
     describe('Task (useTaskWidgetWindow)', () => {
+        const createPointerEvent = (type: string, init: Record<string, unknown>) => {
+            const event = new Event(type, { bubbles: true, cancelable: true });
+            Object.entries(init).forEach(([key, value]) => {
+                Object.defineProperty(event, key, { value });
+            });
+            return event;
+        };
+
+        it('スマホ表示ではintegratedモードでもチャット領域全体に重なること', () => {
+            window.matchMedia = vi.fn().mockImplementation(() => ({
+                matches: true,
+                addEventListener: vi.fn(),
+                removeEventListener: vi.fn()
+            }));
+            let result: any;
+            const TestComponent = defineComponent({
+                setup() {
+                    result = useTaskWidgetWindow(
+                        useTaskStore(),
+                        useConfigStore(),
+                        ref('integrated')
+                    );
+                    return () => null;
+                }
+            });
+            const wrapper = mount(TestComponent);
+
+            expect(result.isCompactOverlay.value).toBe(true);
+            expect(result.widgetStyle.value).toMatchObject({ width: '100%', height: '100%' });
+
+            wrapper.unmount();
+        });
+
+        it('integratedモードではタッチ操作でウィジェットを移動できること', () => {
+            let result: any;
+            const windowMode = ref('integrated');
+            const TestComponent = defineComponent({
+                setup() {
+                    const taskStore = useTaskStore();
+                    const configStore = useConfigStore();
+                    result = useTaskWidgetWindow(taskStore, configStore, windowMode);
+                    return () => null;
+                }
+            });
+            const wrapper = mount(TestComponent);
+            const target = document.createElement('header');
+
+            result.startWidgetDrag(createPointerEvent('pointerdown', {
+                target,
+                pointerType: 'touch',
+                isPrimary: true,
+                button: 0,
+                clientX: 700,
+                clientY: 100
+            }));
+            window.dispatchEvent(createPointerEvent('pointermove', {
+                pointerType: 'touch',
+                isPrimary: true,
+                clientX: 500,
+                clientY: 300
+            }));
+
+            expect(result.widgetStyle.value.left).toBe('474px');
+            expect(result.widgetStyle.value.top).toBe('278px');
+
+            window.dispatchEvent(createPointerEvent('pointerup', {
+                pointerType: 'touch',
+                isPrimary: true
+            }));
+            wrapper.unmount();
+        });
+
         it('standaloneモードの場合、resizeWindow IPCが呼び出され、ローカルstyleが更新されること', () => {
             let result: any;
             const windowMode = ref('standalone');
@@ -76,7 +154,7 @@ describe('Widget Resize IPC Behavior', () => {
                 window.dispatchEvent(mousemoveEvent);
 
                 expect(mockResizeWindow).not.toHaveBeenCalled();
-                expect(result.widgetStyle.value.width).toBe('390px');
+                expect(result.widgetStyle.value.width).toBe(mode === 'compact' ? '100%' : '390px');
 
                 window.dispatchEvent(new MouseEvent('mouseup'));
                 wrapper.unmount();

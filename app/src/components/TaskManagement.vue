@@ -30,6 +30,7 @@ const showDeleteMode = ref(false);
 
 const {
     widgetStyle,
+    isCompactOverlay,
     startWidgetDrag,
     initResize,
     closeWidget
@@ -83,9 +84,14 @@ const handleAddTask = () => {
 </script>
 
 <template>
-    <WidgetFrame class="task-widget-container shadow-sm" :style="widgetStyle" :show-handles="true" @init-resize="initResize">
+    <WidgetFrame
+        class="task-widget-container shadow-sm"
+        :style="widgetStyle"
+        :show-handles="!isCompactOverlay"
+        @init-resize="initResize"
+    >
         <!-- 1. ヘッダー：タイトル ＆ 水平進捗バー -->
-        <header class="widget-header" @mousedown="startWidgetDrag">
+        <header class="widget-header" @pointerdown="startWidgetDrag">
             <h2 class="title">TODO LIST</h2>
             <div class="progress-section" v-if="taskStore.currentView === 'todo'">
                 <ProgressBar 

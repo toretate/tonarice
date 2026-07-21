@@ -13,6 +13,28 @@ export interface MemoData {
     pinned?: boolean;
 }
 
+export function loadMemosFromDb(userId: string) {
+    const memosPath = getUserMemosPath(userId);
+    if (!fs.existsSync(memosPath)) {
+        return [];
+    }
+
+    const raw = fs.readFileSync(memosPath, 'utf8');
+    const data = JSON.parse(raw);
+    return Array.isArray(data.memos) ? data.memos : [];
+}
+
+export function saveMemosToDb(userId: string, memos: unknown[]) {
+    const memosPath = getUserMemosPath(userId);
+    const userDir = path.dirname(memosPath);
+
+    if (!fs.existsSync(userDir)) {
+        fs.mkdirSync(userDir, { recursive: true });
+    }
+
+    safeWriteFileSync(memosPath, JSON.stringify({ memos }, null, 4));
+}
+
 export function addMemoToDb(userId: string, payload: MemoData) {
     const memosPath = getUserMemosPath(userId);
     const userDir = path.dirname(memosPath);

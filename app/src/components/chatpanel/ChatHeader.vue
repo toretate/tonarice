@@ -30,16 +30,38 @@ const { activeMascot, useTts } = storeToRefs(configStore);
 const { isSecretMode, isRadioMode } = storeToRefs(mascotStore);
 
 const showImageMenu = ref(false);
+const showMobileMenu = ref(false);
 
 const toggleImageMenu = (e: MouseEvent) => {
     e.stopPropagation();
+    showMobileMenu.value = false;
     showImageMenu.value = !showImageMenu.value;
+};
+
+const toggleMobileMenu = (e: MouseEvent) => {
+    e.stopPropagation();
+    showImageMenu.value = false;
+    showMobileMenu.value = !showMobileMenu.value;
+};
+
+const closeMobileMenu = () => {
+    showMobileMenu.value = false;
 };
 
 const handleDocumentClick = (e: MouseEvent) => {
     const target = e.target as HTMLElement;
     if (!target.closest('.image-menu-wrapper')) {
         showImageMenu.value = false;
+    }
+    if (!target.closest('.mobile-menu-wrapper')) {
+        showMobileMenu.value = false;
+    }
+};
+
+const handleDocumentKeydown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+        showImageMenu.value = false;
+        showMobileMenu.value = false;
     }
 };
 
@@ -51,20 +73,51 @@ const setImageGenMode = (mode: 't2i' | 'i2i') => {
 const openImageGenDialog = () => {
     emit('open-image-gen-dialog');
     showImageMenu.value = false;
+    closeMobileMenu();
 };
 
 const triggerClearHistory = () => {
     emit('clear-history');
+    closeMobileMenu();
 };
 
 const toggleHistory = () => {
     emit('update:showHistoryList', !props.showHistoryList);
+    closeMobileMenu();
+};
+
+const toggleTts = () => {
+    configStore.updateConfig({ useTts: !useTts.value });
+    configStore.saveConfig();
+};
+
+const toggleRadio = () => {
+    mascotStore.setRadioMode(!isRadioMode.value);
+    closeMobileMenu();
+};
+
+const toggleMemo = () => {
+    emit('update:showMemoManagement', !props.showMemoManagement);
+    closeMobileMenu();
+};
+
+const toggleMusic = () => {
+    emit('update:showMusicPlayer', !props.showMusicPlayer);
+    closeMobileMenu();
+};
+
+const toggleTasks = () => {
+    emit('update:showTaskManagement', !props.showTaskManagement);
+    closeMobileMenu();
 };
 
 const openSettings = () => {
     if (window.electronAPI && window.electronAPI.openSettings) {
         window.electronAPI.openSettings();
+    } else {
+        window.location.hash = '#settings';
     }
+    closeMobileMenu();
 };
 
 // ---- ヘッダードラッグ制御 ----
@@ -125,10 +178,12 @@ const onHeaderMouseUp = () => {
 
 onMounted(() => {
     document.addEventListener('click', handleDocumentClick);
+    document.addEventListener('keydown', handleDocumentKeydown);
 });
 
 onUnmounted(() => {
     document.removeEventListener('click', handleDocumentClick);
+    document.removeEventListener('keydown', handleDocumentKeydown);
     window.removeEventListener('mousemove', onHeaderMouseMove);
     window.removeEventListener('mouseup', onHeaderMouseUp);
 });
@@ -146,11 +201,11 @@ onUnmounted(() => {
             <button class="icon-btn" @click="mascotStore.setSecretMode(!isSecretMode)" :class="{ 'active-secret-btn': isSecretMode, 'secret-mode': isSecretMode }" title="シークレットモード ON/OFF">
                 <i :class="isSecretMode ? 'pi pi-eye-slash' : 'pi pi-eye'"></i>
             </button>
-            <button class="icon-btn" @click="configStore.updateConfig({ useTts: !useTts }); configStore.saveConfig()" :class="{ 'active-btn': useTts, 'secret-mode': isSecretMode }" title="アプリ全体の音声 ON/OFF">
+            <button class="icon-btn" @click="toggleTts" :class="{ 'active-btn': useTts, 'secret-mode': isSecretMode }" title="アプリ全体の音声 ON/OFF">
                 <i :class="useTts ? 'pi pi-volume-up' : 'pi pi-volume-off'"></i>
             </button>
             <!-- 画像生成・編集メニュー -->
-            <div class="image-menu-wrapper">
+            <div class="image-menu-wrapper mobile-collapsible-action">
                 <button type="button" class="icon-btn" @click="toggleImageMenu" :class="{ 'active-btn': imageGenMode !== null, 'secret-mode': isSecretMode }" title="画像生成・編集メニュー">
                     <i class="pi pi-image"></i>
                 </button>
@@ -169,21 +224,53 @@ onUnmounted(() => {
                     </div>
                 </div>
             </div>
-            <button class="icon-btn" @click="mascotStore.setRadioMode(!isRadioMode)" :class="{ 'active-radio-btn': isRadioMode, 'secret-mode': isSecretMode }" title="ラジオモード ON/OFF">
+            <button class="icon-btn mobile-collapsible-action" @click="toggleRadio" :class="{ 'active-radio-btn': isRadioMode, 'secret-mode': isSecretMode }" title="ラジオモード ON/OFF">
                 <img :src="radioIcon" class="radio-svg-icon" :class="{ 'active-radio-btn': isRadioMode }" alt="ラジオ" />
             </button>
-            <button class="icon-btn" @click="emit('update:showMemoManagement', !showMemoManagement)" :class="{ 'active-btn': showMemoManagement, 'secret-mode': isSecretMode }" title="メモ ON/OFF">
+            <button class="icon-btn mobile-collapsible-action" @click="toggleMemo" :class="{ 'active-btn': showMemoManagement, 'secret-mode': isSecretMode }" title="メモ ON/OFF">
                 <i class="pi pi-file-edit"></i>
             </button>
-            <button class="icon-btn" @click="emit('update:showMusicPlayer', !showMusicPlayer)" :class="{ 'active-btn': showMusicPlayer, 'secret-mode': isSecretMode }" title="音楽プレイヤー ON/OFF">
+            <button class="icon-btn mobile-collapsible-action" @click="toggleMusic" :class="{ 'active-btn': showMusicPlayer, 'secret-mode': isSecretMode }" title="音楽プレイヤー ON/OFF">
                 <i class="pi pi-headphones"></i>
             </button>
-            <button class="icon-btn" @click="emit('update:showTaskManagement', !showTaskManagement)" :class="{ 'active-btn': showTaskManagement, 'secret-mode': isSecretMode }" title="タスク管理 ON/OFF">
+            <button class="icon-btn mobile-collapsible-action" @click="toggleTasks" :class="{ 'active-btn': showTaskManagement, 'secret-mode': isSecretMode }" title="タスク管理 ON/OFF">
                 <i class="pi pi-check-square"></i>
             </button>
-            <button class="icon-btn" @click="triggerClearHistory" :class="{ 'secret-mode': isSecretMode }" title="新規話題"><i class="pi pi-plus"></i></button>
-            <button class="icon-btn" @click="toggleHistory" :class="{ 'active-btn': showHistoryList, 'secret-mode': isSecretMode }" title="履歴一覧"><i class="pi pi-history"></i></button>
-            <button class="icon-btn" @click="openSettings" :class="{ 'secret-mode': isSecretMode }" title="設定"><i class="pi pi-cog"></i></button>
+            <button class="icon-btn mobile-collapsible-action" @click="triggerClearHistory" :class="{ 'secret-mode': isSecretMode }" title="新規話題"><i class="pi pi-plus"></i></button>
+            <button class="icon-btn mobile-collapsible-action" @click="toggleHistory" :class="{ 'active-btn': showHistoryList, 'secret-mode': isSecretMode }" title="履歴一覧"><i class="pi pi-history"></i></button>
+            <button class="icon-btn mobile-collapsible-action" @click="openSettings" :class="{ 'secret-mode': isSecretMode }" title="設定"><i class="pi pi-cog"></i></button>
+
+            <div class="mobile-menu-wrapper">
+                <button
+                    type="button"
+                    class="icon-btn mobile-menu-trigger"
+                    :class="{ 'secret-mode': isSecretMode }"
+                    aria-label="その他の操作"
+                    aria-controls="mobile-chat-actions"
+                    :aria-expanded="showMobileMenu"
+                    @click="toggleMobileMenu"
+                >
+                    <i class="pi pi-ellipsis-v"></i>
+                </button>
+                <div
+                    v-if="showMobileMenu"
+                    id="mobile-chat-actions"
+                    class="mobile-actions-panel"
+                    :class="{ 'secret-mode': isSecretMode }"
+                >
+                    <button type="button" @click="setImageGenMode('t2i'); closeMobileMenu()"><i class="pi pi-pencil"></i><span>テキストから画像生成</span></button>
+                    <button type="button" @click="setImageGenMode('i2i'); closeMobileMenu()"><i class="pi pi-image"></i><span>画像から画像生成</span></button>
+                    <button type="button" @click="openImageGenDialog"><i class="pi pi-sliders-h"></i><span>画像生成設定</span></button>
+                    <button type="button" :class="{ active: isRadioMode }" @click="toggleRadio"><i class="pi pi-desktop"></i><span>ラジオモード</span><i v-if="isRadioMode" class="pi pi-check state-check"></i></button>
+                    <button type="button" :class="{ active: showMemoManagement }" @click="toggleMemo"><i class="pi pi-file-edit"></i><span>メモ</span><i v-if="showMemoManagement" class="pi pi-check state-check"></i></button>
+                    <button type="button" :class="{ active: showMusicPlayer }" @click="toggleMusic"><i class="pi pi-headphones"></i><span>音楽プレイヤー</span><i v-if="showMusicPlayer" class="pi pi-check state-check"></i></button>
+                    <button type="button" :class="{ active: showTaskManagement }" @click="toggleTasks"><i class="pi pi-check-square"></i><span>タスク管理</span><i v-if="showTaskManagement" class="pi pi-check state-check"></i></button>
+                    <div class="mobile-menu-divider"></div>
+                    <button type="button" @click="triggerClearHistory"><i class="pi pi-plus"></i><span>新規話題</span></button>
+                    <button type="button" :class="{ active: showHistoryList }" @click="toggleHistory"><i class="pi pi-history"></i><span>履歴一覧</span></button>
+                    <button type="button" @click="openSettings"><i class="pi pi-cog"></i><span>設定</span></button>
+                </div>
+            </div>
         </div>
     </header>
 </template>
@@ -211,6 +298,11 @@ onUnmounted(() => {
 .header-actions {
     display: flex;
     gap: 8px;
+}
+
+.mobile-menu-wrapper {
+    display: none;
+    position: relative;
 }
 
 .icon-btn {
@@ -403,5 +495,96 @@ onUnmounted(() => {
 
 .menu-divider.secret-mode {
     background: rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 768px) and (hover: none) and (pointer: coarse) {
+    .chat-header {
+        padding-inline: 12px;
+    }
+
+    .chat-title {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .header-actions {
+        flex: 0 0 auto;
+        gap: 4px;
+    }
+
+    .mobile-collapsible-action {
+        display: none;
+    }
+
+    .mobile-menu-wrapper {
+        display: block;
+    }
+
+    .icon-btn {
+        width: 36px;
+        height: 36px;
+    }
+
+    .mobile-actions-panel {
+        position: absolute;
+        top: calc(100% + 6px);
+        right: 0;
+        z-index: 120;
+        display: grid;
+        width: min(280px, calc(100vw - 24px));
+        max-height: min(70dvh, 520px);
+        padding: 6px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        border: 1px solid var(--color-primary-alpha-20);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.98);
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2);
+    }
+
+    .mobile-actions-panel > button {
+        display: grid;
+        grid-template-columns: 24px minmax(0, 1fr) 20px;
+        align-items: center;
+        min-height: 44px;
+        padding-inline: 12px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: #475569;
+        text-align: left;
+    }
+
+    .mobile-actions-panel > button:active,
+    .mobile-actions-panel > button.active {
+        background: var(--color-primary-alpha-10);
+        color: var(--color-primary);
+    }
+
+    .mobile-actions-panel > button > span {
+        grid-column: 2;
+    }
+
+    .mobile-actions-panel .state-check {
+        grid-column: 3;
+    }
+
+    .mobile-menu-divider {
+        height: 1px;
+        margin: 4px 8px;
+        background: rgba(0, 0, 0, 0.08);
+    }
+
+    .mobile-actions-panel.secret-mode {
+        border-color: var(--color-primary-alpha-40);
+        background: rgba(30, 27, 75, 0.98);
+    }
+
+    .mobile-actions-panel.secret-mode > button {
+        color: #e2e8f0;
+    }
 }
 </style>
