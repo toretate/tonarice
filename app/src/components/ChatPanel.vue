@@ -24,6 +24,7 @@ import { useMusicStore } from '../store/music';
 import { DEFAULT_ACCENT_COLOR } from '../config/theme';
 import { useResizableFrame } from '../composables/useResizableFrame';
 import WidgetFrame from './common/WidgetFrame.vue';
+import { useChatVisualViewport } from './chatpanel/useChatVisualViewport';
 
 const inputText = ref('');
 const messageListRef = ref<any>(null);
@@ -193,6 +194,8 @@ const scrollToBottom = () => {
         messageListRef.value.scrollToBottom();
     }
 };
+
+useChatVisualViewport(scrollToBottom);
 
 const {
     sessions,
