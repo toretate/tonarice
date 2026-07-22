@@ -229,43 +229,29 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
             }
         },
         askLmStudio: async (message: string, systemPrompt: string, modelName: string, endpoint: string, history?: any[], attachments?: any[]) => {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 60000);
             try {
-                const messages = [
-                    { role: 'system', content: systemPrompt },
-                    ...(history || []).map((msg: any) => ({
-                        role: msg.sender === 'user' ? 'user' : 'assistant',
-                        content: msg.text
-                    })),
-                    { role: 'user', content: message }
-                ];
-
-                const response = await fetch(`${endpoint}chat/completions`, {
+                const response = await fetch('/api/lmstudio/chat', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        model: modelName,
-                        messages: messages,
-                        temperature: 0.7
-                    }),
-                    signal: controller.signal
+                        message,
+                        systemPrompt,
+                        modelName,
+                        endpoint,
+                        history,
+                        attachments
+                    })
                 });
-
-                clearTimeout(timeoutId);
-
                 if (!response.ok) {
                     const errorText = await response.text();
                     throw new Error(`LM Studio Error: ${response.status} ${errorText}`);
                 }
 
                 const data = await response.json();
-                const text = data.choices?.[0]?.message?.content;
-                return text || 'Error: 空の返答を受信しました。';
+                return data.response || 'Error: 空の返答を受信しました。';
             } catch (e: any) {
-                clearTimeout(timeoutId);
                 console.error('[Polyfill] LM Studio API Error:', e.message);
                 throw e;
             }
@@ -367,19 +353,18 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
             }
         },
         getLmStudioModels: async (endpoint: string) => {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
             try {
-                const response = await fetch(`${endpoint}models`, {
-                    method: 'GET',
-                    signal: controller.signal
+                const response = await fetch('/api/lmstudio/models', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ endpoint })
                 });
-                clearTimeout(timeoutId);
                 if (!response.ok) throw new Error(getHttpErrorMessage(response.status));
                 const data = await response.json();
-                return { success: true, models: data.data || [] };
+                return { success: true, models: data.models || [] };
             } catch (e: any) {
-                clearTimeout(timeoutId);
                 return { success: false, models: [], error: e.message || '接続に失敗しました' };
             }
         },
