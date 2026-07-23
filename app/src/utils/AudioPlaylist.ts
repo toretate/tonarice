@@ -1,8 +1,9 @@
-import { normalizeAudioPayload, type PlayableAudio } from '../types/audio';
+import { isBinaryAudioPayload, normalizeAudioPayload, type PlayableAudio } from '../types/audio';
 
 export class AudioPlaylist {
     private queue: PlayableAudio[] = [];
     private currentAudio: HTMLAudioElement | null = null;
+    private currentObjectUrl: string | null = null;
     private isPlaying: boolean = false;
     private onSpeakingChange?: (speaking: boolean) => void;
 
@@ -38,25 +39,39 @@ export class AudioPlaylist {
             this.onSpeakingChange(true);
         }
 
-        const audio = normalizeAudioPayload(this.queue.shift()!);
+        const queuedAudio = this.queue.shift()!;
         try {
-            this.currentAudio = new Audio(`data:${audio.mimeType};base64,${audio.data}`);
+            const source = isBinaryAudioPayload(queuedAudio)
+                ? URL.createObjectURL(queuedAudio.blob)
+                : (() => {
+                    const audio = normalizeAudioPayload(queuedAudio);
+                    return `data:${audio.mimeType};base64,${audio.data}`;
+                })();
+            this.currentObjectUrl = isBinaryAudioPayload(queuedAudio) ? source : null;
+            const audioElement = new Audio(source);
+            this.currentAudio = audioElement;
 
-            this.currentAudio.onended = () => {
-                this.currentAudio = null;
+            const finish = () => {
+                if (this.currentObjectUrl === source) {
+                    URL.revokeObjectURL(source);
+                    this.currentObjectUrl = null;
+                }
+                if (this.currentAudio === audioElement) {
+                    this.currentAudio = null;
+                }
                 this.playNext();
             };
 
-            this.currentAudio.onerror = () => {
+            audioElement.onended = finish;
+
+            audioElement.onerror = () => {
                 console.error('[AudioPlaylist] 音声の再生中にエラーが発生しました');
-                this.currentAudio = null;
-                this.playNext();
+                finish();
             };
 
-            this.currentAudio.play().catch((err) => {
+            audioElement.play().catch((err) => {
                 console.error('[AudioPlaylist] 音声再生の開始に失敗しました:', err);
-                this.currentAudio = null;
-                this.playNext();
+                finish();
             });
         } catch (err) {
             console.error('[AudioPlaylist] Audioオブジェクト作成に失敗しました:', err);
@@ -77,6 +92,10 @@ export class AudioPlaylist {
                 // ignore
             }
             this.currentAudio = null;
+        }
+        if (this.currentObjectUrl) {
+            URL.revokeObjectURL(this.currentObjectUrl);
+            this.currentObjectUrl = null;
         }
         this.isPlaying = false;
         if (this.onSpeakingChange) {
