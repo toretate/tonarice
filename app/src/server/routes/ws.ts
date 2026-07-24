@@ -12,6 +12,7 @@ import { PROJECT_ROOT, USERS_DIR } from '../utils/paths';
 import { executeMemosTool, executeTasksTool } from '../utils/tool-executor';
 import { updateTaskInDb } from '../utils/tasks-service';
 import { isAuthBypassAllowed } from '../utils/auth-bypass';
+import { encodeAudioBinaryFrame } from '../../utils/audio-binary-frame';
 
 
 // ユーザーごとの接続管理（crosswsのPeerオブジェクトをSetに保存）
@@ -113,6 +114,11 @@ export default defineWebSocketHandler({
             const rawMessage = msg.text();
             const parsed = JSON.parse(rawMessage);
             const { event, data } = parsed;
+
+            if (event === 'client-capabilities') {
+                peer.context.binaryAudioV1 = data?.binaryAudioV1 === true;
+                return;
+            }
 
             if (event === 'chat-send') {
                 const {
@@ -358,10 +364,14 @@ export default defineWebSocketHandler({
                                 try {
                                     const audio = await promise;
                                     if (audio) {
-                                        peer.send(JSON.stringify({
-                                            event: 'chat-audio',
-                                            data: { audio }
-                                        }));
+                                        if (peer.context.binaryAudioV1 === true) {
+                                            peer.send(encodeAudioBinaryFrame(Buffer.from(audio.data, 'base64'), audio.codec));
+                                        } else {
+                                            peer.send(JSON.stringify({
+                                                event: 'chat-audio',
+                                                data: { audio }
+                                            }));
+                                        }
 
                                         if (data.saveVoice) {
                                             try {

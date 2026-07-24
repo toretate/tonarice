@@ -10,6 +10,7 @@ import { splitSentences } from '../../utils/sentence-splitter';
 import { sanitizeForIrodoriTTS } from '../../utils/irodori-sanitizer';
 import { useTaskStore } from '../../store/task';
 import { useMemoStore } from '../../store/memo';
+import { decodeAudioBinaryFrame } from '../../utils/audio-binary-frame';
 
 export function useChatConnection(params: {
     messages: Ref<Message[]>;
@@ -137,14 +138,25 @@ export function useChatConnection(params: {
 
         console.log(`[useChatConnection] Connecting to WebSocket (Nitro): ${wsUrl}`);
         socket = new WebSocket(wsUrl);
+        socket.binaryType = 'arraybuffer';
 
         socket.onopen = () => {
             console.log('[useChatConnection] WebSocket connected');
             isWsConnected.value = true;
+            socket?.send(JSON.stringify({
+                event: 'client-capabilities',
+                data: { binaryAudioV1: true }
+            }));
         };
 
         socket.onmessage = async (event) => {
             try {
+                if (event.data instanceof ArrayBuffer) {
+                    if (useTts.value) {
+                        playlist.push(decodeAudioBinaryFrame(event.data));
+                    }
+                    return;
+                }
                 const parsed = JSON.parse(event.data);
                 const { event: wsEvent, data } = parsed;
 

@@ -7,7 +7,14 @@ export interface Base64AudioPayload {
     codec: AudioCodec;
 }
 
-export type PlayableAudio = Base64AudioPayload | string;
+export interface BinaryAudioPayload {
+    blob: Blob;
+    mimeType: 'audio/wav' | 'audio/mpeg';
+    extension: 'wav' | 'mp3';
+    codec: AudioCodec;
+}
+
+export type PlayableAudio = Base64AudioPayload | BinaryAudioPayload | string;
 
 export function isBase64AudioPayload(value: unknown): value is Base64AudioPayload {
     if (!value || typeof value !== 'object') return false;
@@ -18,7 +25,16 @@ export function isBase64AudioPayload(value: unknown): value is Base64AudioPayloa
         && (payload.codec === 'pcm_s16le' || payload.codec === 'mp3');
 }
 
-export function normalizeAudioPayload(audio: PlayableAudio): Base64AudioPayload {
+export function isBinaryAudioPayload(value: unknown): value is BinaryAudioPayload {
+    if (!value || typeof value !== 'object') return false;
+    const payload = value as Partial<BinaryAudioPayload>;
+    return payload.blob instanceof Blob
+        && (payload.mimeType === 'audio/wav' || payload.mimeType === 'audio/mpeg')
+        && (payload.extension === 'wav' || payload.extension === 'mp3')
+        && (payload.codec === 'pcm_s16le' || payload.codec === 'mp3');
+}
+
+export function normalizeAudioPayload(audio: Exclude<PlayableAudio, BinaryAudioPayload>): Base64AudioPayload {
     if (isBase64AudioPayload(audio)) return audio;
     return {
         data: audio,
