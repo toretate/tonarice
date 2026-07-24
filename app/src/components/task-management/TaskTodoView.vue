@@ -200,13 +200,13 @@ onUnmounted(() => {
                             class="action-icon-btn pause-task-btn"
                             @click.stop="taskStore.pauseTask(task.id)"
                             title="一時中断">
-                        <span>⏸️</span>
+                        <i class="pi pi-pause" aria-hidden="true"></i>
                     </button>
                     <button v-else-if="task.status === 'paused'"
                             class="action-icon-btn resume-task-btn"
                             @click.stop="taskStore.resumeTask(task.id)"
                             title="タスクを再開">
-                        <span>▶️</span>
+                        <i class="pi pi-play" aria-hidden="true"></i>
                     </button>
                 </div>
 

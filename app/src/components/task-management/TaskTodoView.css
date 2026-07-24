@@ -6,7 +6,7 @@
 
 /* タスクカード */
 .task-card {
-    background: #ffffff;
+    background: var(--color-surface-raised);
     border: 1px solid #e2e8f0;
     border-radius: 8px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.02);
@@ -351,15 +351,14 @@
 
 /* 進行中のタスクスタイル */
 .task-card.status-doing {
-    border-left: 3px solid #f59e0b; /* オレンジ色の左枠線 */
-    background: #fffbeb; /* 薄いオレンジの背景 */
+    border-color: var(--color-warning);
+    background: var(--color-warning-soft);
 }
 
 /* 期限切れタスクのスタイル（警告色） */
 .task-card.overdue {
-    border-left: 3px solid #ef4444; /* 赤色の左枠線 */
-    background: #fef2f2; /* 薄い赤の背景 */
-    border-color: #fecaca;
+    border-color: var(--color-danger);
+    background: var(--color-danger-soft);
 }
 
 .doing-badge-pill {
