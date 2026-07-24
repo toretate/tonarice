@@ -14,7 +14,8 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
         emotionChanged: [] as ((emotion: string) => void)[],
         chatToggled: [] as ((visible: boolean) => void)[],
         configUpdated: [] as ((config: any) => void)[],
-        timerTrigger: [] as ((memo: string, options?: { notificationId?: string; speak?: boolean }) => void)[]
+        timerTrigger: [] as ((memo: string, options?: { notificationId?: string; speak?: boolean }) => void)[],
+        scheduledPromptChanged: [] as (() => void)[]
     };
 
     // ヘルパー: 設定データを localStorage から読み込み / 保存
@@ -659,6 +660,33 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
             callbacks.timerTrigger.push(callback);
             return () => {
                 callbacks.timerTrigger = callbacks.timerTrigger.filter(cb => cb !== callback);
+            };
+        },
+        getScheduledPromptData: async () => ({
+            tasks: [],
+            runs: [],
+            readOnly: true
+        }),
+        createScheduledPromptTask: async () => {
+            throw new Error('定期実行タスクの登録はデスクトップ版で利用してください。');
+        },
+        updateScheduledPromptTask: async () => {
+            throw new Error('定期実行タスクの編集はデスクトップ版で利用してください。');
+        },
+        setScheduledPromptTaskEnabled: async () => {
+            throw new Error('定期実行タスクの切り替えはデスクトップ版で利用してください。');
+        },
+        deleteScheduledPromptTask: async () => {
+            throw new Error('定期実行タスクの削除はデスクトップ版で利用してください。');
+        },
+        runScheduledPromptTaskNow: async () => {
+            throw new Error('定期実行タスクの手動実行はデスクトップ版で利用してください。');
+        },
+        onScheduledPromptChanged: (callback: () => void) => {
+            callbacks.scheduledPromptChanged.push(callback);
+            return () => {
+                callbacks.scheduledPromptChanged =
+                    callbacks.scheduledPromptChanged.filter(cb => cb !== callback);
             };
         },
         forgeTestConnection: async (host: string) => {

@@ -4,14 +4,20 @@ import { storeToRefs } from 'pinia';
 import { useConfigStore } from '../../store/config';
 import { useMascotStore } from '../../store/mascot';
 import radioIcon from '../../assets/radio_icon.svg';
+import type { ConversationKind } from '../../types/scheduled-prompt-task';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     imageGenMode: 't2i' | 'i2i' | null;
     showHistoryList: boolean;
     showTaskManagement: boolean;
     showMemoManagement: boolean;
     showMusicPlayer: boolean;
-}>();
+    conversationKind?: ConversationKind;
+    coworkUnreadCount?: number;
+}>(), {
+    conversationKind: 'chat',
+    coworkUnreadCount: 0
+});
 
 const emit = defineEmits<{
     (e: 'update:imageGenMode', value: 't2i' | 'i2i' | null): void;
@@ -21,6 +27,7 @@ const emit = defineEmits<{
     (e: 'update:showMusicPlayer', value: boolean): void;
     (e: 'clear-history'): void;
     (e: 'open-image-gen-dialog'): void;
+    (e: 'update:conversationKind', value: ConversationKind): void;
 }>();
 
 const configStore = useConfigStore();
@@ -191,12 +198,25 @@ onUnmounted(() => {
 
 <template>
     <header class="chat-header" :class="{ 'secret-mode': isSecretMode }" @mousedown="onHeaderMouseDown">
-        <span class="chat-title" :class="{ 'secret-mode': isSecretMode }">
-            {{ activeMascot ? `${activeMascot.name} Chat` : 'Mascot Chat' }}
+        <div class="chat-title" :class="{ 'secret-mode': isSecretMode }">
+            <span class="mascot-name">{{ activeMascot?.name || 'Mascot' }}</span>
+            <label class="visually-hidden" for="conversation-kind">会話種別</label>
+            <select
+                id="conversation-kind"
+                class="conversation-select"
+                :value="conversationKind"
+                @mousedown.stop
+                @change="emit('update:conversationKind', ($event.target as HTMLSelectElement).value as ConversationKind)"
+            >
+                <option value="chat">Chat</option>
+                <option value="cowork">
+                    CoWork{{ coworkUnreadCount > 0 ? ` (${coworkUnreadCount})` : '' }}
+                </option>
+            </select>
             <span v-if="isSecretMode" class="secret-badge" title="シークレットモード有効中">
                 <i class="pi pi-eye-slash"></i> Secret
             </span>
-        </span>
+        </div>
         <div class="header-actions">
             <button class="icon-btn" @click="mascotStore.setSecretMode(!isSecretMode)" :class="{ 'active-secret-btn': isSecretMode, 'secret-mode': isSecretMode }" title="シークレットモード ON/OFF">
                 <i :class="isSecretMode ? 'pi pi-eye-slash' : 'pi pi-eye'"></i>
@@ -290,9 +310,39 @@ onUnmounted(() => {
 }
 
 .chat-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-size: 14px;
     font-weight: 600;
     color: #475569;
+}
+
+.conversation-select {
+    min-height: 32px;
+    padding: 4px 28px 4px 8px;
+    border: 1px solid rgba(100, 116, 139, 0.35);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.72);
+    color: inherit;
+    cursor: pointer;
+}
+
+.conversation-select:focus-visible {
+    outline: 3px solid var(--color-primary-alpha-30);
+    outline-offset: 2px;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
 }
 
 .header-actions {

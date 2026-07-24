@@ -60,4 +60,20 @@ describe('ChatHeader', () => {
 
         expect(window.location.hash).toBe('#settings');
     });
+
+    it('会話種別をCoWorkへ切り替えると更新イベントを通知すること', async () => {
+        const wrapper = mountHeader();
+        const select = wrapper.get('#conversation-kind');
+
+        await select.setValue('cowork');
+
+        expect(wrapper.emitted('update:conversationKind')).toEqual([['cowork']]);
+    });
+
+    it('CoWorkに未読件数を表示すること', async () => {
+        const wrapper = mountHeader();
+        await wrapper.setProps({ coworkUnreadCount: 3 });
+
+        expect(wrapper.get('option[value="cowork"]').text()).toContain('CoWork (3)');
+    });
 });
