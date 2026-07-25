@@ -50,6 +50,7 @@ export interface AppConfig {
     chatBackgroundImageFit: 'cover' | 'contain' | 'fill' | 'tile';
     
     // マスコット設定
+    mascotVisible: boolean;
     mascotScale: number;
     alwaysOnTop: boolean;
     mascotBackgroundColor: string;
@@ -178,6 +179,7 @@ export const useConfigStore = defineStore('config', () => {
     const chatBackgroundImageFit = ref<'cover' | 'contain' | 'fill' | 'tile'>('cover');
     
     // マスコット設定
+    const mascotVisible = ref(true);
     const mascotScale = ref(1.0);
     const alwaysOnTop = ref(true);
     const mascotBackgroundColor = ref('#ffffff');
@@ -352,6 +354,7 @@ export const useConfigStore = defineStore('config', () => {
             chatBackgroundImageOpacity.value = configData.chatBackgroundImageOpacity !== undefined ? Number(configData.chatBackgroundImageOpacity) : 1.0;
             chatBackgroundImageFit.value = configData.chatBackgroundImageFit || 'cover';
             
+            mascotVisible.value = configData.mascotVisible !== undefined ? !!configData.mascotVisible : true;
             mascotScale.value = configData.mascotScale !== undefined ? Number(configData.mascotScale) : 1.0;
             alwaysOnTop.value = configData.alwaysOnTop !== undefined ? !!configData.alwaysOnTop : true;
             mascotBackgroundColor.value = configData.mascotBackgroundColor || '#ffffff';
@@ -482,6 +485,8 @@ export const useConfigStore = defineStore('config', () => {
             chatBackgroundImageOpacity.value = bgOpacity ? parseFloat(bgOpacity) : 1.0;
             chatBackgroundImageFit.value = (localStorage.getItem('chatBackgroundImageFit') as any) || 'cover';
 
+            const visible = localStorage.getItem('mascotVisible');
+            mascotVisible.value = visible !== 'false';
             const scale = localStorage.getItem('mascotScale');
             mascotScale.value = scale ? parseFloat(scale) : 1.0;
             alwaysOnTop.value = localStorage.getItem('alwaysOnTop') !== 'false';
@@ -618,6 +623,7 @@ export const useConfigStore = defineStore('config', () => {
             chatBackgroundImage: chatBackgroundImage.value,
             chatBackgroundImageOpacity: Number(chatBackgroundImageOpacity.value),
             chatBackgroundImageFit: chatBackgroundImageFit.value,
+            mascotVisible: mascotVisible.value,
             mascotScale: Number(mascotScale.value),
             alwaysOnTop: alwaysOnTop.value,
             mascotBackgroundColor: mascotBackgroundColor.value,
@@ -770,6 +776,7 @@ export const useConfigStore = defineStore('config', () => {
         safeSetItem('chatBackgroundImage', stripDataUrl(chatBackgroundImage.value));
         safeSetItem('chatBackgroundImageOpacity', chatBackgroundImageOpacity.value.toString());
         safeSetItem('chatBackgroundImageFit', chatBackgroundImageFit.value);
+        safeSetItem('mascotVisible', mascotVisible.value.toString());
         safeSetItem('mascotScale', mascotScale.value.toString());
         safeSetItem('alwaysOnTop', alwaysOnTop.value.toString());
         safeSetItem('mascotBackgroundColor', mascotBackgroundColor.value);
@@ -894,6 +901,7 @@ export const useConfigStore = defineStore('config', () => {
         if (newConfig.chatBackgroundImage !== undefined) chatBackgroundImage.value = newConfig.chatBackgroundImage;
         if (newConfig.chatBackgroundImageOpacity !== undefined) chatBackgroundImageOpacity.value = Number(newConfig.chatBackgroundImageOpacity);
         if (newConfig.chatBackgroundImageFit !== undefined) chatBackgroundImageFit.value = newConfig.chatBackgroundImageFit as any;
+        if (newConfig.mascotVisible !== undefined) mascotVisible.value = !!newConfig.mascotVisible;
         if (newConfig.mascotScale !== undefined) mascotScale.value = Number(newConfig.mascotScale);
         if (newConfig.alwaysOnTop !== undefined) alwaysOnTop.value = !!newConfig.alwaysOnTop;
         if (newConfig.mascotBackgroundColor !== undefined) mascotBackgroundColor.value = newConfig.mascotBackgroundColor;
@@ -992,6 +1000,7 @@ export const useConfigStore = defineStore('config', () => {
         chatBackgroundImage,
         chatBackgroundImageOpacity,
         chatBackgroundImageFit,
+        mascotVisible,
         mascotScale,
         alwaysOnTop,
         mascotBackgroundColor,

@@ -79,6 +79,14 @@ export function registerConfigHandlers(config: AppConfig) {
         // 2. マスコットウィンドウへの伝達と最前面制御 (レベル 'screen-saver' を指定)
         const mascotWin = getMascotWindow();
         if (mascotWin && !mascotWin.isDestroyed()) {
+            if (previousConfig.mascotVisible !== currentConfig.mascotVisible) {
+                if (currentConfig.mascotVisible) {
+                    mascotWin.showInactive();
+                } else {
+                    mascotWin.hide();
+                }
+            }
+
             const prevAlwaysOnTop = !!previousConfig.alwaysOnTop;
             const nextAlwaysOnTop = !!currentConfig.alwaysOnTop;
 

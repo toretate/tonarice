@@ -33,7 +33,7 @@ const emit = defineEmits<{
 const configStore = useConfigStore();
 const mascotStore = useMascotStore();
 
-const { activeMascot, useTts } = storeToRefs(configStore);
+const { activeMascot, mascotVisible, useTts, windowMode } = storeToRefs(configStore);
 const { isSecretMode, isRadioMode } = storeToRefs(mascotStore);
 
 const showImageMenu = ref(false);
@@ -96,6 +96,12 @@ const toggleHistory = () => {
 const toggleTts = () => {
     configStore.updateConfig({ useTts: !useTts.value });
     configStore.saveConfig();
+};
+
+const toggleMascot = () => {
+    configStore.updateConfig({ mascotVisible: !mascotVisible.value });
+    void configStore.saveConfig();
+    closeMobileMenu();
 };
 
 const toggleRadio = () => {
@@ -218,6 +224,18 @@ onUnmounted(() => {
             </span>
         </div>
         <div class="header-actions">
+            <button
+                v-if="windowMode !== 'compact'"
+                type="button"
+                class="icon-btn"
+                aria-label="マスコット表示を切り替える"
+                :aria-pressed="mascotVisible"
+                :class="{ 'active-btn': mascotVisible, 'secret-mode': isSecretMode }"
+                title="マスコット表示 ON/OFF"
+                @click="toggleMascot"
+            >
+                <i aria-hidden="true" :class="mascotVisible ? 'pi pi-user' : 'pi pi-user-minus'"></i>
+            </button>
             <button class="icon-btn" aria-label="シークレットモードを切り替える" :aria-pressed="isSecretMode" @click="mascotStore.setSecretMode(!isSecretMode)" :class="{ 'active-secret-btn': isSecretMode, 'secret-mode': isSecretMode }" title="シークレットモード ON/OFF">
                 <i aria-hidden="true" :class="isSecretMode ? 'pi pi-eye-slash' : 'pi pi-eye'"></i>
             </button>
@@ -287,6 +305,7 @@ onUnmounted(() => {
                     class="mobile-actions-panel"
                     :class="{ 'secret-mode': isSecretMode }"
                 >
+                    <button v-if="windowMode !== 'compact'" type="button" :class="{ active: mascotVisible }" @click="toggleMascot"><i :class="mascotVisible ? 'pi pi-user' : 'pi pi-user-minus'"></i><span>マスコット表示</span><i v-if="mascotVisible" class="pi pi-check state-check"></i></button>
                     <button type="button" @click="setImageGenMode('t2i'); closeMobileMenu()"><i class="pi pi-pencil"></i><span>テキストから画像生成</span></button>
                     <button type="button" @click="setImageGenMode('i2i'); closeMobileMenu()"><i class="pi pi-image"></i><span>画像から画像生成</span></button>
                     <button type="button" @click="openImageGenDialog"><i class="pi pi-sliders-h"></i><span>画像生成設定</span></button>

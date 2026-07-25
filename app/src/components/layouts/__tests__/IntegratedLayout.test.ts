@@ -51,6 +51,8 @@ describe('IntegratedLayout.vue - 統合ウィンドウのテスト', () => {
             onChatToggled: vi.fn().mockReturnValue(() => {}),
             onEmotionChanged: vi.fn().mockReturnValue(() => {}),
             onConfigUpdated: vi.fn().mockReturnValue(() => {}),
+            onScheduledPromptChanged: vi.fn().mockReturnValue(() => {}),
+            getChatHistory: vi.fn().mockResolvedValue(null),
         } as any;
     });
 
@@ -141,6 +143,19 @@ describe('IntegratedLayout.vue - 統合ウィンドウのテスト', () => {
         musicStore.contentPanelExpanded = true;
         await wrapper.vm.$nextTick();
         expect(chatSection.classes()).toContain('has-expanded-music-widget');
+    });
+
+    it('マスコット表示をOFFにすると表示エリアとスプリッターを畳むこと', async () => {
+        const configStore = useConfigStore();
+        configStore.windowMode = 'integrated';
+        const wrapper = mount(IntegratedLayout);
+
+        configStore.mascotVisible = false;
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.find('.mascot-section').exists()).toBe(false);
+        expect(wrapper.find('.section-splitter').exists()).toBe(false);
+        expect(wrapper.find('.chat-section').exists()).toBe(true);
     });
 
     describe('チャット欄の幅調整スプリッター', () => {

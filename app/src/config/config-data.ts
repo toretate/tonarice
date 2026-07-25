@@ -5,6 +5,7 @@ import { DEFAULT_ACCENT_COLOR } from './theme';
 export interface ConfigData {
     mascotX: number;
     mascotY: number;
+    mascotVisible: boolean;
     chatVisible: boolean;
     alwaysOnTop: boolean;
     selectedEngine: string;
@@ -116,6 +117,7 @@ export interface ConfigData {
 export const defaultData: ConfigData = {
     mascotX: -1,
     mascotY: -1,
+    mascotVisible: true,
     chatVisible: false,
     alwaysOnTop: true,
     selectedEngine: 'gemini',
