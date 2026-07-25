@@ -156,6 +156,7 @@ describe('IntegratedLayout.vue - 統合ウィンドウのテスト', () => {
         expect(wrapper.find('.mascot-section').exists()).toBe(false);
         expect(wrapper.find('.section-splitter').exists()).toBe(false);
         expect(wrapper.find('.chat-section').exists()).toBe(true);
+        expect(wrapper.get('.chat-section').classes()).toContain('is-mascot-hidden');
     });
 
     describe('チャット欄の幅調整スプリッター', () => {

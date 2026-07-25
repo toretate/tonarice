@@ -156,6 +156,7 @@ const integratedBackgroundStyle = computed(() => {
             class="chat-section"
             :class="{
                 'is-compact': windowMode === 'compact',
+                'is-mascot-hidden': windowMode !== 'compact' && !mascotVisible,
                 'has-music-widget': showMusicWidget,
                 'has-expanded-music-widget': showMusicWidget && (playlistExpanded || contentPanelExpanded)
             }"
@@ -249,6 +250,10 @@ const integratedBackgroundStyle = computed(() => {
 .chat-section.is-compact {
     flex: 1;
     padding: 0;
+}
+
+.chat-section.is-mascot-hidden {
+    flex: 1 1 100%;
 }
 
 /* 下部プレイヤーの表示中はチャット入力欄まで含めて重ならない高さに収める */
