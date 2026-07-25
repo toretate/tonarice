@@ -86,12 +86,14 @@ export function useChatConnection(params: {
             const pendingMessage = messages.value.find(message => message.id === pendingAssistantMessageId);
             if (pendingMessage) {
                 pendingMessage.text = text;
+                pendingMessage.timestamp = Date.now();
                 return;
             }
         }
         for (let i = messages.value.length - 1; i >= 0; i--) {
             if (messages.value[i].sender === 'mascot') {
                 messages.value[i].text = text;
+                messages.value[i].timestamp = Date.now();
                 break;
             }
         }
@@ -363,6 +365,7 @@ export function useChatConnection(params: {
                     id: Date.now(),
                     sender: 'user',
                     text: userQuery,
+                    timestamp: Date.now(),
                     attachments: attachments.length > 0 ? attachments : undefined,
                     deliveryStatus: 'sending'
                 };
@@ -486,7 +489,8 @@ export function useChatConnection(params: {
             aiMessage = {
                 id: Date.now() + 1,
                 sender: 'mascot',
-                text: '考え中...'
+                text: '考え中...',
+                timestamp: Date.now()
             };
             messages.value.push(aiMessage);
         }
