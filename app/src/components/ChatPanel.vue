@@ -25,8 +25,18 @@ import { DEFAULT_ACCENT_COLOR } from '../config/theme';
 import { useResizableFrame } from '../composables/useResizableFrame';
 import WidgetFrame from './common/WidgetFrame.vue';
 import { useChatVisualViewport } from './chatpanel/useChatVisualViewport';
+import CoWorkPanel from './cowork/CoWorkPanel.vue';
+import type { ConversationKind } from '../types/scheduled-prompt-task';
 
 const inputText = ref('');
+const storedConversationKind = typeof window === 'undefined'
+    ? null
+    : window.localStorage.getItem('tonarice-conversation-kind');
+const conversationKind = ref<ConversationKind>(
+    storedConversationKind === 'cowork' ? 'cowork' : 'chat'
+);
+const coworkUnreadCount = ref(0);
+let unsubscribeScheduledPromptChanged: (() => void) | undefined;
 const messageListRef = ref<any>(null);
 const showTaskManagement = ref(false);
 const showMemoManagement = ref(false);
@@ -39,6 +49,18 @@ const mascotStore = useMascotStore();
 const taskStore = useTaskStore();
 const memoStore = useMemoStore();
 const musicStore = useMusicStore();
+
+watch(conversationKind, (kind) => {
+    if (typeof window !== 'undefined') {
+        window.localStorage.setItem('tonarice-conversation-kind', kind);
+    }
+    if (kind === 'cowork') coworkUnreadCount.value = 0;
+});
+
+const handleConversationStorage = (event: StorageEvent) => {
+    if (event.key !== 'tonarice-conversation-kind') return;
+    conversationKind.value = event.newValue === 'cowork' ? 'cowork' : 'chat';
+};
 
 // タスク管理ウィジェット表示のトグル制御
 watch(showTaskManagement, (newVal) => {
@@ -639,6 +661,8 @@ onUnmounted(() => {
         unsubscribeConfig();
     }
     stopActiveTalkTimer();
+    window.removeEventListener('storage', handleConversationStorage);
+    unsubscribeScheduledPromptChanged?.();
 });
 
 const focusWindow = () => {
@@ -646,6 +670,15 @@ const focusWindow = () => {
         window.electronAPI.focusWindow();
     }
 };
+
+onMounted(() => {
+    window.addEventListener('storage', handleConversationStorage);
+    unsubscribeScheduledPromptChanged = window.electronAPI?.onScheduledPromptChanged(() => {
+        if (conversationKind.value === 'chat') {
+            coworkUnreadCount.value++;
+        }
+    });
+});
 </script>
 
 <template>
@@ -654,6 +687,8 @@ const focusWindow = () => {
         <div class="chat-background" :style="chatBackgroundStyle"></div>
         <!-- グラスモーフィズム調のヘッダー -->
         <ChatHeader
+            v-model:conversationKind="conversationKind"
+            :coworkUnreadCount="coworkUnreadCount"
             v-model:imageGenMode="imageGenMode"
             v-model:showHistoryList="showHistoryList"
             v-model:showTaskManagement="showTaskManagement"
@@ -663,17 +698,19 @@ const focusWindow = () => {
             @open-image-gen-dialog="imageGenDialogVisible = true"
         />
 
+        <CoWorkPanel v-if="conversationKind === 'cowork'" />
+
         <!-- コンパクトモードでは操作パネル直下に1行ミニプレイヤーを重ねる -->
-        <MusicWidget v-if="showMusicPlayer && windowMode === 'compact'" />
+        <MusicWidget v-if="conversationKind === 'chat' && showMusicPlayer && windowMode === 'compact'" />
 
         <!-- コンパクト表示かつタスク表示ONのときは画面切り替え -->
-        <div v-if="showTaskManagement && windowMode === 'compact'" class="task-management-section">
+        <div v-if="conversationKind === 'chat' && showTaskManagement && windowMode === 'compact'" class="task-management-section">
             <TaskManagement />
         </div>
-        <div v-else-if="showMemoManagement && windowMode === 'compact'" class="task-management-section">
+        <div v-else-if="conversationKind === 'chat' && showMemoManagement && windowMode === 'compact'" class="task-management-section">
             <MemoWidget />
         </div>
-        <template v-else>
+        <template v-else-if="conversationKind === 'chat'">
             <!-- メッセージスクロール領域 -->
             <MessageList
                 v-if="!showHistoryList"
@@ -732,6 +769,7 @@ const focusWindow = () => {
 .chat-wrapper {
     position: relative;
     z-index: 1;
+    container: chat-panel / inline-size;
     width: 100%;
     height: 100%;
     display: flex;

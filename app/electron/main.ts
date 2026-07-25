@@ -15,6 +15,7 @@ import { registerHistoryHandlers } from './ipc-handlers/history-handler';
 import { registerLifecycleHandlers } from './ipc-handlers/lifecycle-handler';
 import { registerAuthHandlers } from './ipc-handlers/auth-handler';
 import { registerScheduleHandlers } from './ipc-handlers/schedule-handler';
+import { registerScheduledPromptHandlers, stopScheduledPromptScheduler } from './ipc-handlers/scheduled-prompt-handler';
 import { registerConfigHandlers } from './ipc-handlers/config-handler';
 import { registerWindowHandlers } from './ipc-handlers/window-handler';
 import { initSettingsWindow, getSettingsWindow, createSettingsWindow, openSettingsWindow } from './window/settings-window';
@@ -224,6 +225,7 @@ app.whenReady().then(async () => {
     registerLifecycleHandlers();
     registerAuthHandlers(() => config.get());
     registerScheduleHandlers();
+    registerScheduledPromptHandlers(() => config.get());
     registerConfigHandlers(config);
     registerWindowHandlers(config);
 
@@ -335,5 +337,6 @@ app.on('window-all-closed', () => {
 });
 
 app.on('will-quit', () => {
+    stopScheduledPromptScheduler();
     stopNitroServer();
 });
