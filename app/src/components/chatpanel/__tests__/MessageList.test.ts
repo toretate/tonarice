@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 import { mount } from '@vue/test-utils';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import MessageList from '../MessageList.vue';
 
 describe('MessageList TTS読み辞書メニュー', () => {
     afterEach(() => {
+        vi.useRealTimers();
         window.getSelection()?.removeAllRanges();
     });
 
@@ -109,5 +110,36 @@ describe('MessageList TTS読み辞書メニュー', () => {
         expect(wrapper.findAll('li').map(item => item.text())).toEqual(['脆弱性を検出', 'リスクを管理']);
         expect(wrapper.text()).not.toContain('###');
         expect(wrapper.text()).not.toContain('**');
+    });
+
+    test('formatMessageTime_到着日と現在日の関係に応じた形式で表示すること', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 6, 25, 12, 0));
+        const wrapper = mount(MessageList, {
+            props: {
+                messages: [
+                    { id: 1, sender: 'mascot', text: '今日', timestamp: new Date(2026, 6, 25, 9, 7).getTime() },
+                    { id: 2, sender: 'mascot', text: '同月', timestamp: new Date(2026, 6, 23, 9, 7).getTime() },
+                    { id: 3, sender: 'mascot', text: '別月', timestamp: new Date(2026, 5, 30, 9, 7).getTime() },
+                    { id: 4, sender: 'mascot', text: '別年', timestamp: new Date(2025, 11, 31, 9, 7).getTime() }
+                ],
+                isSecretMode: false
+            }
+        });
+
+        const times = wrapper.findAll('time.message-timestamp');
+        expect(times.map(time => time.text())).toEqual([
+            '09:07',
+            '07/23 09:07',
+            '06/30',
+            '2025/12/31'
+        ]);
+        expect(times.map(time => time.attributes('title'))).toEqual([
+            '2026/07/25 09:07',
+            '2026/07/23 09:07',
+            '2026/06/30 09:07',
+            '2025/12/31 09:07'
+        ]);
+        expect(times[0].attributes('datetime')).toBe(new Date(2026, 6, 25, 9, 7).toISOString());
     });
 });
