@@ -130,7 +130,7 @@ describe('MessageList TTS読み辞書メニュー', () => {
         const times = wrapper.findAll('time.message-timestamp');
         expect(times.map(time => time.text())).toEqual([
             '09:07',
-            '23 09:07',
+            '07/23 09:07',
             '06/30',
             '2025/12/31'
         ]);

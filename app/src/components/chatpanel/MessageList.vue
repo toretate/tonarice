@@ -76,7 +76,7 @@ const formatMessageTime = (timestamp: number) => {
         return `${pad(month)}/${pad(day)}`;
     }
     if (day !== today.getDate()) {
-        return `${pad(day)} ${pad(hours)}:${pad(minutes)}`;
+        return `${pad(month)}/${pad(day)} ${pad(hours)}:${pad(minutes)}`;
     }
     return `${pad(hours)}:${pad(minutes)}`;
 };
