@@ -142,12 +142,12 @@ const integratedBackgroundStyle = computed(() => {
         <div class="integrated-background" :style="integratedBackgroundStyle"></div>
 
         <!-- マスコット表示エリア -->
-        <div v-if="windowMode !== 'compact' && mascotVisible" class="mascot-section">
-            <MascotViewer />
+        <div v-if="windowMode !== 'compact'" class="mascot-section">
+            <MascotViewer v-show="mascotVisible" />
         </div>
         <!-- チャット欄の幅を調整するスプリッター -->
         <div
-            v-if="windowMode !== 'compact' && mascotVisible"
+            v-if="windowMode !== 'compact'"
             class="section-splitter"
             @pointerdown="onSplitterPointerDown"
         ></div>
@@ -156,7 +156,6 @@ const integratedBackgroundStyle = computed(() => {
             class="chat-section"
             :class="{
                 'is-compact': windowMode === 'compact',
-                'is-mascot-hidden': windowMode !== 'compact' && !mascotVisible,
                 'has-music-widget': showMusicWidget,
                 'has-expanded-music-widget': showMusicWidget && (playlistExpanded || contentPanelExpanded)
             }"
@@ -250,10 +249,6 @@ const integratedBackgroundStyle = computed(() => {
 .chat-section.is-compact {
     flex: 1;
     padding: 0;
-}
-
-.chat-section.is-mascot-hidden {
-    flex: 1 1 100%;
 }
 
 /* 下部プレイヤーの表示中はチャット入力欄まで含めて重ならない高さに収める */

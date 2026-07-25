@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import IntegratedLayout from '../IntegratedLayout.vue';
+import MascotViewer from '../../MascotViewer.vue';
 import { useConfigStore } from '../../../store/config';
 import { useMusicStore } from '../../../store/music';
 
@@ -145,7 +146,7 @@ describe('IntegratedLayout.vue - 統合ウィンドウのテスト', () => {
         expect(chatSection.classes()).toContain('has-expanded-music-widget');
     });
 
-    it('マスコット表示をOFFにすると表示エリアとスプリッターを畳むこと', async () => {
+    it('マスコット表示をOFFにしても表示エリアとスプリッターの幅を維持すること', async () => {
         const configStore = useConfigStore();
         configStore.windowMode = 'integrated';
         const wrapper = mount(IntegratedLayout);
@@ -153,10 +154,16 @@ describe('IntegratedLayout.vue - 統合ウィンドウのテスト', () => {
         configStore.mascotVisible = false;
         await wrapper.vm.$nextTick();
 
-        expect(wrapper.find('.mascot-section').exists()).toBe(false);
-        expect(wrapper.find('.section-splitter').exists()).toBe(false);
+        expect(wrapper.find('.mascot-section').exists()).toBe(true);
+        expect(wrapper.find('.section-splitter').exists()).toBe(true);
         expect(wrapper.find('.chat-section').exists()).toBe(true);
-        expect(wrapper.get('.chat-section').classes()).toContain('is-mascot-hidden');
+        expect(wrapper.findComponent(MascotViewer).exists()).toBe(true);
+        expect(wrapper.get('.mascot-wrapper').attributes('style')).toContain('display: none');
+
+        configStore.mascotVisible = true;
+        await wrapper.vm.$nextTick();
+
+        expect(wrapper.get('.mascot-wrapper').attributes('style') || '').not.toContain('display: none');
     });
 
     describe('チャット欄の幅調整スプリッター', () => {

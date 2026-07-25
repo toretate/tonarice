@@ -38,6 +38,7 @@ const { isSecretMode, isRadioMode } = storeToRefs(mascotStore);
 
 const showImageMenu = ref(false);
 const showMobileMenu = ref(false);
+const isMascotVisibilitySaving = ref(false);
 
 const toggleImageMenu = (e: MouseEvent) => {
     e.stopPropagation();
@@ -98,10 +99,17 @@ const toggleTts = () => {
     configStore.saveConfig();
 };
 
-const toggleMascot = () => {
+const toggleMascot = async () => {
+    if (isMascotVisibilitySaving.value) return;
+
+    isMascotVisibilitySaving.value = true;
     configStore.updateConfig({ mascotVisible: !mascotVisible.value });
-    void configStore.saveConfig();
     closeMobileMenu();
+    try {
+        await configStore.saveConfig();
+    } finally {
+        isMascotVisibilitySaving.value = false;
+    }
 };
 
 const toggleRadio = () => {
@@ -230,7 +238,9 @@ onUnmounted(() => {
                 class="icon-btn"
                 aria-label="マスコット表示を切り替える"
                 :aria-pressed="mascotVisible"
+                :aria-busy="isMascotVisibilitySaving"
                 :class="{ 'active-btn': mascotVisible, 'secret-mode': isSecretMode }"
+                :disabled="isMascotVisibilitySaving"
                 title="マスコット表示 ON/OFF"
                 @click="toggleMascot"
             >
@@ -305,7 +315,7 @@ onUnmounted(() => {
                     class="mobile-actions-panel"
                     :class="{ 'secret-mode': isSecretMode }"
                 >
-                    <button v-if="windowMode !== 'compact'" type="button" :class="{ active: mascotVisible }" @click="toggleMascot"><i :class="mascotVisible ? 'pi pi-user' : 'pi pi-user-minus'"></i><span>マスコット表示</span><i v-if="mascotVisible" class="pi pi-check state-check"></i></button>
+                    <button v-if="windowMode !== 'compact'" type="button" :class="{ active: mascotVisible }" :disabled="isMascotVisibilitySaving" @click="toggleMascot"><i :class="mascotVisible ? 'pi pi-user' : 'pi pi-user-minus'"></i><span>マスコット表示</span><i v-if="mascotVisible" class="pi pi-check state-check"></i></button>
                     <button type="button" @click="setImageGenMode('t2i'); closeMobileMenu()"><i class="pi pi-pencil"></i><span>テキストから画像生成</span></button>
                     <button type="button" @click="setImageGenMode('i2i'); closeMobileMenu()"><i class="pi pi-image"></i><span>画像から画像生成</span></button>
                     <button type="button" @click="openImageGenDialog"><i class="pi pi-sliders-h"></i><span>画像生成設定</span></button>
