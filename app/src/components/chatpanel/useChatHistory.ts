@@ -14,6 +14,8 @@ export interface Message {
     id: number;
     sender: 'user' | 'mascot';
     text: string;
+    /** メッセージが画面へ追加された時刻（Unixミリ秒） */
+    timestamp?: number;
     attachments?: MessageAttachment[];
     /** ユーザーメッセージの送信状態。成功後は未設定に戻す。 */
     deliveryStatus?: 'sending' | 'failed';
@@ -53,7 +55,31 @@ export function useChatHistory(scrollToBottom: () => void) {
     const isHistoryLoaded = ref(false);
 
     const getDefaultMessage = () => {
-        return { id: 1, sender: 'mascot' as const, text: 'こんにちは！今日はどんなお話をしますか？' };
+        return {
+            id: 1,
+            sender: 'mascot' as const,
+            text: 'こんにちは！今日はどんなお話をしますか？',
+            timestamp: Date.now()
+        };
+    };
+
+    // 旧形式の履歴にも表示時刻を補い、読み込み後は全メッセージで時刻を表示できるようにする
+    const normalizeMessageTimestamps = (history: Record<string, MascotHistory>) => {
+        Object.values(history).forEach((mascotHistory) => {
+            const allSessions = [
+                ...(mascotHistory.sessions || []),
+                ...(mascotHistory.secretSessions || [])
+            ];
+            allSessions.forEach((session) => {
+                session.messages.forEach((message) => {
+                    if (message.timestamp === undefined) {
+                        message.timestamp = message.id >= 946684800000
+                            ? message.id
+                            : session.timestamp;
+                    }
+                });
+            });
+        });
     };
 
     const createNewSession = (isSecret = false): ChatSession => {
@@ -136,6 +162,7 @@ export function useChatHistory(scrollToBottom: () => void) {
             try {
                 const history = await window.electronAPI.getChatHistory();
                 allHistories.value = history || {};
+                normalizeMessageTimestamps(allHistories.value);
             } catch (e) {
                 console.error('Failed to load chat history:', e);
                 allHistories.value = {};

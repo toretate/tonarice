@@ -126,4 +126,28 @@ describe('useChatHistory.ts のテスト', () => {
         // saveChatHistory が呼び出されたこと
         expect(window.electronAPI!.saveChatHistory).toHaveBeenCalled();
     });
+
+    it('loadHistory_旧形式メッセージの到着時刻を補完すること', async () => {
+        const messageId = new Date(2026, 6, 25, 9, 7).getTime();
+        window.electronAPI!.getChatHistory = vi.fn().mockResolvedValue({
+            default: {
+                activeSessionId: 'session-1',
+                sessions: [{
+                    id: 'session-1',
+                    title: '既存の話題',
+                    timestamp: messageId + 1000,
+                    messages: [
+                        { id: messageId, sender: 'user', text: '既存メッセージ' },
+                        { id: 1, sender: 'mascot', text: '初期メッセージ' }
+                    ]
+                }]
+            }
+        });
+
+        const history = useChatHistory(vi.fn());
+        await history.loadHistory();
+
+        expect(history.messages.value[0].timestamp).toBe(messageId);
+        expect(history.messages.value[1].timestamp).toBe(messageId + 1000);
+    });
 });

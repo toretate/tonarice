@@ -7,6 +7,7 @@ const props = defineProps<{
         id: number;
         sender: 'user' | 'mascot';
         text: string;
+        timestamp?: number;
         deliveryStatus?: 'sending' | 'failed';
         deliveryError?: string;
         attachments?: Array<{
@@ -56,6 +57,34 @@ const formatFileSize = (bytes?: number) => {
     if (kb < 1024) return kb.toFixed(1) + ' KB';
     const mb = kb / 1024;
     return mb.toFixed(1) + ' MB';
+};
+
+const formatMessageTime = (timestamp: number) => {
+    const messageDate = new Date(timestamp);
+    const today = new Date();
+    const year = messageDate.getFullYear();
+    const month = messageDate.getMonth() + 1;
+    const day = messageDate.getDate();
+    const hours = messageDate.getHours();
+    const minutes = messageDate.getMinutes();
+    const pad = (value: number) => String(value).padStart(2, '0');
+
+    if (year !== today.getFullYear()) {
+        return `${year}/${pad(month)}/${pad(day)}`;
+    }
+    if (messageDate.getMonth() !== today.getMonth()) {
+        return `${pad(month)}/${pad(day)}`;
+    }
+    if (day !== today.getDate()) {
+        return `${pad(day)} ${pad(hours)}:${pad(minutes)}`;
+    }
+    return `${pad(hours)}:${pad(minutes)}`;
+};
+
+const formatMessageDateTime = (timestamp: number) => {
+    const date = new Date(timestamp);
+    const pad = (value: number) => String(value).padStart(2, '0');
+    return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 };
 
 // --- カスタムコンテキストメニューの制御 ---
@@ -264,6 +293,14 @@ const registerTtsReadings = () => {
                 <span v-if="msg.sender === 'user' && msg.deliveryStatus === 'failed'" class="delivery-error-label" :title="msg.deliveryError">
                     送信失敗
                 </span>
+                <time
+                    v-if="msg.timestamp !== undefined"
+                    class="message-timestamp"
+                    :datetime="new Date(msg.timestamp).toISOString()"
+                    :title="formatMessageDateTime(msg.timestamp)"
+                >
+                    {{ formatMessageTime(msg.timestamp) }}
+                </time>
             </div>
         </div>
     </div>
@@ -335,6 +372,7 @@ const registerTtsReadings = () => {
     display: flex;
     align-items: center;
     gap: 6px;
+    padding-bottom: 16px;
 }
 
 .message-row.user .bubble-wrapper {
@@ -401,6 +439,28 @@ const registerTtsReadings = () => {
     color: #dc2626;
     font-size: 10px;
     white-space: nowrap;
+}
+
+.message-timestamp {
+    position: absolute;
+    bottom: 0;
+    color: var(--color-ink-subtle);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.message-row.user .message-timestamp {
+    right: 0;
+}
+
+.message-row.mascot .message-timestamp {
+    left: 0;
+}
+
+.message-container.secret-mode .message-timestamp {
+    color: var(--theme-accent-300);
 }
 
 .bubble {

@@ -539,14 +539,16 @@ const generateImageFlow = async (isI2i = false) => {
     messages.value.push({
         id: Date.now(),
         sender: 'user',
-        text: userPrompt
+        text: userPrompt,
+        timestamp: Date.now()
     });
 
     const aiMessageId = Date.now() + 1;
     messages.value.push({
         id: aiMessageId,
         sender: 'mascot',
-        text: isI2i ? '画像を編集しています...' : '画像を生成しています...'
+        text: isI2i ? '画像を編集しています...' : '画像を生成しています...',
+        timestamp: Date.now()
     });
 
     mascotStore.setLoading(true);
