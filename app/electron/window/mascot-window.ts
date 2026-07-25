@@ -59,6 +59,7 @@ export function createMascotWindow(onMove?: () => void): BrowserWindow {
         y: initialY,
         transparent: true,
         frame: false,
+        show: configData.mascotVisible,
         alwaysOnTop: configData.alwaysOnTop,
         resizable: false,
         hasShadow: false,

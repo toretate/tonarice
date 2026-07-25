@@ -26,7 +26,8 @@ const {
     useServer,
     serverHost,
     serverPort,
-    integratedChatRatio
+    integratedChatRatio,
+    mascotVisible
 } = storeToRefs(configStore);
 
 const { showTaskWidget } = storeToRefs(taskStore);
@@ -142,7 +143,7 @@ const integratedBackgroundStyle = computed(() => {
 
         <!-- マスコット表示エリア -->
         <div v-if="windowMode !== 'compact'" class="mascot-section">
-            <MascotViewer />
+            <MascotViewer v-show="mascotVisible" />
         </div>
         <!-- チャット欄の幅を調整するスプリッター -->
         <div

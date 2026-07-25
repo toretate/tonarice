@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ChatHeader from '../ChatHeader.vue';
+import { useConfigStore } from '../../../store/config';
 
 const mountHeader = () => mount(ChatHeader, {
     props: {
@@ -94,6 +95,7 @@ describe('ChatHeader', () => {
     it('アイコン操作にアクセシブルな名前と選択状態が設定されること', () => {
         const wrapper = mountHeader();
         const statefulLabels = [
+            'マスコット表示を切り替える',
             'シークレットモードを切り替える',
             '音声読み上げを切り替える',
             'ラジオモードを切り替える',
@@ -108,11 +110,26 @@ describe('ChatHeader', () => {
         }
 
         expect(wrapper.get('[aria-label="メモを切り替える"]').attributes('aria-pressed')).toBe('false');
+        expect(wrapper.get('[aria-label="マスコット表示を切り替える"]').attributes('aria-pressed')).toBe('true');
         expect(wrapper.get('[aria-label="音楽プレイヤーを切り替える"]').attributes('aria-pressed')).toBe('false');
         expect(wrapper.get('[aria-label="タスク管理を切り替える"]').attributes('aria-pressed')).toBe('false');
         expect(wrapper.get('[aria-label="対話履歴を切り替える"]').attributes('aria-pressed')).toBe('false');
         expect(wrapper.get('[aria-label="画像生成・編集メニューを開く"]').attributes('aria-expanded')).toBe('false');
         expect(wrapper.get('[aria-label="新しい話題を開始する"]').element.tagName).toBe('BUTTON');
         expect(wrapper.get('[aria-label="設定を開く"]').element.tagName).toBe('BUTTON');
+    });
+
+    it('toggleMascot - マスコット表示ボタンで表示状態を切り替えて保存すること', async () => {
+        const configStore = useConfigStore();
+        configStore.windowMode = 'integrated';
+        configStore.isLoaded = true;
+        const saveSpy = vi.spyOn(configStore, 'saveConfig').mockResolvedValue(undefined as any);
+        const wrapper = mountHeader();
+
+        await wrapper.get('[aria-label="マスコット表示を切り替える"]').trigger('click');
+
+        expect(configStore.mascotVisible).toBe(false);
+        expect(saveSpy).toHaveBeenCalledTimes(1);
+        expect(wrapper.get('[aria-label="マスコット表示を切り替える"]').attributes('aria-pressed')).toBe('false');
     });
 });
