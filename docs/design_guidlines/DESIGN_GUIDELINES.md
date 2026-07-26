@@ -197,6 +197,78 @@ AIプロバイダー選択など、テキストに加えてアイコンを併記
 設定画面などの左側サイドバーで、カテゴリ間の切り替えを行うナビゲーションリストです。
 （詳細な状態マトリクスの視覚例および実装仕様については、[縦ナビゲーションリスト設計仕様書](VERTICAL_NAVIGATION.md) を参照してください）
 
+#### 5.2.3. 横タブナビゲーション (Horizontal Tabs)
+
+設定パネル内で同一階層の内容を切り替える場合は、チャット AI 設定と同じ下線型タブを使用します。角丸ボタン型や背景色で選択状態を表すタブを個別に作成せず、次の仕様へ統一してください。
+
+*   **使用箇所**:
+    *   チャット AI 設定
+    *   ウィンドウ設定
+    *   マスコット詳細設定
+    *   その他、設定パネル内で同一階層の内容を切り替える箇所
+*   **タブコンテナ**:
+    *   横並びのフレックスレイアウトとする。
+    *   タブ間の間隔は `1.5rem`。
+    *   コンテンツとの下余白は `1.5rem`。
+    *   タブ列全体の下線は `2px`、色は `#e2e8f0`。
+    *   幅が不足する場合は折り返さず、横スクロールで全タブへアクセスできるようにする。
+*   **タブ項目**:
+    *   背景は透明、通常の枠線と角丸は付けない。
+    *   上下 `0.75rem`、左右 `0.5rem` の余白を取る。
+    *   フォントサイズは `14px`、ウェイトは `600`。
+    *   文字色は通常時 `#64748b`、ホバー時と選択時は `var(--color-primary)`。
+    *   アイコンを表示する場合はラベルとの間隔を `0.5rem` とし、画像アイコンは `16px × 16px` を基準とする。
+*   **選択状態**:
+    *   選択タブの下線だけを `var(--color-primary)` に変更する。
+    *   下線の太さは必ず `2px` とし、ボーダーと影を重ねて太くしない。
+    *   横スクロール領域で下線が切れないよう、コンテナと選択タブの下線は `inset 0 -2px 0` の内側シャドウで描画する。
+    *   選択状態は下線色だけに依存せず、文字色と `aria-pressed` も同時に変更する。
+*   **フォーカス状態**:
+    *   `:focus-visible` では `2px solid var(--control-focus-color)` のアウトラインを表示する。
+    *   アウトラインのオフセットは `-2px` とし、スクロール領域で欠けないようにする。
+
+標準実装例:
+
+```css
+.tabs-container {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+    overflow-x: auto;
+    box-shadow: inset 0 -2px 0 #e2e8f0;
+}
+
+.tab-btn {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0;
+    padding: 0.75rem 0.5rem;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: #64748b;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.tab-btn:hover,
+.tab-btn.active {
+    color: var(--color-primary);
+}
+
+.tab-btn.active {
+    box-shadow: inset 0 -2px 0 var(--color-primary);
+}
+
+.tab-btn:focus-visible {
+    outline: 2px solid var(--control-focus-color);
+    outline-offset: -2px;
+}
+```
+
 ### 5.3. スライダー (Sliders)
 音量、温度 (Temperature) などの調整スライダーは直感的に現在の数値がわかるようにします。
 

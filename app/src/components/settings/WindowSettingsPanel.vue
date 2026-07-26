@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import Card from 'primevue/card';
 import Select from 'primevue/select';
 import Button from 'primevue/button';
@@ -86,7 +86,14 @@ const chatBackgroundImageFitOptions = ref([
 
 const saveStatus = ref('設定を保存');
 const isSaving = ref(false);
+const activeTab = ref<'general' | 'integrated' | 'mascot' | 'chat' | 'server'>('general');
 let initialWindowMode = '';
+
+watch(windowMode, (mode) => {
+    if (mode !== 'integrated' && activeTab.value === 'integrated') {
+        activeTab.value = 'general';
+    }
+});
 
 // --- サーバー接続 疎通確認用の状態変数・関数 ---
 const isTestingServerConnection = ref(false);
@@ -446,31 +453,52 @@ onMounted(async () => {
         <template #title>ウィンドウ設定</template>
         <template #content>
             <div class="flex flex-column gap-4">
-                <!-- ウィンドウモード設定 -->
-                <div class="form-field-header font-bold text-base border-bottom pb-2 mb-2 text-brand-600 flex align-items-center gap-2">
-                    <i class="pi pi-th-large text-brand-500"></i>
-                    <span>ウィンドウモード設定</span>
+                <!-- チャットAI設定と共通のタブUI -->
+                <div class="tabs-container" aria-label="ウィンドウ設定の分類">
+                    <button type="button" class="tab-btn" :class="{ active: activeTab === 'general' }" :aria-pressed="activeTab === 'general'" @click="activeTab = 'general'">
+                        <i class="pi pi-th-large mr-2"></i>基本設定
+                    </button>
+                    <button v-if="windowMode === 'integrated'" type="button" class="tab-btn" :class="{ active: activeTab === 'integrated' }" :aria-pressed="activeTab === 'integrated'" @click="activeTab = 'integrated'">
+                        <i class="pi pi-clone mr-2"></i>統合表示
+                    </button>
+                    <button type="button" class="tab-btn" :class="{ active: activeTab === 'mascot' }" :aria-pressed="activeTab === 'mascot'" @click="activeTab = 'mascot'">
+                        <i class="pi pi-user mr-2"></i>マスコット
+                    </button>
+                    <button type="button" class="tab-btn" :class="{ active: activeTab === 'chat' }" :aria-pressed="activeTab === 'chat'" @click="activeTab = 'chat'">
+                        <i class="pi pi-comments mr-2"></i>チャット
+                    </button>
+                    <button type="button" class="tab-btn" :class="{ active: activeTab === 'server' }" :aria-pressed="activeTab === 'server'" @click="activeTab = 'server'">
+                        <i class="pi pi-server mr-2"></i>サーバー
+                    </button>
                 </div>
 
-                <div class="form-field">
-                    <label class="font-medium">ウィンドウモード</label>
-                    <Select 
-                        v-model="windowMode" 
-                        :options="windowModeOptions" 
-                        optionLabel="name" 
-                        optionValue="value" 
-                        class="w-full mt-2" 
-                    >
-                        <template #option="slotProps">
-                            <div class="flex align-items-center">
-                                <span>{{ slotProps.option.name }} ｜ {{ slotProps.option.desc }}</span>
-                            </div>
-                        </template>
-                    </Select>
+                <div v-if="activeTab === 'general'" class="flex flex-column gap-4">
+                    <!-- ウィンドウモード設定 -->
+                    <div class="form-field-header font-bold text-base border-bottom pb-2 mb-2 text-brand-600 flex align-items-center gap-2">
+                        <i class="pi pi-th-large text-brand-500"></i>
+                        <span>ウィンドウモード設定</span>
+                    </div>
+
+                    <div class="form-field">
+                        <label class="font-medium">ウィンドウモード</label>
+                        <Select
+                            v-model="windowMode"
+                            :options="windowModeOptions"
+                            optionLabel="name"
+                            optionValue="value"
+                            class="w-full mt-2"
+                        >
+                            <template #option="slotProps">
+                                <div class="flex align-items-center">
+                                    <span>{{ slotProps.option.name }} ｜ {{ slotProps.option.desc }}</span>
+                                </div>
+                            </template>
+                        </Select>
+                    </div>
                 </div>
 
                 <!-- 統合ウィンドウ設定（統合モード時のみ表示） -->
-                <div v-if="windowMode === 'integrated'" class="flex flex-column gap-3 mt-2">
+                <div v-if="activeTab === 'integrated' && windowMode === 'integrated'" class="flex flex-column gap-3 mt-2">
                     <div class="form-field-header font-bold text-base border-bottom pb-2 mb-2 text-brand-600 flex align-items-center gap-2">
                         <i class="pi pi-clone text-brand-500"></i>
                         <span>統合ウィンドウ設定</span>
@@ -584,13 +612,14 @@ onMounted(async () => {
                     </div>
                 </div>
 
-                <!-- マスコットウィンドウ設定 -->
-                <div class="form-field-header font-bold text-base border-bottom pb-2 mb-2 text-brand-600 flex align-items-center gap-2">
-                    <i class="pi pi-user text-brand-500"></i>
-                    <span>マスコットウィンドウ設定</span>
-                </div>
+                <div v-if="activeTab === 'mascot'" class="flex flex-column gap-4">
+                    <!-- マスコットウィンドウ設定 -->
+                    <div class="form-field-header font-bold text-base border-bottom pb-2 mb-2 text-brand-600 flex align-items-center gap-2">
+                        <i class="pi pi-user text-brand-500"></i>
+                        <span>マスコットウィンドウ設定</span>
+                    </div>
 
-                <div class="flex flex-column md:flex-row gap-4 mt-2">
+                    <div class="flex flex-column md:flex-row gap-4 mt-2">
                     <!-- 左ペイン: 各種設定コントロール -->
                     <div class="flex-1 flex flex-column gap-3">
                         <div class="form-field">
@@ -730,15 +759,17 @@ onMounted(async () => {
                             </div>
                         </div>
                     </div>
+                    </div>
                 </div>
 
-                <!-- チャットウィンドウ設定 -->
-                <div class="form-field-header font-bold text-base border-bottom pb-2 mt-4 mb-2 text-brand-600 flex align-items-center gap-2">
-                    <i class="pi pi-comments text-brand-500"></i>
-                    <span>チャットウィンドウ設定</span>
-                </div>
+                <div v-if="activeTab === 'chat'" class="flex flex-column gap-4">
+                    <!-- チャットウィンドウ設定 -->
+                    <div class="form-field-header font-bold text-base border-bottom pb-2 mb-2 text-brand-600 flex align-items-center gap-2">
+                        <i class="pi pi-comments text-brand-500"></i>
+                        <span>チャットウィンドウ設定</span>
+                    </div>
 
-                <div class="flex flex-column md:flex-row gap-4 mt-2">
+                    <div class="flex flex-column md:flex-row gap-4 mt-2">
                     <!-- 左ペイン: 各種設定コントロール -->
                     <div class="flex-1 flex flex-column gap-3">
                         <!-- メッセージエリア背景色 -->
@@ -911,17 +942,19 @@ onMounted(async () => {
                             </div>
                         </div>
                     </div>
+                    </div>
                 </div>
 
 
 
-                <!-- サーバー連携設定 -->
-                <div class="form-field-header font-bold text-base border-bottom pb-2 mt-4 mb-2 text-brand-600 flex align-items-center gap-2">
-                    <i class="pi pi-server text-brand-500"></i>
-                    <span>サーバー連携設定 (マルチデバイス)</span>
-                </div>
+                <div v-if="activeTab === 'server'" class="flex flex-column gap-4">
+                    <!-- サーバー連携設定 -->
+                    <div class="form-field-header font-bold text-base border-bottom pb-2 mb-2 text-brand-600 flex align-items-center gap-2">
+                        <i class="pi pi-server text-brand-500"></i>
+                        <span>サーバー連携設定 (マルチデバイス)</span>
+                    </div>
 
-                <div class="form-field mt-3 flex flex-column gap-3">
+                    <div class="form-field mt-3 flex flex-column gap-3">
                     <div class="flex gap-3">
                         <div class="flex-1">
                             <label class="font-medium">サーバーホスト (IPアドレス / ドメイン)</label>
@@ -975,7 +1008,8 @@ onMounted(async () => {
                              </div>
                          </div>
                      </div>
-                 </div>
+                    </div>
+                </div>
 
                 <div class="flex justify-content-end mt-4">
                     <Button 
@@ -992,6 +1026,44 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.tabs-container {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+    overflow-x: auto;
+    box-shadow: inset 0 -2px 0 #e2e8f0;
+}
+
+.tab-btn {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    margin-bottom: 0;
+    padding: 0.75rem 0.5rem;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: #64748b;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+    color: var(--color-primary);
+}
+
+.tab-btn.active {
+    color: var(--color-primary);
+    box-shadow: inset 0 -2px 0 var(--color-primary);
+}
+
+.tab-btn:focus-visible {
+    outline: 2px solid var(--control-focus-color);
+    outline-offset: -2px;
+}
+
 .color-picker-input {
     width: 40px;
     height: 32px;

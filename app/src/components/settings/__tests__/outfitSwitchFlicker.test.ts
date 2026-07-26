@@ -137,9 +137,13 @@ describe('outfit切り替え時のちらつき防止テスト', () => {
 
             const subtabButtons = wrapper.findAll('button.mascot-subtab');
             expect(subtabButtons).toHaveLength(3);
+            expect(wrapper.find('.mascot-subtabs.tabs-container').exists()).toBe(true);
+            expect(subtabButtons.every((button) => button.classes().includes('tab-btn'))).toBe(true);
             expect(subtabButtons[0].attributes('aria-pressed')).toBe('true');
+            expect(subtabButtons[0].classes()).toContain('active');
             await subtabButtons[1].trigger('click');
             expect(subtabButtons[1].attributes('aria-pressed')).toBe('true');
+            expect(subtabButtons[1].classes()).toContain('active');
 
             // MascotOutfitSettngs コンポーネントから set-main-outfit イベントを発火させる
             const outfitComponent = wrapper.findComponent({ name: 'MascotOutfitSettngs' });

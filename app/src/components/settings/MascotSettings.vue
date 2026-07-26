@@ -423,37 +423,37 @@ const updateOutfitNofacePath = ({ outfitId, nofacePath }: { outfitId: string; no
             </div>
 
             <!-- サブタブ -->
-            <div class="mascot-subtabs flex border-bottom border-gray-200 pb-2 gap-2">
-                <Button 
-                    class="mascot-subtab p-button-sm flex align-items-center justify-content-center"
-                    :class="{ 'is-active': activeMascotSubTab === 'expression' }"
+            <div class="tabs-container mascot-subtabs" aria-label="マスコット詳細設定の分類">
+                <button
+                    type="button"
+                    class="tab-btn mascot-subtab"
+                    :class="{ active: activeMascotSubTab === 'expression' }"
                     :aria-pressed="activeMascotSubTab === 'expression'"
                     @click="activeMascotSubTab = 'expression'"
-                    title="表情"
                 >
                     <img :src="mascotEmotionIcon" class="subtab-icon" alt="" aria-hidden="true" />
                     <span class="subtab-label">表情</span>
-                </Button>
-                <Button 
-                    class="mascot-subtab p-button-sm flex align-items-center justify-content-center"
-                    :class="{ 'is-active': activeMascotSubTab === 'outfit' }"
+                </button>
+                <button
+                    type="button"
+                    class="tab-btn mascot-subtab"
+                    :class="{ active: activeMascotSubTab === 'outfit' }"
                     :aria-pressed="activeMascotSubTab === 'outfit'"
                     @click="activeMascotSubTab = 'outfit'"
-                    title="立ち絵"
                 >
                     <img :src="mascotOutfitIcon" class="subtab-icon" alt="" aria-hidden="true" />
                     <span class="subtab-label">立ち絵</span>
-                </Button>
-                <Button 
-                    class="mascot-subtab p-button-sm flex align-items-center justify-content-center"
-                    :class="{ 'is-active': activeMascotSubTab === 'profile' }"
+                </button>
+                <button
+                    type="button"
+                    class="tab-btn mascot-subtab"
+                    :class="{ active: activeMascotSubTab === 'profile' }"
                     :aria-pressed="activeMascotSubTab === 'profile'"
                     @click="activeMascotSubTab = 'profile'"
-                    title="プロフィール"
                 >
                     <img :src="mascotProfileIcon" class="subtab-icon" alt="" aria-hidden="true" />
                     <span class="subtab-label">プロフィール</span>
-                </Button>
+                </button>
             </div>
 
             <!-- サブタブ中身エリア (スクロール可能) -->
@@ -763,68 +763,59 @@ const updateOutfitNofacePath = ({ outfitId, nofacePath }: { outfitId: string; no
     width: 100% !important;
 }
 
-.mascot-subtabs {
-    min-height: 42px;
+.tabs-container {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+    overflow-x: auto;
+    box-shadow: inset 0 -2px 0 #e2e8f0;
 }
 
-.mascot-subtab.p-button {
-    min-width: 0;
-    height: 34px;
-    padding: 4px 10px;
-    gap: 6px;
-    border: 1px solid transparent;
-    border-radius: 7px;
+.tab-btn {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0;
+    padding: 0.75rem 0.5rem;
+    border: none;
+    border-bottom: 2px solid transparent;
     background: transparent;
-    color: var(--color-ink-muted);
-    box-shadow: none;
+    color: #64748b;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
 }
 
-.mascot-subtab.p-button:hover {
-    border-color: var(--color-border);
-    background: var(--color-surface-muted);
-    color: var(--color-ink-strong);
+.tab-btn:hover {
+    color: var(--color-primary);
 }
 
-.mascot-subtab.p-button:active {
-    border-color: var(--color-primary-border);
-    background: var(--color-primary-subtle);
+.tab-btn.active {
+    color: var(--color-primary);
+    box-shadow: inset 0 -2px 0 var(--color-primary);
 }
 
-.mascot-subtab.p-button:disabled {
-    cursor: not-allowed;
-    opacity: 0.55;
-}
-
-.mascot-subtab.p-button.is-active {
-    border-color: var(--color-primary-border);
-    background: var(--color-primary-soft);
-    color: var(--color-primary-strong);
-}
-
-.mascot-subtab.p-button:focus-visible {
+.tab-btn:focus-visible {
     outline: 2px solid var(--control-focus-color);
-    outline-offset: 2px;
+    outline-offset: -2px;
 }
 
 .subtab-icon {
-    width: 24px !important;
-    height: 24px !important;
+    width: 16px;
+    height: 16px;
     object-fit: contain;
-    border-radius: 2px;
-    opacity: 0.78;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
 }
 
 .mascot-subtab:hover .subtab-icon,
-.mascot-subtab.is-active .subtab-icon {
+.mascot-subtab.active .subtab-icon {
     opacity: 1;
 }
 
 .subtab-label {
-    font-family: var(--font-body);
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1;
-    text-box: trim-both cap alphabetic;
     white-space: nowrap;
 }
 
@@ -873,26 +864,6 @@ const updateOutfitNofacePath = ({ outfitId, nofacePath }: { outfitId: string; no
     /* 立ち絵全身像グリッドを縦一列にする */
     .outfit-grid-container {
         grid-template-columns: 1fr !important;
-    }
-
-    /* サブタブのラベルを非表示にしてアイコンのみにする */
-    .subtab-label {
-        display: none !important;
-    }
-    .subtab-icon {
-        width: 24px !important;
-        height: 24px !important;
-    }
-    .mascot-detail-panel .pb-2 button svg,
-    .mascot-detail-panel .pb-2 button img {
-        margin-right: 0 !important;
-    }
-
-    .mascot-detail-panel .mascot-subtabs button.p-button-sm {
-        width: 44px !important;
-        height: 44px !important;
-        padding: 0 !important;
-        justify-content: center !important;
     }
 
     .desktop-text {
