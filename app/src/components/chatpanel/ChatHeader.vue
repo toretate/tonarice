@@ -598,7 +598,7 @@ onUnmounted(() => {
     background: rgba(255, 255, 255, 0.08);
 }
 
-@media (max-width: 768px) {
+@container chat-panel (max-width: 768px) {
     .chat-header {
         padding-inline: 12px;
     }

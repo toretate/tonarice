@@ -41,7 +41,7 @@ export function useSettingsWindow() {
     const activeMenu = ref('mascot');
     const saveStatus = ref('設定を保存');
     const isSaving = ref(false);
-    const settingsMenuValues = new Set(['mascot', 'chat', 'chatwindow', 'music', 'voice', 'image', 'video', 'tool', 'apikey']);
+    const settingsMenuValues = new Set(['mascot', 'chat', 'chatwindow', 'voice', 'image', 'video', 'tool', 'apikey']);
 
     const applyRequestedMenu = () => {
         const requestedMenu = localStorage.getItem('desktop-mascot-settings-menu');
@@ -203,7 +203,6 @@ export function useSettingsWindow() {
         { name: 'マスコット', value: 'mascot', icon: 'pi pi-user' },
         { name: 'チャットAI', value: 'chat', icon: 'pi pi-comments' },
         { name: 'ウィンドウ設定', value: 'chatwindow', icon: 'pi pi-window-maximize' },
-        { name: '音楽ウィジェット', value: 'music', icon: 'pi pi-headphones' },
         { name: '音声AI', value: 'voice', icon: 'pi pi-volume-up' },
         { name: '画像AI', value: 'image', icon: 'pi pi-image' },
         { name: '動画AI', value: 'video', icon: 'pi pi-video' },
