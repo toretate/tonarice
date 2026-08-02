@@ -10,6 +10,9 @@ export interface AppConfig {
     selectedEngine: string;
     selectedVoiceEngine: string;
     selectedImageEngine: string;
+    geminiImageModel: string;
+    geminiImageAspectRatio: string;
+    geminiImageSize: '1K' | '2K' | '4K';
     openaiImageModel: string;
     openaiImageQuality: 'low' | 'medium' | 'high' | 'auto';
     openaiImageSize: '1024x1024' | '1024x1536' | '1536x1024' | 'auto';
@@ -141,6 +144,9 @@ export const useConfigStore = defineStore('config', () => {
     const selectedEngine = ref('gemini');
     const selectedVoiceEngine = ref('voicevox');
     const selectedImageEngine = ref('openai_image');
+    const geminiImageModel = ref('gemini-3.1-flash-image');
+    const geminiImageAspectRatio = ref('1:1');
+    const geminiImageSize = ref<'1K' | '2K' | '4K'>('1K');
     const openaiImageModel = ref('gpt-image-2');
     const openaiImageQuality = ref<'low' | 'medium' | 'high' | 'auto'>('auto');
     const openaiImageSize = ref<'1024x1024' | '1024x1536' | '1536x1024' | 'auto'>('1024x1024');
@@ -319,6 +325,9 @@ export const useConfigStore = defineStore('config', () => {
             selectedImageEngine.value = configData.selectedImageEngine === 'dalle3'
                 ? 'openai_image'
                 : (configData.selectedImageEngine || 'openai_image');
+            geminiImageModel.value = configData.geminiImageModel || 'gemini-3.1-flash-image';
+            geminiImageAspectRatio.value = configData.geminiImageAspectRatio || '1:1';
+            geminiImageSize.value = configData.geminiImageSize || '1K';
             openaiImageModel.value = configData.openaiImageModel || 'gpt-image-2';
             openaiImageQuality.value = configData.openaiImageQuality || 'auto';
             openaiImageSize.value = configData.openaiImageSize || '1024x1024';
@@ -447,6 +456,9 @@ export const useConfigStore = defineStore('config', () => {
             selectedImageEngine.value = storedImageEngine === 'dalle3'
                 ? 'openai_image'
                 : (storedImageEngine || 'openai_image');
+            geminiImageModel.value = localStorage.getItem('geminiImageModel') || 'gemini-3.1-flash-image';
+            geminiImageAspectRatio.value = localStorage.getItem('geminiImageAspectRatio') || '1:1';
+            geminiImageSize.value = (localStorage.getItem('geminiImageSize') as typeof geminiImageSize.value) || '1K';
             openaiImageModel.value = localStorage.getItem('openaiImageModel') || 'gpt-image-2';
             openaiImageQuality.value = (localStorage.getItem('openaiImageQuality') as typeof openaiImageQuality.value) || 'auto';
             openaiImageSize.value = (localStorage.getItem('openaiImageSize') as typeof openaiImageSize.value) || '1024x1024';
@@ -610,6 +622,9 @@ export const useConfigStore = defineStore('config', () => {
             selectedEngine: selectedEngine.value,
             selectedVoiceEngine: selectedVoiceEngine.value,
             selectedImageEngine: selectedImageEngine.value,
+            geminiImageModel: geminiImageModel.value,
+            geminiImageAspectRatio: geminiImageAspectRatio.value,
+            geminiImageSize: geminiImageSize.value,
             openaiImageModel: openaiImageModel.value,
             openaiImageQuality: openaiImageQuality.value,
             openaiImageSize: openaiImageSize.value,
@@ -773,6 +788,9 @@ export const useConfigStore = defineStore('config', () => {
         safeSetItem('selectedEngine', selectedEngine.value);
         safeSetItem('selectedVoiceEngine', selectedVoiceEngine.value);
         safeSetItem('selectedImageEngine', selectedImageEngine.value);
+        safeSetItem('geminiImageModel', geminiImageModel.value);
+        safeSetItem('geminiImageAspectRatio', geminiImageAspectRatio.value);
+        safeSetItem('geminiImageSize', geminiImageSize.value);
         safeSetItem('openaiImageModel', openaiImageModel.value);
         safeSetItem('openaiImageQuality', openaiImageQuality.value);
         safeSetItem('openaiImageSize', openaiImageSize.value);
@@ -901,6 +919,9 @@ export const useConfigStore = defineStore('config', () => {
         if (newConfig.selectedEngine !== undefined) selectedEngine.value = newConfig.selectedEngine;
         if (newConfig.selectedVoiceEngine !== undefined) selectedVoiceEngine.value = newConfig.selectedVoiceEngine;
         if (newConfig.selectedImageEngine !== undefined) selectedImageEngine.value = newConfig.selectedImageEngine;
+        if (newConfig.geminiImageModel !== undefined) geminiImageModel.value = newConfig.geminiImageModel;
+        if (newConfig.geminiImageAspectRatio !== undefined) geminiImageAspectRatio.value = newConfig.geminiImageAspectRatio;
+        if (newConfig.geminiImageSize !== undefined) geminiImageSize.value = newConfig.geminiImageSize;
         if (newConfig.openaiImageModel !== undefined) openaiImageModel.value = newConfig.openaiImageModel;
         if (newConfig.openaiImageQuality !== undefined) openaiImageQuality.value = newConfig.openaiImageQuality;
         if (newConfig.openaiImageSize !== undefined) openaiImageSize.value = newConfig.openaiImageSize;
@@ -1005,6 +1026,9 @@ export const useConfigStore = defineStore('config', () => {
         selectedEngine,
         selectedVoiceEngine,
         selectedImageEngine,
+        geminiImageModel,
+        geminiImageAspectRatio,
+        geminiImageSize,
         openaiImageModel,
         openaiImageQuality,
         openaiImageSize,

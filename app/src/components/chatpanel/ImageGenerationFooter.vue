@@ -52,6 +52,10 @@ const cancelMode = () => {
             <i class="pi pi-info-circle" aria-hidden="true"></i>
             GPT Image 2は入力画像を高忠実度で参照します。変更量はプロンプトで指定してください。
         </p>
+        <p v-else-if="mode === 'i2i' && configStore.selectedImageEngine === 'gemini_image'" class="openai-i2i-note">
+            <i class="pi pi-info-circle" aria-hidden="true"></i>
+            Nano Bananaは添付画像を参照して編集します。変更内容はプロンプトで指定してください。
+        </p>
     </div>
 </template>
 

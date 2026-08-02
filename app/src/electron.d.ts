@@ -92,6 +92,7 @@ export interface IElectronAPI {
     saveRadioPrompts: (prompts: { radioMode: string; activeTalk: string; exRadioMode?: string; exActiveTalk?: string }) => Promise<{ success: boolean; error?: string }>;
     forgeGenerateImage?: (params: any, host: string) => Promise<string>;
     openAiGenerateImage?: (params: any) => Promise<string>;
+    geminiGenerateImage?: (params: any) => Promise<string>;
     openDownloadsFolder?: () => void;
     logDebug?: (message: string) => void;
     focusWindow?: () => void;

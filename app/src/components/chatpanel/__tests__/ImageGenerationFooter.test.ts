@@ -34,4 +34,16 @@ describe('ImageGenerationFooter', () => {
         expect(wrapper.find('.denoise-slider-box').exists()).toBe(true);
         expect(wrapper.find('.openai-i2i-note').exists()).toBe(false);
     });
+
+    test('表示内容_NanoBananaのi2iではプロンプト編集案内を表示すること', () => {
+        const configStore = useConfigStore();
+        configStore.selectedImageEngine = 'gemini_image';
+
+        const wrapper = mount(ImageGenerationFooter, {
+            props: { mode: 'i2i', isSecretMode: false }
+        });
+
+        expect(wrapper.find('.denoise-slider-box').exists()).toBe(false);
+        expect(wrapper.find('.openai-i2i-note').text()).toContain('添付画像を参照して編集');
+    });
 });

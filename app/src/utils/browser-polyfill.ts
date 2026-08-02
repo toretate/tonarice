@@ -746,6 +746,21 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
                 throw new Error(errorMessage);
             }
             return data.image;
+        },
+        geminiGenerateImage: async (params: any) => {
+            const response = await fetch('/api/gemini-image/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ params })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success || !data.image) {
+                const message = data.error || `HTTP Error: ${response.status}`;
+                console.error(`[Polyfill] Geminiとの接続エラー: ${message}`);
+                throw new Error(message);
+            }
+            return data.image;
         }
     };
 }

@@ -235,6 +235,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     forgeGetLoras: (host: string) => ipcRenderer.invoke('forge:loras', host),
     forgeGenerateImage: (params: any, host: string) => ipcRenderer.invoke('forge:generate', params, host),
     openAiGenerateImage: (params: any) => ipcRenderer.invoke('openai-image:generate', params),
+    geminiGenerateImage: (params: any) => ipcRenderer.invoke('gemini-image:generate', params),
     openDownloadsFolder: () => ipcRenderer.send('open-downloads-folder'),
     logDebug: (msg: string) => ipcRenderer.send('log-debug', msg)
 });

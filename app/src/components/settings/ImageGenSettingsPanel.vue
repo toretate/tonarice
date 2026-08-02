@@ -9,6 +9,9 @@ import { storeToRefs } from 'pinia';
 const configStore = useConfigStore();
 const {
     selectedImageEngine,
+    geminiImageModel,
+    geminiImageAspectRatio,
+    geminiImageSize,
     openaiImageModel,
     openaiImageQuality,
     openaiImageSize,
@@ -22,9 +25,28 @@ const {
 } = storeToRefs(configStore);
 
 const imageEngines = ref([
+    { name: 'Google Nano Banana', value: 'gemini_image' },
     { name: 'OpenAI GPT Image', value: 'openai_image' },
     { name: 'Stable Diffusion Forge (ローカル)', value: 'sd_forge' }
 ]);
+
+const geminiImageModels = [
+    { name: 'Nano Banana 2（推奨）', value: 'gemini-3.1-flash-image' },
+    { name: 'Nano Banana Pro', value: 'gemini-3-pro-image' },
+    { name: 'Nano Banana（従来版）', value: 'gemini-2.5-flash-image' }
+];
+const geminiAspectRatios = [
+    { name: '正方形（1:1）', value: '1:1' },
+    { name: '縦長（3:4）', value: '3:4' },
+    { name: '縦長（9:16）', value: '9:16' },
+    { name: '横長（4:3）', value: '4:3' },
+    { name: '横長（16:9）', value: '16:9' }
+];
+const geminiImageSizes = [
+    { name: '1K', value: '1K' },
+    { name: '2K', value: '2K' },
+    { name: '4K', value: '4K' }
+];
 
 const openaiModels = [
     { name: 'GPT Image 2（推奨）', value: 'gpt-image-2' }
@@ -145,6 +167,28 @@ const saveSettings = async () => {
                         class="w-full" 
                     />
                 </div>
+
+                <fieldset v-if="selectedImageEngine === 'gemini_image'" class="flex flex-column gap-3 p-3 bg-slate-50 border-round border-1 border-gray-200 mt-2">
+                    <legend class="font-medium text-sm text-slate-700 px-1">Google Nano Banana 設定</legend>
+                    <div class="openai-mode-notes" aria-label="Nano Bananaのモード別仕様">
+                        <p><strong>t2i:</strong> テキストから画像を生成します。</p>
+                        <p><strong>i2i:</strong> 添付画像とプロンプトを使って画像を編集します。</p>
+                    </div>
+                    <div class="form-field flex flex-column gap-1">
+                        <label for="gemini-image-model" class="font-medium text-sm text-slate-700">モデル</label>
+                        <Select id="gemini-image-model" v-model="geminiImageModel" :options="geminiImageModels" optionLabel="name" optionValue="value" class="w-full" />
+                    </div>
+                    <div class="form-field flex flex-column gap-1">
+                        <label for="gemini-image-aspect-ratio" class="font-medium text-sm text-slate-700">縦横比</label>
+                        <Select id="gemini-image-aspect-ratio" v-model="geminiImageAspectRatio" :options="geminiAspectRatios" optionLabel="name" optionValue="value" class="w-full" />
+                    </div>
+                    <div class="form-field flex flex-column gap-1">
+                        <label for="gemini-image-size" class="font-medium text-sm text-slate-700">解像度</label>
+                        <Select id="gemini-image-size" v-model="geminiImageSize" :options="geminiImageSizes" optionLabel="name" optionValue="value" class="w-full" :disabled="geminiImageModel === 'gemini-2.5-flash-image'" aria-describedby="gemini-image-size-help" />
+                        <small id="gemini-image-size-help" class="text-slate-500">従来版Nano Bananaは1K固定です。Nano Banana 2／Proは1K・2K・4Kを選択できます。</small>
+                    </div>
+                    <small class="text-slate-500">APIキーは「API KEY設定」のGoogle AI Studio欄を使用します。</small>
+                </fieldset>
 
                 <fieldset v-if="selectedImageEngine === 'openai_image'" class="flex flex-column gap-3 p-3 bg-slate-50 border-round border-1 border-gray-200 mt-2">
                     <legend class="font-medium text-sm text-slate-700 px-1">OpenAI GPT Image 2 設定</legend>
