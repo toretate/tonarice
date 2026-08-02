@@ -11,6 +11,8 @@ describe('createInitialConfig', () => {
         expect(config.chatBackgroundImage).toBe('');
         expect(config.mascotBackgroundImage).toBe('');
         expect(config.integratedBackgroundImage).toBe('');
+        expect(config.selectedImageEngine).toBe('openai_image');
+        expect(config.openaiImageModel).toBe('gpt-image-2');
         expect(JSON.stringify(config)).not.toContain('data:image/');
     });
 

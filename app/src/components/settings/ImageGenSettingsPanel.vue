@@ -9,6 +9,10 @@ import { storeToRefs } from 'pinia';
 const configStore = useConfigStore();
 const {
     selectedImageEngine,
+    openaiImageModel,
+    openaiImageQuality,
+    openaiImageSize,
+    openaiImageBackground,
     forgeEndpoint,
     forgeModel,
     forgeLora,
@@ -18,11 +22,30 @@ const {
 } = storeToRefs(configStore);
 
 const imageEngines = ref([
-    { name: 'DALL-E 3 (OpenAI)', value: 'dalle3' },
-    { name: 'Stable Diffusion Forge (ローカル)', value: 'sd_forge' },
-    { name: 'Stable Diffusion (ローカル)', value: 'sd_local' },
-    { name: 'Midjourney API', value: 'midjourney' }
+    { name: 'OpenAI GPT Image', value: 'openai_image' },
+    { name: 'Stable Diffusion Forge (ローカル)', value: 'sd_forge' }
 ]);
+
+const openaiModels = [
+    { name: 'GPT Image 2（推奨）', value: 'gpt-image-2' }
+];
+const openaiQualities = [
+    { name: '自動', value: 'auto' },
+    { name: '低', value: 'low' },
+    { name: '中', value: 'medium' },
+    { name: '高', value: 'high' }
+];
+const openaiSizes = [
+    { name: '正方形（1024 × 1024）', value: '1024x1024' },
+    { name: '縦長（1024 × 1536）', value: '1024x1536' },
+    { name: '横長（1536 × 1024）', value: '1536x1024' },
+    { name: '自動', value: 'auto' }
+];
+const openaiBackgrounds = [
+    { name: '自動', value: 'auto' },
+    { name: '透過', value: 'transparent' },
+    { name: '不透明', value: 'opaque' }
+];
 
 const saveStatus = ref('設定を保存');
 const isSaving = ref(false);
@@ -123,6 +146,27 @@ const saveSettings = async () => {
                         class="w-full" 
                     />
                 </div>
+
+                <fieldset v-if="selectedImageEngine === 'openai_image'" class="flex flex-column gap-3 p-3 bg-slate-50 border-round border-1 border-gray-200 mt-2">
+                    <legend class="font-medium text-sm text-slate-700 px-1">OpenAI GPT Image 設定</legend>
+                    <div class="form-field flex flex-column gap-1">
+                        <label for="openai-image-model" class="font-medium text-sm text-slate-700">モデル</label>
+                        <Select id="openai-image-model" v-model="openaiImageModel" :options="openaiModels" optionLabel="name" optionValue="value" class="w-full" />
+                    </div>
+                    <div class="form-field flex flex-column gap-1">
+                        <label for="openai-image-quality" class="font-medium text-sm text-slate-700">品質</label>
+                        <Select id="openai-image-quality" v-model="openaiImageQuality" :options="openaiQualities" optionLabel="name" optionValue="value" class="w-full" />
+                    </div>
+                    <div class="form-field flex flex-column gap-1">
+                        <label for="openai-image-size" class="font-medium text-sm text-slate-700">画像サイズ</label>
+                        <Select id="openai-image-size" v-model="openaiImageSize" :options="openaiSizes" optionLabel="name" optionValue="value" class="w-full" />
+                    </div>
+                    <div class="form-field flex flex-column gap-1">
+                        <label for="openai-image-background" class="font-medium text-sm text-slate-700">背景</label>
+                        <Select id="openai-image-background" v-model="openaiImageBackground" :options="openaiBackgrounds" optionLabel="name" optionValue="value" class="w-full" />
+                    </div>
+                    <small class="text-slate-500">APIキーは「API KEY設定」のOpenAI欄を使用します。</small>
+                </fieldset>
 
                 <!-- Stable Diffusion Forge 専用設定 -->
                 <div v-if="selectedImageEngine === 'sd_forge'" class="flex flex-column gap-3 p-3 bg-slate-50 border-round border-1 border-gray-200 mt-2">

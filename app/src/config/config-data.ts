@@ -27,6 +27,10 @@ export interface ConfigData {
     irodoriModel: string;
     irodoriVoice: string;
     selectedImageEngine: string;
+    openaiImageModel: string;
+    openaiImageQuality: 'low' | 'medium' | 'high' | 'auto';
+    openaiImageSize: '1024x1024' | '1024x1536' | '1536x1024' | 'auto';
+    openaiImageBackground: 'transparent' | 'opaque' | 'auto';
     selectedVideoEngine: string;
     chatOpacity: number;
     taskOpacity: number;
@@ -138,7 +142,11 @@ export const defaultData: ConfigData = {
     irodoriEndpoint: 'http://127.0.0.1:8088',
     irodoriModel: 'irodori-tts',
     irodoriVoice: 'default',
-    selectedImageEngine: 'dalle3',
+    selectedImageEngine: 'openai_image',
+    openaiImageModel: 'gpt-image-2',
+    openaiImageQuality: 'auto',
+    openaiImageSize: '1024x1024',
+    openaiImageBackground: 'auto',
     selectedVideoEngine: 'runway',
     chatOpacity: 1.0,
     taskOpacity: 1.0,

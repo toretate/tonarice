@@ -558,7 +558,7 @@ const generateImageFlow = async (isI2i = false) => {
     try {
         const host = configStore.forgeEndpoint || 'http://127.0.0.1:5555';
         let finalPrompt = configStore.forgePrompt ? `${configStore.forgePrompt}, ${userPrompt}` : userPrompt;
-        if (configStore.forgeLora) {
+        if (configStore.selectedImageEngine === 'sd_forge' && configStore.forgeLora) {
             const loraPromptParts = configStore.forgeLora
                 .split(',')
                 .map(s => s.trim())
@@ -600,10 +600,22 @@ const generateImageFlow = async (isI2i = false) => {
         }
 
         let base64Image = '';
-        if (window.electronAPI && window.electronAPI.forgeGenerateImage) {
+        if (configStore.selectedImageEngine === 'openai_image') {
+            if (!window.electronAPI?.openAiGenerateImage) {
+                throw new Error('OpenAI画像生成機能がこの実行環境で利用できません。');
+            }
+            base64Image = await window.electronAPI.openAiGenerateImage({
+                prompt: finalPrompt,
+                model: configStore.openaiImageModel,
+                quality: configStore.openaiImageQuality,
+                size: configStore.openaiImageSize,
+                background: configStore.openaiImageBackground,
+                initImage: isI2i ? initImageBase64 : undefined
+            });
+        } else if (configStore.selectedImageEngine === 'sd_forge' && window.electronAPI?.forgeGenerateImage) {
             base64Image = await window.electronAPI.forgeGenerateImage(params, host);
         } else {
-            throw new Error('window.electronAPI.forgeGenerateImage が定義されていません。この実行環境（Webブラウザなど）ではローカル画像生成機能は利用できません。');
+            throw new Error(`未対応の画像生成エンジンです: ${configStore.selectedImageEngine}`);
         }
 
         const imgDataUrl = `data:image/png;base64,${base64Image}`;
