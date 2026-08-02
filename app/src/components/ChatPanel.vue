@@ -594,13 +594,24 @@ const generateImageFlow = async (isI2i = false) => {
             samplerName: configStore.forgeSampler || undefined
         };
 
-        if (isI2i && initImageBase64) {
+        if (isI2i && initImageBase64 && configStore.selectedImageEngine === 'sd_forge') {
             params.initImage = initImageBase64;
             params.denoisingStrength = Number(configStore.forgeDenoisingStrength) ?? 0.7;
         }
 
         let base64Image = '';
-        if (configStore.selectedImageEngine === 'openai_image') {
+        if (configStore.selectedImageEngine === 'gemini_image') {
+            if (!window.electronAPI?.geminiGenerateImage) {
+                throw new Error('Gemini画像生成機能がこの実行環境で利用できません。');
+            }
+            base64Image = await window.electronAPI.geminiGenerateImage({
+                prompt: userPrompt,
+                model: configStore.geminiImageModel,
+                aspectRatio: configStore.geminiImageAspectRatio,
+                imageSize: configStore.geminiImageSize,
+                initImage: isI2i ? initImageBase64 : undefined
+            });
+        } else if (configStore.selectedImageEngine === 'openai_image') {
             if (!window.electronAPI?.openAiGenerateImage) {
                 throw new Error('OpenAI画像生成機能がこの実行環境で利用できません。');
             }

@@ -27,6 +27,9 @@ export interface ConfigData {
     irodoriModel: string;
     irodoriVoice: string;
     selectedImageEngine: string;
+    geminiImageModel: string;
+    geminiImageAspectRatio: string;
+    geminiImageSize: '1K' | '2K' | '4K';
     openaiImageModel: string;
     openaiImageQuality: 'low' | 'medium' | 'high' | 'auto';
     openaiImageSize: '1024x1024' | '1024x1536' | '1536x1024' | 'auto';
@@ -143,6 +146,9 @@ export const defaultData: ConfigData = {
     irodoriModel: 'irodori-tts',
     irodoriVoice: 'default',
     selectedImageEngine: 'openai_image',
+    geminiImageModel: 'gemini-3.1-flash-image',
+    geminiImageAspectRatio: '1:1',
+    geminiImageSize: '1K',
     openaiImageModel: 'gpt-image-2',
     openaiImageQuality: 'auto',
     openaiImageSize: '1024x1024',
