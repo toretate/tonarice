@@ -10,7 +10,7 @@ describe('OpenAiImageConnector', () => {
     test('generateImage - テキストから画像を生成できること', async () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
-            json: async () => ({ data: [{ b64_json: 'generated-image' }] })
+            text: async () => JSON.stringify({ data: [{ b64_json: 'generated-image' }] })
         });
         vi.stubGlobal('fetch', fetchMock);
 
@@ -19,7 +19,7 @@ describe('OpenAiImageConnector', () => {
             model: 'gpt-image-2',
             quality: 'high',
             size: '1024x1024',
-            background: 'transparent'
+            background: 'opaque'
         }, 'test-api-key');
 
         expect(result).toBe('generated-image');
@@ -31,7 +31,7 @@ describe('OpenAiImageConnector', () => {
                 n: 1,
                 quality: 'high',
                 size: '1024x1024',
-                background: 'transparent',
+                background: 'opaque',
                 output_format: 'png'
             })
         }));
@@ -40,7 +40,7 @@ describe('OpenAiImageConnector', () => {
     test('generateImage - 添付画像を編集できること', async () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
-            json: async () => ({ data: [{ b64_json: 'edited-image' }] })
+            text: async () => JSON.stringify({ data: [{ b64_json: 'edited-image' }] })
         });
         vi.stubGlobal('fetch', fetchMock);
 
@@ -71,11 +71,23 @@ describe('OpenAiImageConnector', () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
             ok: false,
             status: 400,
-            json: async () => ({ error: { message: 'invalid image' } })
+            text: async () => JSON.stringify({ error: { message: 'invalid image' } })
         }));
 
         await expect(OpenAiImageConnector.generateImage({ prompt: 'test' }, 'test-api-key')).rejects.toThrow(
             'OpenAIとの接続エラー: invalid image'
+        );
+    });
+
+    test('generateImage - JSON以外のAPIエラー本文を呼び出し元へ返すこと', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+            ok: false,
+            status: 502,
+            text: async () => 'upstream unavailable'
+        }));
+
+        await expect(OpenAiImageConnector.generateImage({ prompt: 'test' }, 'test-api-key')).rejects.toThrow(
+            'OpenAIとの接続エラー: OpenAI Images API returned status 502: upstream unavailable'
         );
     });
 });

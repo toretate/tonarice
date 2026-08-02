@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { createError, defineEventHandler, readBody } from 'h3';
+import { createError, defineEventHandler, readBody, setResponseStatus } from 'h3';
 import { OpenAiImageConnector } from '../../../connector/openai-image-connector';
 import { USERS_DIR } from '../../utils/paths';
 
@@ -19,10 +19,9 @@ export default defineEventHandler(async (event) => {
         const image = await OpenAiImageConnector.generateImage(body.params, userConfig.openaiApiKey || '');
         return { success: true, image };
     } catch (error: any) {
-        console.error('[Server] OpenAIとの接続エラー');
-        throw createError({
-            statusCode: error.statusCode || 500,
-            statusMessage: error.message
-        });
+        const message = error.message || error.statusMessage || '不明なエラー';
+        console.error(`[Server] OpenAIとの接続エラー: ${message}`);
+        setResponseStatus(event, error.statusCode || 502);
+        return { success: false, error: message };
     }
 });

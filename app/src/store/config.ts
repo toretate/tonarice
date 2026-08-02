@@ -13,7 +13,7 @@ export interface AppConfig {
     openaiImageModel: string;
     openaiImageQuality: 'low' | 'medium' | 'high' | 'auto';
     openaiImageSize: '1024x1024' | '1024x1536' | '1536x1024' | 'auto';
-    openaiImageBackground: 'transparent' | 'opaque' | 'auto';
+    openaiImageBackground: 'opaque' | 'auto';
     selectedVideoEngine: string;
     lmstudioEndpoint: string;
     lmstudioModel: string;
@@ -144,7 +144,7 @@ export const useConfigStore = defineStore('config', () => {
     const openaiImageModel = ref('gpt-image-2');
     const openaiImageQuality = ref<'low' | 'medium' | 'high' | 'auto'>('auto');
     const openaiImageSize = ref<'1024x1024' | '1024x1536' | '1536x1024' | 'auto'>('1024x1024');
-    const openaiImageBackground = ref<'transparent' | 'opaque' | 'auto'>('auto');
+    const openaiImageBackground = ref<'opaque' | 'auto'>('auto');
     const selectedVideoEngine = ref('runway');
     
     const lmstudioEndpoint = ref('http://127.0.0.1:1234/v1/');
@@ -322,7 +322,7 @@ export const useConfigStore = defineStore('config', () => {
             openaiImageModel.value = configData.openaiImageModel || 'gpt-image-2';
             openaiImageQuality.value = configData.openaiImageQuality || 'auto';
             openaiImageSize.value = configData.openaiImageSize || '1024x1024';
-            openaiImageBackground.value = configData.openaiImageBackground || 'auto';
+            openaiImageBackground.value = configData.openaiImageBackground === 'opaque' ? 'opaque' : 'auto';
             selectedVideoEngine.value = configData.selectedVideoEngine || 'runway';
             
             lmstudioEndpoint.value = configData.lmstudioEndpoint || 'http://127.0.0.1:1234/v1/';
@@ -450,7 +450,7 @@ export const useConfigStore = defineStore('config', () => {
             openaiImageModel.value = localStorage.getItem('openaiImageModel') || 'gpt-image-2';
             openaiImageQuality.value = (localStorage.getItem('openaiImageQuality') as typeof openaiImageQuality.value) || 'auto';
             openaiImageSize.value = (localStorage.getItem('openaiImageSize') as typeof openaiImageSize.value) || '1024x1024';
-            openaiImageBackground.value = (localStorage.getItem('openaiImageBackground') as typeof openaiImageBackground.value) || 'auto';
+            openaiImageBackground.value = localStorage.getItem('openaiImageBackground') === 'opaque' ? 'opaque' : 'auto';
             selectedVideoEngine.value = localStorage.getItem('selectedVideoEngine') || 'runway';
             
             lmstudioEndpoint.value = localStorage.getItem('lmstudioEndpoint') || 'http://127.0.0.1:1234/v1/';

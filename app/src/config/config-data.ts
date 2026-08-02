@@ -30,7 +30,7 @@ export interface ConfigData {
     openaiImageModel: string;
     openaiImageQuality: 'low' | 'medium' | 'high' | 'auto';
     openaiImageSize: '1024x1024' | '1024x1536' | '1536x1024' | 'auto';
-    openaiImageBackground: 'transparent' | 'opaque' | 'auto';
+    openaiImageBackground: 'opaque' | 'auto';
     selectedVideoEngine: string;
     chatOpacity: number;
     taskOpacity: number;

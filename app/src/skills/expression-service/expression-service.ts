@@ -1,6 +1,7 @@
 import fs from "fs";
 import yaml from 'js-yaml';
 import { GeminiExpressionEngine } from './expression-create-gemini';
+import { OpenAiImageConnector } from '../../connector/openai-image-connector';
 
 /*
 キャラクターの一貫性を保ってください。
@@ -97,12 +98,19 @@ export class AiExpressionService {
         const labelInstruction = prompts.labels.replace("__EMOTIONS_LABLE__", emotionsLabels);
 
         // プロンプト作成
-        const finalPrompt = `${prompts.common} ${userPromptTemplate} ${labelInstruction}`;
+        const resolvedUserPrompt = userPromptTemplate.replace(
+            /\[__EMOTIONS_LABLE__\]|\[EMOTIONS\]/g,
+            emotionsLabels
+        );
+        const finalPrompt = `${prompts.common} ${resolvedUserPrompt} ${labelInstruction}`;
         console.log(`[AiExpressionService] Engine: ${currentEngine}`);
 
         // 2 生成エンジン毎に画像を生成
         if (currentEngine === 'openai') {
-            return await this.generateOpenAiImage(finalPrompt, targetModel, openaiApiKey);
+            if (base64Image && !rawBase64) {
+                return { success: false, error: 'ベースキャラクター画像を読み込めませんでした。' };
+            }
+            return await this.generateOpenAiImage(finalPrompt, targetModel, openaiApiKey, rawBase64, mimeType);
         } else if (currentEngine === 'comfyui') {
             return await this.generateComfyUiImage(finalPrompt, targetModel);
         } else if (currentEngine === 'ollama') {
@@ -182,31 +190,34 @@ export class AiExpressionService {
     }
 
     /**
-     * OpenAI DALL-E による生成
+     * OpenAI GPT Image による表情スプライト生成・編集
      */
-    private static async generateOpenAiImage(prompt: string, model: string, apiKey?: string) {
-        if (!apiKey) return { success: false, error: 'OpenAI API key is missing' };
-        const url = 'https://api.openai.com/v1/images/generations';
+    private static async generateOpenAiImage(
+        prompt: string,
+        model: string,
+        apiKey: string | undefined,
+        rawBase64: string,
+        mimeType: string
+    ) {
+        if (!apiKey) return { success: false, error: 'OpenAI APIキーが設定されていません。' };
         try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`
-                },
-                body: JSON.stringify({
-                    model: model || 'dall-e-3',
-                    prompt: prompt,
-                    n: 1,
-                    size: '1024x1024',
-                    response_format: 'b64_json'
-                })
-            });
-            if (!response.ok) throw new Error(`OpenAI Error: ${response.status}`);
-            const data: any = await response.json();
-            return { success: true, imageBytes: `data:image/png;base64,${data.data[0].b64_json}` };
-        } catch (e: any) {
-            return { success: false, error: e.message };
+            const base64Image = await OpenAiImageConnector.generateImage({
+                model: model || 'gpt-image-2',
+                prompt,
+                quality: 'high',
+                size: '1024x1024',
+                background: 'opaque',
+                initImage: rawBase64 ? `data:${mimeType};base64,${rawBase64}` : undefined
+            }, apiKey);
+            return {
+                success: true,
+                imageBytes: `data:image/png;base64,${base64Image}`
+            };
+        } catch (error: any) {
+            return {
+                success: false,
+                error: error.message
+            };
         }
     }
 

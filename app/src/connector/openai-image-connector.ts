@@ -1,6 +1,6 @@
 export type OpenAiImageQuality = 'low' | 'medium' | 'high' | 'auto';
 export type OpenAiImageSize = '1024x1024' | '1024x1536' | '1536x1024' | 'auto';
-export type OpenAiImageBackground = 'transparent' | 'opaque' | 'auto';
+export type OpenAiImageBackground = 'opaque' | 'auto';
 
 export interface OpenAiImageGenerateParams {
     prompt: string;
@@ -44,7 +44,7 @@ export class OpenAiImageConnector {
                     ? this.createEditFormData(params)
                     : JSON.stringify(this.createGenerationPayload(params))
             });
-            const data = await response.json() as OpenAiImageResponse;
+            const data = await this.readResponse(response);
             if (!response.ok) {
                 throw new Error(data.error?.message || `OpenAI Images API returned status ${response.status}`);
             }
@@ -55,9 +55,32 @@ export class OpenAiImageConnector {
             }
             return base64Image;
         } catch (error: any) {
-            console.error('[OpenAiImageConnector] OpenAIとの接続エラー');
-            throw new Error(`OpenAIとの接続エラー: ${error.message}`);
+            const message = this.sanitizeErrorMessage(error?.message || '不明なエラー', apiKey);
+            console.error(`[OpenAiImageConnector] OpenAIとの接続エラー: ${message}`);
+            throw new Error(`OpenAIとの接続エラー: ${message}`);
         }
+    }
+
+    private static async readResponse(response: Response): Promise<OpenAiImageResponse> {
+        const responseText = await response.text();
+        if (!responseText) return {};
+        try {
+            return JSON.parse(responseText) as OpenAiImageResponse;
+        } catch {
+            return {
+                error: {
+                    message: response.ok
+                        ? 'OpenAI Images APIの応答形式が不正です。'
+                        : `OpenAI Images API returned status ${response.status}: ${responseText.slice(0, 300)}`
+                }
+            };
+        }
+    }
+
+    private static sanitizeErrorMessage(message: string, apiKey: string): string {
+        return message
+            .replaceAll(apiKey, '[REDACTED]')
+            .replace(/sk-[A-Za-z0-9_-]+/g, '[REDACTED]');
     }
 
     private static createGenerationPayload(params: OpenAiImageGenerateParams) {
