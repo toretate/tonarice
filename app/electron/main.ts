@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, screen, dialog, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { ForgeConnector } from '../src/connector/forge-connector';
+import { OpenAiImageConnector } from '../src/connector/openai-image-connector';
 import { AiExpressionService } from '../src/skills/expression-service/expression-service';
 import { alignExpression, detectBaseFace } from '../src/server/utils/expression-edit-service';
 import { registerSelectLocalImageHandler } from './ipc-handlers/select-local-image-handler';
@@ -300,6 +301,10 @@ app.whenReady().then(async () => {
         const appConfig = config?.get();
         const debugLog = appConfig ? !!appConfig.forgeDebugLog : false;
         return await ForgeConnector.generateImage(params, host, debugLog);
+    });
+    ipcMain.handle('openai-image:generate', async (event, params: any) => {
+        const appConfig = config.get();
+        return await OpenAiImageConnector.generateImage(params, appConfig.openaiApiKey || '');
     });
 
 

@@ -84,7 +84,7 @@ const isFetchingModels = ref(false);
 
 const modelPresetsMap = ref<Record<string, string[]>>({
     gemini: ['gemini-3.1-flash-image', 'gemini-3-pro-image', 'gemini-2.5-flash-image', 'imagen-3.0-generate-002', 'imagen-3.0-generate-001'],
-    openai: ['dall-e-3', 'dall-e-2'],
+    openai: ['gpt-image-2'],
     ollama: [],
     comfyui: []
 });
@@ -153,7 +153,7 @@ const fetchImagenModels = async () => {
 const defaultPromptTemplate = 
 `顔のアップで、チャットマスコットとして必要な様々な表情を作成してください。
 作成する表情は以下の通りです：
-[__EMOTIONS_LABLE__]
+[EMOTIONS]
 背景は純白(#ffffff)にしてください。`
 // `添付した画像（スタイル特徴：[FEATURES]）を参照して、チャットマスコットとして必要な様々な表情を作成してください。
 // 作成する表情は以下の通りです：
@@ -184,8 +184,10 @@ watch(
             generationHistory.value = [];
             
             // エンジン初期値
-            selectedEngine.value = 'gemini';
-            selectedModel.value = 'gemini-3.1-flash-image';
+            selectedEngine.value = configStore.selectedImageEngine === 'openai_image' ? 'openai' : 'gemini';
+            selectedModel.value = selectedEngine.value === 'openai'
+                ? configStore.openaiImageModel
+                : 'gemini-3.1-flash-image';
             customModel.value = '';
             customModelEnabled.value = false;
             
@@ -354,7 +356,7 @@ const importGeneratedSprite = () => {
         <div class="modal-header flex justify-content-between align-items-center pb-2 border-bottom border-gray-200">
             <h2 id="ai-expression-generator-modal-title" class="text-base font-bold flex align-items-center gap-2 m-0 text-slate-800">
                     <i class="pi pi-sparkles text-brand-600 text-sm animate-pulse"></i>
-                    <span>AI表情スプライト自動生成 (Gemini Vision + Imagen 3)</span>
+                    <span>AI表情スプライト自動生成</span>
                 </h2>
                 <Button icon="pi pi-times" class="modal-close-button p-button-rounded p-button-text p-button-secondary" @click="emit('close')" :disabled="isGenerating" />
             </div>
@@ -396,7 +398,7 @@ const importGeneratedSprite = () => {
                                     :disabled="isGenerating"
                                 >
                                     <option value="gemini">Gemini (Imagen 3)</option>
-                                    <option value="openai">OpenAI (DALL-E)</option>
+                                    <option value="openai">OpenAI (GPT Image)</option>
                                     <option value="ollama">Ollama (Local)</option>
                                     <option value="comfyui">Comfy UI (Local)</option>
                                 </select>
@@ -537,7 +539,7 @@ const importGeneratedSprite = () => {
                         <div v-else-if="generatedImage" class="w-full h-full flex align-items-center justify-content-center p-2 relative">
                             <img :src="resolveImageUrl(generatedImage)" class="max-w-full max-h-full object-contain border-round shadow-md" />
                             <div class="absolute bottom-4 right-4 bg-slate-900/70 backdrop-blur text-white px-2.5 py-1 border-round text-xxs font-bold font-mono">
-                                Imagen 3 (1024x1024)
+                                {{ getModelDisplayName(finalModelName) }} (1024x1024)
                             </div>
                         </div>
 

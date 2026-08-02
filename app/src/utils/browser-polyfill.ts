@@ -729,6 +729,23 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
                 console.error('[Polyfill] forgeGenerateImage failed:', e);
                 throw e;
             }
+        },
+        openAiGenerateImage: async (params: any) => {
+            const response = await fetch('/api/openai-image/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ params })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success || !data.image) {
+                const errorMessage = data.error
+                    || data.statusMessage
+                    || data.message
+                    || `HTTP Error: ${response.status}`;
+                console.error(`[Polyfill] OpenAIとの接続エラー: ${errorMessage}`);
+                throw new Error(errorMessage);
+            }
+            return data.image;
         }
     };
 }

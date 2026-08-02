@@ -10,6 +10,10 @@ export interface AppConfig {
     selectedEngine: string;
     selectedVoiceEngine: string;
     selectedImageEngine: string;
+    openaiImageModel: string;
+    openaiImageQuality: 'low' | 'medium' | 'high' | 'auto';
+    openaiImageSize: '1024x1024' | '1024x1536' | '1536x1024' | 'auto';
+    openaiImageBackground: 'opaque' | 'auto';
     selectedVideoEngine: string;
     lmstudioEndpoint: string;
     lmstudioModel: string;
@@ -136,7 +140,11 @@ export const useConfigStore = defineStore('config', () => {
     
     const selectedEngine = ref('gemini');
     const selectedVoiceEngine = ref('voicevox');
-    const selectedImageEngine = ref('dalle3');
+    const selectedImageEngine = ref('openai_image');
+    const openaiImageModel = ref('gpt-image-2');
+    const openaiImageQuality = ref<'low' | 'medium' | 'high' | 'auto'>('auto');
+    const openaiImageSize = ref<'1024x1024' | '1024x1536' | '1536x1024' | 'auto'>('1024x1024');
+    const openaiImageBackground = ref<'opaque' | 'auto'>('auto');
     const selectedVideoEngine = ref('runway');
     
     const lmstudioEndpoint = ref('http://127.0.0.1:1234/v1/');
@@ -308,7 +316,13 @@ export const useConfigStore = defineStore('config', () => {
             
             selectedEngine.value = configData.selectedEngine || 'gemini';
             selectedVoiceEngine.value = configData.selectedVoiceEngine || 'voicevox';
-            selectedImageEngine.value = configData.selectedImageEngine || 'dalle3';
+            selectedImageEngine.value = configData.selectedImageEngine === 'dalle3'
+                ? 'openai_image'
+                : (configData.selectedImageEngine || 'openai_image');
+            openaiImageModel.value = configData.openaiImageModel || 'gpt-image-2';
+            openaiImageQuality.value = configData.openaiImageQuality || 'auto';
+            openaiImageSize.value = configData.openaiImageSize || '1024x1024';
+            openaiImageBackground.value = configData.openaiImageBackground === 'opaque' ? 'opaque' : 'auto';
             selectedVideoEngine.value = configData.selectedVideoEngine || 'runway';
             
             lmstudioEndpoint.value = configData.lmstudioEndpoint || 'http://127.0.0.1:1234/v1/';
@@ -429,7 +443,14 @@ export const useConfigStore = defineStore('config', () => {
             
             selectedEngine.value = localStorage.getItem('selectedEngine') || 'gemini';
             selectedVoiceEngine.value = localStorage.getItem('selectedVoiceEngine') || 'voicevox';
-            selectedImageEngine.value = localStorage.getItem('selectedImageEngine') || 'dalle3';
+            const storedImageEngine = localStorage.getItem('selectedImageEngine');
+            selectedImageEngine.value = storedImageEngine === 'dalle3'
+                ? 'openai_image'
+                : (storedImageEngine || 'openai_image');
+            openaiImageModel.value = localStorage.getItem('openaiImageModel') || 'gpt-image-2';
+            openaiImageQuality.value = (localStorage.getItem('openaiImageQuality') as typeof openaiImageQuality.value) || 'auto';
+            openaiImageSize.value = (localStorage.getItem('openaiImageSize') as typeof openaiImageSize.value) || '1024x1024';
+            openaiImageBackground.value = localStorage.getItem('openaiImageBackground') === 'opaque' ? 'opaque' : 'auto';
             selectedVideoEngine.value = localStorage.getItem('selectedVideoEngine') || 'runway';
             
             lmstudioEndpoint.value = localStorage.getItem('lmstudioEndpoint') || 'http://127.0.0.1:1234/v1/';
@@ -589,6 +610,10 @@ export const useConfigStore = defineStore('config', () => {
             selectedEngine: selectedEngine.value,
             selectedVoiceEngine: selectedVoiceEngine.value,
             selectedImageEngine: selectedImageEngine.value,
+            openaiImageModel: openaiImageModel.value,
+            openaiImageQuality: openaiImageQuality.value,
+            openaiImageSize: openaiImageSize.value,
+            openaiImageBackground: openaiImageBackground.value,
             selectedVideoEngine: selectedVideoEngine.value,
             lmstudioEndpoint: lmstudioEndpoint.value,
             lmstudioModel: lmstudioModel.value,
@@ -748,6 +773,10 @@ export const useConfigStore = defineStore('config', () => {
         safeSetItem('selectedEngine', selectedEngine.value);
         safeSetItem('selectedVoiceEngine', selectedVoiceEngine.value);
         safeSetItem('selectedImageEngine', selectedImageEngine.value);
+        safeSetItem('openaiImageModel', openaiImageModel.value);
+        safeSetItem('openaiImageQuality', openaiImageQuality.value);
+        safeSetItem('openaiImageSize', openaiImageSize.value);
+        safeSetItem('openaiImageBackground', openaiImageBackground.value);
         safeSetItem('selectedVideoEngine', selectedVideoEngine.value);
         safeSetItem('lmstudioEndpoint', lmstudioEndpoint.value);
         safeSetItem('lmstudioModel', lmstudioModel.value);
@@ -872,6 +901,10 @@ export const useConfigStore = defineStore('config', () => {
         if (newConfig.selectedEngine !== undefined) selectedEngine.value = newConfig.selectedEngine;
         if (newConfig.selectedVoiceEngine !== undefined) selectedVoiceEngine.value = newConfig.selectedVoiceEngine;
         if (newConfig.selectedImageEngine !== undefined) selectedImageEngine.value = newConfig.selectedImageEngine;
+        if (newConfig.openaiImageModel !== undefined) openaiImageModel.value = newConfig.openaiImageModel;
+        if (newConfig.openaiImageQuality !== undefined) openaiImageQuality.value = newConfig.openaiImageQuality;
+        if (newConfig.openaiImageSize !== undefined) openaiImageSize.value = newConfig.openaiImageSize;
+        if (newConfig.openaiImageBackground !== undefined) openaiImageBackground.value = newConfig.openaiImageBackground;
         if (newConfig.selectedVideoEngine !== undefined) selectedVideoEngine.value = newConfig.selectedVideoEngine;
         if (newConfig.lmstudioEndpoint !== undefined) lmstudioEndpoint.value = newConfig.lmstudioEndpoint;
         if (newConfig.lmstudioModel !== undefined) lmstudioModel.value = newConfig.lmstudioModel;
@@ -972,6 +1005,10 @@ export const useConfigStore = defineStore('config', () => {
         selectedEngine,
         selectedVoiceEngine,
         selectedImageEngine,
+        openaiImageModel,
+        openaiImageQuality,
+        openaiImageSize,
+        openaiImageBackground,
         selectedVideoEngine,
         lmstudioEndpoint,
         lmstudioModel,

@@ -195,7 +195,7 @@ const removeLora = (index: number) => {
 };
 
 const engines = ref([
-    { name: 'DALL-E 3 (OpenAI)', value: 'dalle3' },
+    { name: 'OpenAI GPT Image', value: 'openai_image' },
     { name: 'Stable Diffusion Forge', value: 'sd_forge' }
 ]);
 

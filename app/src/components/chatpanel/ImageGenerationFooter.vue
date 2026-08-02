@@ -32,8 +32,8 @@ const cancelMode = () => {
                 チャットに戻る <i class="pi pi-times"></i>
             </button>
         </div>
-        <!-- i2i時のみ Denoise (ノイズ強度) スライダーを表示 -->
-        <div v-if="mode === 'i2i'" class="denoise-slider-box">
+        <!-- Forgeのi2i時のみ Denoise (ノイズ強度) スライダーを表示 -->
+        <div v-if="mode === 'i2i' && configStore.selectedImageEngine === 'sd_forge'" class="denoise-slider-box">
             <span class="denoise-label">
                 Denoise (変化度): 
                 <span class="denoise-val">{{ (configStore.forgeDenoisingStrength !== undefined ? configStore.forgeDenoisingStrength : 0.7).toFixed(2) }}</span>
@@ -48,6 +48,10 @@ const cancelMode = () => {
                 @change="configStore.saveConfig()"
             />
         </div>
+        <p v-else-if="mode === 'i2i' && configStore.selectedImageEngine === 'openai_image'" class="openai-i2i-note">
+            <i class="pi pi-info-circle" aria-hidden="true"></i>
+            GPT Image 2は入力画像を高忠実度で参照します。変更量はプロンプトで指定してください。
+        </p>
     </div>
 </template>
 
@@ -168,6 +172,18 @@ const cancelMode = () => {
     transform: scale(1.2);
 }
 
+.openai-i2i-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 0;
+    padding-top: 6px;
+    border-top: 1px dashed var(--color-primary-alpha-15);
+    color: #64748b;
+    font-size: 10px;
+    line-height: 1.5;
+}
+
 /* シークレットモードスタイル */
 .image-gen-indicator.secret-mode {
     background: var(--color-primary-alpha-12);
@@ -189,6 +205,11 @@ const cancelMode = () => {
 
 .image-gen-indicator.secret-mode .denoise-slider-box {
     border-top-color: var(--color-primary-alpha-25);
+}
+
+.image-gen-indicator.secret-mode .openai-i2i-note {
+    border-top-color: var(--color-primary-alpha-25);
+    color: #cbd5e1;
 }
 
 .image-gen-indicator.secret-mode .denoise-label {

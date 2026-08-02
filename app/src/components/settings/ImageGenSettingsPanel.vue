@@ -9,6 +9,10 @@ import { storeToRefs } from 'pinia';
 const configStore = useConfigStore();
 const {
     selectedImageEngine,
+    openaiImageModel,
+    openaiImageQuality,
+    openaiImageSize,
+    openaiImageBackground,
     forgeEndpoint,
     forgeModel,
     forgeLora,
@@ -18,11 +22,29 @@ const {
 } = storeToRefs(configStore);
 
 const imageEngines = ref([
-    { name: 'DALL-E 3 (OpenAI)', value: 'dalle3' },
-    { name: 'Stable Diffusion Forge (ローカル)', value: 'sd_forge' },
-    { name: 'Stable Diffusion (ローカル)', value: 'sd_local' },
-    { name: 'Midjourney API', value: 'midjourney' }
+    { name: 'OpenAI GPT Image', value: 'openai_image' },
+    { name: 'Stable Diffusion Forge (ローカル)', value: 'sd_forge' }
 ]);
+
+const openaiModels = [
+    { name: 'GPT Image 2（推奨）', value: 'gpt-image-2' }
+];
+const openaiQualities = [
+    { name: '自動', value: 'auto' },
+    { name: '低', value: 'low' },
+    { name: '中', value: 'medium' },
+    { name: '高', value: 'high' }
+];
+const openaiSizes = [
+    { name: '正方形（1024 × 1024）', value: '1024x1024' },
+    { name: '縦長（1024 × 1536）', value: '1024x1536' },
+    { name: '横長（1536 × 1024）', value: '1536x1024' },
+    { name: '自動', value: 'auto' }
+];
+const openaiBackgrounds = [
+    { name: '自動', value: 'auto' },
+    { name: '不透明', value: 'opaque' }
+];
 
 const saveStatus = ref('設定を保存');
 const isSaving = ref(false);
@@ -124,6 +146,32 @@ const saveSettings = async () => {
                     />
                 </div>
 
+                <fieldset v-if="selectedImageEngine === 'openai_image'" class="flex flex-column gap-3 p-3 bg-slate-50 border-round border-1 border-gray-200 mt-2">
+                    <legend class="font-medium text-sm text-slate-700 px-1">OpenAI GPT Image 2 設定</legend>
+                    <div class="openai-mode-notes" aria-label="GPT Image 2 のモード別仕様">
+                        <p><strong>t2i:</strong> テキストから新しい画像を生成します。</p>
+                        <p><strong>i2i:</strong> 入力画像を常に高忠実度で参照します。Denoise設定はなく、変更量はプロンプトで指定します。</p>
+                    </div>
+                    <div class="form-field flex flex-column gap-1">
+                        <label for="openai-image-model" class="font-medium text-sm text-slate-700">モデル</label>
+                        <Select id="openai-image-model" v-model="openaiImageModel" :options="openaiModels" optionLabel="name" optionValue="value" class="w-full" />
+                    </div>
+                    <div class="form-field flex flex-column gap-1">
+                        <label for="openai-image-quality" class="font-medium text-sm text-slate-700">品質</label>
+                        <Select id="openai-image-quality" v-model="openaiImageQuality" :options="openaiQualities" optionLabel="name" optionValue="value" class="w-full" />
+                    </div>
+                    <div class="form-field flex flex-column gap-1">
+                        <label for="openai-image-size" class="font-medium text-sm text-slate-700">画像サイズ</label>
+                        <Select id="openai-image-size" v-model="openaiImageSize" :options="openaiSizes" optionLabel="name" optionValue="value" class="w-full" />
+                    </div>
+                    <div class="form-field flex flex-column gap-1">
+                        <label for="openai-image-background" class="font-medium text-sm text-slate-700">背景</label>
+                        <Select id="openai-image-background" v-model="openaiImageBackground" :options="openaiBackgrounds" optionLabel="name" optionValue="value" class="w-full" aria-describedby="openai-image-background-help" />
+                        <small id="openai-image-background-help" class="text-slate-500">GPT Image 2は透過背景に対応していません。</small>
+                    </div>
+                    <small class="text-slate-500">APIキーは「API KEY設定」のOpenAI欄を使用します。</small>
+                </fieldset>
+
                 <!-- Stable Diffusion Forge 専用設定 -->
                 <div v-if="selectedImageEngine === 'sd_forge'" class="flex flex-column gap-3 p-3 bg-slate-50 border-round border-1 border-gray-200 mt-2">
                     <div class="form-field flex flex-column gap-1">
@@ -212,3 +260,21 @@ const saveSettings = async () => {
         </template>
     </Card>
 </template>
+
+<style scoped>
+.openai-mode-notes {
+    display: grid;
+    gap: 4px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-primary-alpha-15);
+    border-radius: 8px;
+    background: var(--color-primary-alpha-06);
+    color: #475569;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.openai-mode-notes p {
+    margin: 0;
+}
+</style>
