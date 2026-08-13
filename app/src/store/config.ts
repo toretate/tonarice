@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { DEFAULT_ACCENT_COLOR } from '../config/theme';
+import { IRODORI_SPEED_DEFAULT, normalizeIrodoriSpeed } from '../utils/irodori-tts-settings';
 
 // アプリケーション全体の共通設定インターフェース
 export interface AppConfig {
@@ -28,6 +29,9 @@ export interface AppConfig {
     irodoriEndpoint: string;
     irodoriModel: string;
     irodoriVoice: string;
+    irodoriLora: string;
+    irodoriSpeed: number;
+    irodoriCaption: string;
     temperature: number;
     frequencyPenalty: number;
     repetitionPenalty: number;
@@ -172,6 +176,9 @@ export const useConfigStore = defineStore('config', () => {
     const irodoriEndpoint = ref('http://127.0.0.1:8088');
     const irodoriModel = ref('irodori-tts');
     const irodoriVoice = ref('default');
+    const irodoriLora = ref('');
+    const irodoriSpeed = ref(IRODORI_SPEED_DEFAULT);
+    const irodoriCaption = ref('');
     const temperature = ref(0.7);
     const frequencyPenalty = ref(0.0);
     const repetitionPenalty = ref(1.1);
@@ -352,6 +359,9 @@ export const useConfigStore = defineStore('config', () => {
             irodoriEndpoint.value = configData.irodoriEndpoint || 'http://127.0.0.1:8088';
             irodoriModel.value = configData.irodoriModel || 'irodori-tts';
             irodoriVoice.value = configData.irodoriVoice || 'default';
+            irodoriLora.value = configData.irodoriLora || '';
+            irodoriSpeed.value = normalizeIrodoriSpeed(configData.irodoriSpeed);
+            irodoriCaption.value = configData.irodoriCaption || '';
             temperature.value = configData.temperature !== undefined ? Number(configData.temperature) : 0.7;
             frequencyPenalty.value = configData.frequencyPenalty !== undefined ? Number(configData.frequencyPenalty) : 0.0;
             repetitionPenalty.value = configData.repetitionPenalty !== undefined ? Number(configData.repetitionPenalty) : 1.1;
@@ -477,6 +487,9 @@ export const useConfigStore = defineStore('config', () => {
             irodoriEndpoint.value = localStorage.getItem('irodoriEndpoint') || 'http://127.0.0.1:8088';
             irodoriModel.value = localStorage.getItem('irodoriModel') || 'irodori-tts';
             irodoriVoice.value = localStorage.getItem('irodoriVoice') || 'default';
+            irodoriLora.value = localStorage.getItem('irodoriLora') || '';
+            irodoriSpeed.value = normalizeIrodoriSpeed(localStorage.getItem('irodoriSpeed'));
+            irodoriCaption.value = localStorage.getItem('irodoriCaption') || '';
             
             const temp = localStorage.getItem('temperature');
             temperature.value = temp ? parseFloat(temp) : 0.7;
@@ -646,6 +659,9 @@ export const useConfigStore = defineStore('config', () => {
             irodoriEndpoint: irodoriEndpoint.value,
             irodoriModel: irodoriModel.value,
             irodoriVoice: irodoriVoice.value,
+            irodoriLora: irodoriLora.value,
+            irodoriSpeed: normalizeIrodoriSpeed(irodoriSpeed.value),
+            irodoriCaption: irodoriCaption.value.trim(),
             temperature: Number(temperature.value),
             frequencyPenalty: Number(frequencyPenalty.value),
             repetitionPenalty: Number(repetitionPenalty.value),
@@ -806,6 +822,9 @@ export const useConfigStore = defineStore('config', () => {
         safeSetItem('irodoriEndpoint', irodoriEndpoint.value);
         safeSetItem('irodoriModel', irodoriModel.value);
         safeSetItem('irodoriVoice', irodoriVoice.value);
+        safeSetItem('irodoriLora', irodoriLora.value);
+        safeSetItem('irodoriSpeed', normalizeIrodoriSpeed(irodoriSpeed.value).toString());
+        safeSetItem('irodoriCaption', irodoriCaption.value);
         safeSetItem('temperature', temperature.value.toString());
         safeSetItem('frequencyPenalty', frequencyPenalty.value.toString());
         safeSetItem('repetitionPenalty', repetitionPenalty.value.toString());
@@ -937,6 +956,9 @@ export const useConfigStore = defineStore('config', () => {
         if (newConfig.irodoriEndpoint !== undefined) irodoriEndpoint.value = newConfig.irodoriEndpoint;
         if (newConfig.irodoriModel !== undefined) irodoriModel.value = newConfig.irodoriModel;
         if (newConfig.irodoriVoice !== undefined) irodoriVoice.value = newConfig.irodoriVoice;
+        if (newConfig.irodoriLora !== undefined) irodoriLora.value = newConfig.irodoriLora;
+        if (newConfig.irodoriSpeed !== undefined) irodoriSpeed.value = normalizeIrodoriSpeed(newConfig.irodoriSpeed);
+        if (newConfig.irodoriCaption !== undefined) irodoriCaption.value = newConfig.irodoriCaption;
         if (newConfig.temperature !== undefined) temperature.value = Number(newConfig.temperature);
         if (newConfig.frequencyPenalty !== undefined) frequencyPenalty.value = Number(newConfig.frequencyPenalty);
         if (newConfig.repetitionPenalty !== undefined) repetitionPenalty.value = Number(newConfig.repetitionPenalty);
@@ -1044,6 +1066,9 @@ export const useConfigStore = defineStore('config', () => {
         irodoriEndpoint,
         irodoriModel,
         irodoriVoice,
+        irodoriLora,
+        irodoriSpeed,
+        irodoriCaption,
         temperature,
         frequencyPenalty,
         repetitionPenalty,

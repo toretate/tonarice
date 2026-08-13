@@ -1,0 +1,10 @@
+<resources>
+    <style name="Theme.Tonarice" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">@color/tonarice_primary</item>
+        <item name="android:navigationBarColor">@color/tonarice_background</item>
+        <item name="android:statusBarColor">@color/tonarice_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>

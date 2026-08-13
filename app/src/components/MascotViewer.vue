@@ -55,6 +55,9 @@ const {
     irodoriEndpoint,
     irodoriModel,
     irodoriVoice,
+    irodoriLora,
+    irodoriSpeed,
+    irodoriCaption,
     mascotBackgroundColor,
     mascotBackgroundOpacity,
     mascotBackgroundImage,
@@ -1259,9 +1262,12 @@ onMounted(async () => {
                 ? activeMascot.value.aiConfig.voice.speaker_id 
                 : (voicevoxSpeaker.value !== undefined ? voicevoxSpeaker.value : 2);
             const voicevoxEndpointUrl = voicevoxEndpoint.value || 'http://localhost:50021';
-            const irodoriEndpointUrl = irodoriEndpoint.value || 'http://localhost:7861';
+            const irodoriEndpointUrl = irodoriEndpoint.value || 'http://127.0.0.1:8088';
             const irodoriModelName = activeMascot.value?.aiConfig?.voice?.irodori_model || irodoriModel.value || 'irodori-tts-500m-v3';
             const irodoriVoiceName = activeMascot.value?.aiConfig?.voice?.irodori_voice || irodoriVoice.value || 'default';
+            const irodoriLoraPath = activeMascot.value?.aiConfig?.voice?.irodori_lora || irodoriLora.value || '';
+            const irodoriSpeedValue = activeMascot.value?.aiConfig?.voice?.irodori_speed ?? irodoriSpeed.value;
+            const irodoriCaptionValue = activeMascot.value?.aiConfig?.voice?.irodori_caption || irodoriCaption.value || '';
 
             if (useTts.value && options?.speak !== false && window.electronAPI) {
                 try {
@@ -1269,7 +1275,7 @@ onMounted(async () => {
                     const normalizedMemo = stripResidualAsterisks(normalizeTextForTts(memo, dict));
                     let audio = null;
                     if (voiceEngine === 'irodori') {
-                        audio = await window.electronAPI.synthesizeIrodori(normalizedMemo, irodoriEndpointUrl, irodoriModelName, irodoriVoiceName, 'surprised');
+                        audio = await window.electronAPI.synthesizeIrodori(normalizedMemo, irodoriEndpointUrl, irodoriModelName, irodoriVoiceName, 'surprised', irodoriLoraPath, irodoriSpeedValue, irodoriCaptionValue);
                     } else {
                         audio = await window.electronAPI.synthesizeVoicevox(normalizedMemo, speakerId, voicevoxEndpointUrl);
                     }
@@ -1458,8 +1464,10 @@ onUnmounted(() => {
 }
 
 .mascot-wrapper {
-    width: 100vw;
-    height: 100vh;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -1513,6 +1521,25 @@ onUnmounted(() => {
 .mascot-wrapper.is-integrated {
     width: 100% !important;
     height: 100% !important;
+    container-type: size;
+}
+
+/* スマホ縦画面では、固定キャンバスを上部セクション内へ収める */
+@media (max-width: 480px) and (hover: none) and (pointer: coarse) {
+    .mascot-wrapper.is-integrated .mascot-visual {
+        width: min(512px, 100vw, calc(31.48dvh - 12px));
+        height: auto;
+        aspect-ratio: 512 / 683;
+    }
+}
+
+/* コンテナクエリ対応WebViewでは、safe-areaを含む親セクションの実寸で計算する */
+@supports (width: 1cqw) {
+    @media (max-width: 480px) and (hover: none) and (pointer: coarse) {
+        .mascot-wrapper.is-integrated .mascot-visual {
+            width: min(512px, 100cqw, calc(74.96cqh - 12px));
+        }
+    }
 }
 
 .is-compact .mascot-character {

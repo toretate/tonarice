@@ -1,5 +1,6 @@
 import type { Base64AudioPayload } from '../../types/audio';
 import { createMp3Payload, encodeVoicevoxAudio } from './voice-audio-transcoder';
+import { normalizeIrodoriSpeed } from '../../utils/irodori-tts-settings';
 
 export class VoiceAiService {
     /**
@@ -10,7 +11,12 @@ export class VoiceAiService {
         const speaker = speakerId !== undefined ? speakerId : 2;
 
         if (showVoiceLog) {
-            console.log(`[VoiceAiService] VOICEVOX synthesize start for: "${text}"`);
+            console.log(`[VoiceAiService] TTS送信内容デバッグ: ${JSON.stringify({
+                engine: 'voicevox',
+                content: text,
+                lora: 'なし',
+                voiceId: speaker
+            })}`);
         }
 
         const voiceController = new AbortController();
@@ -75,18 +81,42 @@ export class VoiceAiService {
     /**
      * irodori-tts (OpenAI 互換) を使用して音声を合成し、Base64形式の音声データを返します。
      */
-    public static async synthesizeIrodori(text: string, endpoint: string, model: string, voice: string, emotion?: string, showVoiceLog: boolean = true): Promise<Base64AudioPayload | null> {
+    public static async synthesizeIrodori(
+        text: string,
+        endpoint: string,
+        model: string,
+        voice: string,
+        emotion?: string,
+        showVoiceLog: boolean = true,
+        loraAdapter?: string,
+        speed?: number,
+        caption?: string
+    ): Promise<Base64AudioPayload | null> {
         const baseUrl = endpoint || 'http://127.0.0.1:8088';
         let targetModel = model || 'irodori-tts';
         if (targetModel === 'irodori-tts-500m-v3') {
             targetModel = 'irodori-tts';
         }
         const targetVoice = voice || 'default';
+        const normalizedLoraAdapter = loraAdapter?.trim();
+        const targetSpeed = normalizeIrodoriSpeed(speed);
+        const normalizedCaption = caption?.trim();
+        const irodoriOptions = {
+            ...(normalizedLoraAdapter ? { lora_adapter: normalizedLoraAdapter } : {}),
+            ...(normalizedCaption ? { caption: normalizedCaption } : {})
+        };
 
         let textWithEmotion = text;
 
         if (showVoiceLog) {
-            console.log(`[VoiceAiService] irodori-tts synthesize start for: "${textWithEmotion}"`);
+            console.log(`[VoiceAiService] TTS送信内容デバッグ: ${JSON.stringify({
+                engine: 'irodori',
+                content: textWithEmotion,
+                lora: normalizedLoraAdapter || 'なし',
+                voiceId: targetVoice,
+                speed: targetSpeed,
+                caption: normalizedCaption || 'なし'
+            })}`);
         }
 
         const controller = new AbortController();
@@ -94,17 +124,20 @@ export class VoiceAiService {
 
         try {
             const url = baseUrl.endsWith('/') ? `${baseUrl}v1/audio/speech` : `${baseUrl}/v1/audio/speech`;
+            const requestBody = {
+                model: targetModel,
+                input: textWithEmotion,
+                voice: targetVoice,
+                response_format: 'mp3',
+                speed: targetSpeed,
+                ...(Object.keys(irodoriOptions).length > 0 ? { irodori: irodoriOptions } : {})
+            };
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    model: targetModel,
-                    input: textWithEmotion,
-                    voice: targetVoice,
-                    response_format: 'mp3'
-                }),
+                body: JSON.stringify(requestBody),
                 signal: controller.signal
             });
 

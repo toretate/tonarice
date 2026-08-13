@@ -29,10 +29,12 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
         // WebSocketのモック設定
         originalWebSocket = global.WebSocket;
         class MockWebSocket {
+            static CONNECTING = 0;
             static OPEN = 1;
+            static CLOSED = 3;
             send = vi.fn();
             close = vi.fn();
-            readyState = 1;
+            readyState = MockWebSocket.CONNECTING;
             onopen: any = null;
             onmessage: any = null;
             onclose: any = null;
@@ -252,7 +254,11 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
             scrollToBottom: vi.fn()
         });
 
-        await connection.sendMessage();
+        const sendPromise = connection.sendMessage();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        mockWebSocket.onclose?.({ code: 1006, reason: 'test' });
+        await sendPromise;
+        connection.disconnectWebSocket();
 
         const userMessage = messages.value.find(message => message.sender === 'user');
         expect(userMessage).toMatchObject({
@@ -275,12 +281,21 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
             scrollToBottom: vi.fn()
         });
 
-        // 初回は未接続のため失敗し、内部で再接続用WebSocketが作成される
-        await connection.sendMessage();
+        // 初回は接続完了前に切断されるため失敗し、内部で再接続用WebSocketが作成される
+        const firstSendPromise = connection.sendMessage();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        mockWebSocket.onclose?.({ code: 1006, reason: 'test' });
+        await firstSendPromise;
         const failedMessage = messages.value.find(message => message.sender === 'user');
+        connection.disconnectWebSocket();
 
-        await connection.retryMessage(failedMessage.id);
-        expect(mockWebSocket.send).toHaveBeenCalledOnce();
+        const retryPromise = connection.retryMessage(failedMessage.id);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        mockWebSocket.readyState = 1;
+        mockWebSocket.onopen?.();
+        await retryPromise;
+        expect(mockWebSocket.send).toHaveBeenCalledTimes(2);
+        expect(JSON.parse(mockWebSocket.send.mock.calls[1][0])).toMatchObject({ event: 'chat-send' });
         expect(messages.value.filter(message => message.sender === 'user')).toHaveLength(1);
         expect(failedMessage.deliveryStatus).toBe('sending');
 

@@ -26,6 +26,9 @@ export interface ConfigData {
     irodoriEndpoint: string;
     irodoriModel: string;
     irodoriVoice: string;
+    irodoriLora: string;
+    irodoriSpeed: number;
+    irodoriCaption: string;
     selectedImageEngine: string;
     geminiImageModel: string;
     geminiImageAspectRatio: string;
@@ -145,6 +148,9 @@ export const defaultData: ConfigData = {
     irodoriEndpoint: 'http://127.0.0.1:8088',
     irodoriModel: 'irodori-tts',
     irodoriVoice: 'default',
+    irodoriLora: '',
+    irodoriSpeed: 1.0,
+    irodoriCaption: '',
     selectedImageEngine: 'openai_image',
     geminiImageModel: 'gemini-3.1-flash-image',
     geminiImageAspectRatio: '1:1',

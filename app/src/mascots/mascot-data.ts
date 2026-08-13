@@ -17,6 +17,9 @@ interface MascotAiConfig {
         style?: string;
         irodori_voice?: string;
         irodori_model?: string;
+        irodori_lora?: string;
+        irodori_speed?: number;
+        irodori_caption?: string;
     };
     /** TTS読み上げ用の個別読み辞書（英語表記→カタカナ読み） */
     ttsDictionary?: Record<string, string>;
@@ -61,4 +64,3 @@ export default interface MascotData {
         poses: MascotAsset[];
     };
 }
-

@@ -15,6 +15,9 @@ export default defineEventHandler(async (event) => {
         endpoint,
         model,
         voice,
+        loraAdapter,
+        speed,
+        caption,
         speakerId,
         emotion,
         ttsDictionary,
@@ -42,6 +45,28 @@ export default defineEventHandler(async (event) => {
             return {
                 success: true,
                 voices: data.data || []
+            };
+        }
+
+        if (action === 'getIrodoriLoras') {
+            const defaultEndpoint = 'http://127.0.0.1:8088';
+            const apiBase = endpoint || defaultEndpoint;
+            const url = apiBase.endsWith('/') ? `${apiBase}v1/audio/loras` : `${apiBase}/v1/audio/loras`;
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+            const response = await fetch(url, {
+                method: 'GET',
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            return {
+                success: true,
+                loras: data.data || []
             };
         }
 
@@ -82,14 +107,29 @@ export default defineEventHandler(async (event) => {
 
             const audios = await Promise.all(sentences.map(sentence => {
                 if (engine === 'irodori') {
-                    return VoiceAiService.synthesizeIrodori(
-                        sentence,
-                        endpoint,
-                        model,
-                        voice,
-                        emotion,
-                        showVoiceLog !== false
-                    );
+                    return loraAdapter
+                        ? VoiceAiService.synthesizeIrodori(
+                            sentence,
+                            endpoint,
+                            model,
+                            voice,
+                            emotion,
+                            showVoiceLog !== false,
+                            loraAdapter,
+                            speed,
+                            caption
+                        )
+                        : VoiceAiService.synthesizeIrodori(
+                            sentence,
+                            endpoint,
+                            model,
+                            voice,
+                            emotion,
+                            showVoiceLog !== false,
+                            undefined,
+                            speed,
+                            caption
+                        );
                 }
                 return VoiceAiService.synthesize(
                     sentence,
@@ -110,14 +150,29 @@ export default defineEventHandler(async (event) => {
         let audio: Base64AudioPayload | null = null;
 
         if (engine === 'irodori') {
-            audio = await VoiceAiService.synthesizeIrodori(
-                sanitizeForIrodoriTTS(normalizedText),
-                endpoint,
-                model,
-                voice,
-                emotion,
-                true
-            );
+            audio = loraAdapter
+                ? await VoiceAiService.synthesizeIrodori(
+                    sanitizeForIrodoriTTS(normalizedText),
+                    endpoint,
+                    model,
+                    voice,
+                    emotion,
+                    true,
+                    loraAdapter,
+                    speed,
+                    caption
+                )
+                : await VoiceAiService.synthesizeIrodori(
+                    sanitizeForIrodoriTTS(normalizedText),
+                    endpoint,
+                    model,
+                    voice,
+                    emotion,
+                    true,
+                    undefined,
+                    speed,
+                    caption
+                );
         } else {
             // デフォルトは VOICEVOX
             const targetSpeakerId = speakerId !== undefined ? Number(speakerId) : 1;

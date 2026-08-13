@@ -6,6 +6,12 @@ app/dist/
 app/dist-electron/
 app/dist-web/
 
+# Android build outputs and local SDK configuration
+android/.gradle/
+android/local.properties
+android/build/
+android/app/build/
+
 # IDE and OS files
 .idea/
 .DS_Store

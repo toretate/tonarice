@@ -132,6 +132,9 @@ export default defineWebSocketHandler({
                     irodoriEndpoint,
                     irodoriModel,
                     irodoriVoice,
+                    irodoriLora,
+                    irodoriSpeed,
+                    irodoriCaption,
                     engine,
                     lmstudioEndpoint,
                     history,
@@ -338,7 +341,7 @@ export default defineWebSocketHandler({
                     const voiceEngine = selectedVoiceEngine || 'voicevox';
                     const baseUrl = voicevoxEndpoint || 'http://localhost:50021';
                     const speaker = voicevoxSpeakerId !== undefined ? voicevoxSpeakerId : 2;
-                    const irodoriUrl = irodoriEndpoint || 'http://localhost:7861';
+                    const irodoriUrl = irodoriEndpoint || 'http://127.0.0.1:8088';
                     const irodoriModelName = irodoriModel || 'irodori-tts-500m-v3';
                     const irodoriVoiceName = irodoriVoice || 'default';
 
@@ -353,7 +356,9 @@ export default defineWebSocketHandler({
 
                         const synthPromises = processedSentences.map(sentence => {
                             if (voiceEngine === 'irodori') {
-                                return VoiceAiService.synthesizeIrodori(sentence, irodoriUrl, irodoriModelName, irodoriVoiceName, detectedEmotion, showVoiceLog !== false);
+                                return irodoriLora
+                                    ? VoiceAiService.synthesizeIrodori(sentence, irodoriUrl, irodoriModelName, irodoriVoiceName, detectedEmotion, showVoiceLog !== false, irodoriLora, irodoriSpeed, irodoriCaption)
+                                    : VoiceAiService.synthesizeIrodori(sentence, irodoriUrl, irodoriModelName, irodoriVoiceName, detectedEmotion, showVoiceLog !== false, undefined, irodoriSpeed, irodoriCaption);
                             } else {
                                 return VoiceAiService.synthesize(sentence, speaker, baseUrl, showVoiceLog !== false);
                             }

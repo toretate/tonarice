@@ -137,7 +137,14 @@ const integratedBackgroundStyle = computed(() => {
 </script>
 
 <template>
-    <div ref="containerRef" class="integrated-container" :class="{ 'is-resizing': isResizing }">
+    <div
+        ref="containerRef"
+        class="integrated-container"
+        :class="{
+            'is-resizing': isResizing,
+            'is-mascot-hidden': windowMode !== 'compact' && !mascotVisible
+        }"
+    >
         <!-- 背景レイヤー -->
         <div class="integrated-background" :style="integratedBackgroundStyle"></div>
 
@@ -183,6 +190,7 @@ const integratedBackgroundStyle = computed(() => {
     display: flex;
     width: 100%;
     height: 100%;
+    min-height: 0;
     overflow: hidden;
     position: relative;
     box-sizing: border-box;
@@ -201,6 +209,7 @@ const integratedBackgroundStyle = computed(() => {
 .mascot-section {
     flex: 1;
     min-width: 0;
+    min-height: 0;
     height: 100%;
     position: relative;
     display: flex;
@@ -238,8 +247,11 @@ const integratedBackgroundStyle = computed(() => {
 .chat-section {
     flex: 0 0 var(--integrated-chat-size, 60%);
     min-width: 0;
+    min-height: 0;
     height: 100%;
     position: relative;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
     padding: 16px;
     box-sizing: border-box;
@@ -260,17 +272,18 @@ const integratedBackgroundStyle = computed(() => {
     padding-bottom: 220px;
 }
 
-/* 子コンポーネントの調整：MascotViewer が画面いっぱいに広がるようにする */
-:deep(.mascot-container) {
+/* 子コンポーネントを各セクションの実寸に合わせる */
+:deep(.mascot-wrapper),
+:deep(.chat-wrapper) {
     width: 100% !important;
     height: 100% !important;
-    background: transparent !important;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
 }
 
-/* ChatPanel 内の背景が二重にならないように透過させる（あるいは設定色をこちらでコントロールする） */
-:deep(.chat-panel-container) {
+:deep(.mascot-wrapper) {
     background: transparent !important;
-    height: 100% !important;
 }
 
 /* フローティングウィジェット専用の絶対配置レイヤー */
@@ -307,9 +320,9 @@ const integratedBackgroundStyle = computed(() => {
     }
 
     .mascot-section {
-        flex: 2 1 42%;
+        flex: 0 0 42%;
         width: 100%;
-        min-height: 0;
+        height: auto;
     }
 
     .section-splitter {
@@ -317,9 +330,20 @@ const integratedBackgroundStyle = computed(() => {
     }
 
     .chat-section:not(.is-compact) {
-        flex: 3 1 58%;
+        flex: 1 1 auto;
         width: 100%;
-        min-height: 0;
+        height: auto;
     }
+}
+
+/* v-showで状態を保持したまま、非表示時はチャットだけを全画面にする */
+.integrated-container.is-mascot-hidden .mascot-section,
+.integrated-container.is-mascot-hidden .section-splitter {
+    display: none;
+}
+
+.integrated-container.is-mascot-hidden .chat-section {
+    flex: 1 1 100%;
+    width: 100%;
 }
 </style>

@@ -1,9 +1,13 @@
+import { normalizeIrodoriSpeed } from '../utils/irodori-tts-settings';
+
 export type IrodoriTtsParameters = {
     text: string;
     endpoint: string;
     model: string;
     voice: string;
     emotion?: string;
+    speed?: number;
+    caption?: string;
 }
 
 export type IrodoriTtsModelResult = {
@@ -24,9 +28,20 @@ export type IrodoriTtsVoiceItem = {
     no_ref: boolean;
 }
 
+export type IrodoriTtsLoraItem = {
+    id: string;
+    object: "lora_adapter";
+    path: string;
+}
+
 export type IrodoriTtsVoicesResult = {
     object: "list";
     data: IrodoriTtsVoiceItem[];
+}
+
+export type IrodoriTtsLorasResult = {
+    object: "list";
+    data: IrodoriTtsLoraItem[];
 }
 
 export type IrodoriTtsUploadVoiceResult = {
@@ -43,6 +58,7 @@ type IrodoriSpecificOptions = {
     cfg_scale_text?: number,     // Strength of text guidance.
     cfg_scale_speaker?: number,  // Strength of speaker/reference-voice guidance.
     lora_adapter?: string,       // PEFT LoRA adapter directory to load dynamically for this request. The adapter is not merged into the base checkpoint.
+    caption?: string,             // VoiceDesign用の音声スタイル説明。
     t_schedule_mode?: string,    // Sampling schedule, usually linear or sway.
     sway_coeff?: number,         // Sway schedule coefficient when using t_schedule_mode: "sway".
     chunking_enabled?: boolean,  // Enable chunking inference.
@@ -126,6 +142,30 @@ export class IrodoriTtsConnector {
             return await response.json() as IrodoriTtsVoicesResult;
         } catch (e) {
             console.error('[IrodoriTtsConnector] ボイス一覧取得エラー:', e);
+            return null;
+        }
+    }
+
+    /**
+     * GET /v1/audio/loras
+     * サーバーに登録されている有効な LoRA アダプター一覧を取得します。
+     * @param endpoint エンドポイントURL
+     * @returns LoRA アダプター一覧
+     */
+    public static async listLoras(endpoint: string): Promise<IrodoriTtsLorasResult | null> {
+        const url = endpoint.endsWith('/')
+            ? `${endpoint}v1/audio/loras`
+            : `${endpoint}/v1/audio/loras`;
+        try {
+            const response = await fetch(url, {
+                method: 'GET'
+            });
+            if (!response.ok) {
+                return null;
+            }
+            return await response.json() as IrodoriTtsLorasResult;
+        } catch (e) {
+            console.error('[IrodoriTtsConnector] LoRA一覧取得エラー:', e);
             return null;
         }
     }
@@ -221,15 +261,8 @@ export class IrodoriTtsConnector {
                 response_format: 'mp3'
             };
 
-            if (params.speed) {
-                irodoriParams.speed = params.speed;
-            }
-
-            // ミヤコ用設定
-            if (!params.irodori) {
-                params.irodori = {
-                    lora_adapter: "models/adapters/miyako",
-                }
+            if (params.speed !== undefined) {
+                irodoriParams.speed = normalizeIrodoriSpeed(params.speed);
             }
 
             const response = await fetch(url, {
@@ -237,7 +270,10 @@ export class IrodoriTtsConnector {
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(irodoriParams)
+                body: JSON.stringify({
+                    ...irodoriParams,
+                    ...(params.irodori ? { irodori: params.irodori } : {})
+                })
             });
 
             if (!response.ok) {

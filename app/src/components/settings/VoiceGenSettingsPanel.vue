@@ -9,6 +9,11 @@ import { useConfigStore } from '@/store/config';
 import { useAuthStore } from '@/store/auth';
 import { storeToRefs } from 'pinia';
 import { IrodoriTtsConnector } from '@/connector/irodori-tts-connector';
+import {
+    IRODORI_SPEED_MAX,
+    IRODORI_SPEED_MIN,
+    normalizeIrodoriSpeed
+} from '@/utils/irodori-tts-settings';
 
 const configStore = useConfigStore();
 const authStore = useAuthStore();
@@ -20,6 +25,9 @@ const {
     irodoriEndpoint,
     irodoriModel,
     irodoriVoice,
+    irodoriLora,
+    irodoriSpeed,
+    irodoriCaption,
     activeMascot
 } = storeToRefs(configStore);
 
@@ -40,6 +48,12 @@ const isTestingIrodori = ref(false);
 const irodoriConnectionState = ref<'idle' | 'success' | 'failed'>('idle');
 const irodoriConnectionErrorMsg = ref('');
 const irodoriVoices = ref<{ name: string; value: string }[]>([]);
+
+// irodori-tts LoRA アダプター一覧の状態変数
+const isTestingIrodoriLora = ref(false);
+const irodoriLoraConnectionState = ref<'idle' | 'success' | 'failed'>('idle');
+const irodoriLoraConnectionErrorMsg = ref('');
+const irodoriLoras = ref<{ name: string; value: string }[]>([]);
 
 const saveStatus = ref('設定を保存');
 const isSaving = ref(false);
@@ -143,9 +157,62 @@ const fetchIrodoriVoices = async () => {
     }
 };
 
+// irodori-tts LoRA アダプター一覧のロード処理
+const fetchIrodoriLoras = async () => {
+    isTestingIrodoriLora.value = true;
+    irodoriLoraConnectionState.value = 'idle';
+    irodoriLoraConnectionErrorMsg.value = '';
+
+    try {
+        let rawLoras: Array<{ id?: string; path?: string }>;
+
+        if (window.electronAPI) {
+            const result = await window.electronAPI.getIrodoriLoras(irodoriEndpoint.value);
+            if (!result.success) {
+                throw new Error(result.error || 'LoRA一覧の取得に失敗しました。');
+            }
+            rawLoras = result.loras;
+        } else {
+            const result = await IrodoriTtsConnector.listLoras(irodoriEndpoint.value);
+            if (!result || !Array.isArray(result.data)) {
+                throw new Error('LoRA一覧の取得に失敗しました。');
+            }
+            rawLoras = result.data;
+        }
+
+        const loraOptions = rawLoras
+            .map((lora) => ({
+                name: lora.id || lora.path || '',
+                value: lora.path || lora.id || ''
+            }))
+            .filter((lora) => lora.value);
+
+        irodoriLoras.value = [
+            { name: 'ベースモデル（LoRAなし）', value: '' },
+            ...loraOptions
+        ];
+        if (!loraOptions.some((lora) => lora.value === irodoriLora.value)) {
+            irodoriLora.value = '';
+        }
+        irodoriLoraConnectionState.value = 'success';
+    } catch (e: any) {
+        irodoriLoraConnectionState.value = 'failed';
+        irodoriLoraConnectionErrorMsg.value = e?.message || '通信エラーが発生しました。';
+        irodoriLoras.value = [];
+    } finally {
+        isTestingIrodoriLora.value = false;
+    }
+};
+
+// エンドポイント変更時にボイスと LoRA の一覧をまとめて更新する
+const fetchIrodoriResources = () => {
+    void fetchIrodoriVoices();
+    void fetchIrodoriLoras();
+};
+
 watch([selectedVoiceEngine, irodoriEndpoint], ([newEngine]) => {
     if (newEngine === 'irodori') {
-        fetchIrodoriVoices();
+        fetchIrodoriResources();
     }
 });
 
@@ -185,6 +252,24 @@ const irodoriConnectionText = computed(() => {
     return 'エンドポイントを入力して更新ボタンを押してください。';
 });
 
+const irodoriLoraConnectionClass = computed(() => {
+    if (irodoriLoraConnectionState.value === 'success') return 'status-success';
+    if (irodoriLoraConnectionState.value === 'failed') return 'status-failed';
+    return 'status-idle';
+});
+
+const irodoriLoraConnectionIcon = computed(() => {
+    if (irodoriLoraConnectionState.value === 'success') return 'pi pi-check-circle text-green-400';
+    if (irodoriLoraConnectionState.value === 'failed') return 'pi pi-times-circle text-red-400';
+    return 'pi pi-info-circle text-gray-400';
+});
+
+const irodoriLoraConnectionText = computed(() => {
+    if (irodoriLoraConnectionState.value === 'success') return `取得成功 (LoRA数: ${Math.max(irodoriLoras.value.length - 1, 0)})`;
+    if (irodoriLoraConnectionState.value === 'failed') return `取得失敗: ${irodoriLoraConnectionErrorMsg.value}`;
+    return 'エンドポイントを入力して更新ボタンを押してください。';
+});
+
 // --- 音声テスト用 ---
 const testMessage = ref('こんにちは！音声合成のテストです。');
 const isTestingVoice = ref(false);
@@ -211,7 +296,10 @@ const testPlayVoice = async () => {
                     irodoriEndpoint.value,
                     irodoriModel.value,
                     irodoriVoice.value,
-                    'neutral'
+                    'neutral',
+                    irodoriLora.value,
+                    irodoriSpeed.value,
+                    irodoriCaption.value
                 );
             }
         }
@@ -306,6 +394,9 @@ const applyVoiceToMascot = async () => {
     } else if (selectedVoiceEngine.value === 'irodori') {
         activeMascot.value.aiConfig.voice.irodori_voice = irodoriVoice.value;
         activeMascot.value.aiConfig.voice.irodori_model = irodoriModel.value;
+        activeMascot.value.aiConfig.voice.irodori_lora = irodoriLora.value;
+        activeMascot.value.aiConfig.voice.irodori_speed = normalizeIrodoriSpeed(irodoriSpeed.value);
+        activeMascot.value.aiConfig.voice.irodori_caption = irodoriCaption.value.trim();
     }
     
     console.log(`[VoiceGenSettingsPanel] Applied voice to mascot ${activeMascot.value.id}:`, activeMascot.value.aiConfig.voice);
@@ -341,6 +432,15 @@ const loadMascotVoiceSettings = () => {
         if (mv.irodori_model) {
             irodoriModel.value = mv.irodori_model;
         }
+        if (mv.irodori_lora !== undefined) {
+            irodoriLora.value = mv.irodori_lora;
+        }
+        if (mv.irodori_speed !== undefined) {
+            irodoriSpeed.value = normalizeIrodoriSpeed(mv.irodori_speed);
+        }
+        if (mv.irodori_caption !== undefined) {
+            irodoriCaption.value = mv.irodori_caption;
+        }
         console.log('[VoiceGenSettingsPanel] Loaded voice settings from mascot:', activeMascot.value.name);
     }
 };
@@ -351,7 +451,7 @@ onMounted(() => {
         testVoicevoxConnection();
     }
     if (selectedVoiceEngine.value === 'irodori') {
-        fetchIrodoriVoices();
+        fetchIrodoriResources();
     }
 });
 
@@ -469,6 +569,98 @@ watch(activeMascot, () => {
                             placeholder="irodori-tts" 
                             class="w-full"
                         />
+                    </div>
+                    <div class="form-field">
+                        <div class="flex justify-content-between align-items-center">
+                            <label for="irodori-speed" class="font-medium">再生速度 (speed)</label>
+                            <span class="text-sm text-gray-500">{{ Number(irodoriSpeed).toFixed(2) }}x</span>
+                        </div>
+                        <div class="flex align-items-center gap-3">
+                            <input
+                                id="irodori-speed-range"
+                                v-model.number="irodoriSpeed"
+                                type="range"
+                                :min="IRODORI_SPEED_MIN"
+                                :max="IRODORI_SPEED_MAX"
+                                step="0.05"
+                                class="flex-1"
+                                aria-label="Irodori-TTS再生速度スライダー"
+                                aria-describedby="irodori-speed-help"
+                            />
+                            <input
+                                id="irodori-speed"
+                                v-model.number="irodoriSpeed"
+                                type="number"
+                                :min="IRODORI_SPEED_MIN"
+                                :max="IRODORI_SPEED_MAX"
+                                step="0.05"
+                                inputmode="decimal"
+                                class="p-inputtext"
+                                style="width: 7rem"
+                                aria-label="Irodori-TTS再生速度を直接指定"
+                                aria-describedby="irodori-speed-help"
+                                @change="irodoriSpeed = normalizeIrodoriSpeed(irodoriSpeed)"
+                            />
+                        </div>
+                        <small id="irodori-speed-help" class="text-gray-500">
+                            ゲージまたは数値入力で、0.25〜4.0の範囲を指定します。1.0が標準速度で、値が大きいほど速くなります。
+                        </small>
+                    </div>
+                    <div class="form-field">
+                        <label for="irodori-caption" class="font-medium">音声スタイル (caption)</label>
+                        <textarea
+                            id="irodori-caption"
+                            v-model="irodoriCaption"
+                            rows="3"
+                            class="p-inputtext w-full"
+                            placeholder="例: 落ち着いた、やさしい声で話す"
+                            aria-describedby="irodori-caption-help"
+                        ></textarea>
+                        <small id="irodori-caption-help" class="text-gray-500">
+                            Irodori-TTS v4以降のVoiceDesign対応モデルで使用する音声スタイルの説明です。未入力の場合は送信しません。
+                        </small>
+                    </div>
+                    <div class="form-field">
+                        <label for="irodori-lora" class="font-medium">使用 LoRA (lora_adapter)</label>
+                        <div class="flex gap-2 w-full">
+                            <Select
+                                v-if="irodoriLoras.length > 0"
+                                inputId="irodori-lora"
+                                v-model="irodoriLora"
+                                :options="irodoriLoras"
+                                optionLabel="name"
+                                optionValue="value"
+                                placeholder="LoRAを選択..."
+                                class="flex-1"
+                            />
+                            <InputText
+                                v-else
+                                id="irodori-lora"
+                                v-model="irodoriLora"
+                                placeholder="LoRAなし"
+                                class="flex-1"
+                            />
+                            <Button
+                                icon="pi pi-sync"
+                                class="p-button-secondary"
+                                title="LoRA一覧再読み込み"
+                                :loading="isTestingIrodoriLora"
+                                @click="fetchIrodoriLoras"
+                            />
+                        </div>
+                        <small class="text-gray-500">
+                            サーバーから返された path を使用します。LoRAを使わない場合は「ベースモデル」を選択してください。
+                        </small>
+                        <div
+                            v-if="irodoriLoraConnectionState !== 'idle'"
+                            class="connection-status mt-1"
+                            :class="irodoriLoraConnectionClass"
+                            role="status"
+                            aria-live="polite"
+                        >
+                            <i :class="irodoriLoraConnectionIcon"></i>
+                            <span>{{ irodoriLoraConnectionText }}</span>
+                        </div>
                     </div>
                     <div class="form-field">
                         <label class="font-medium">使用ボイス/話者 (voice)</label>

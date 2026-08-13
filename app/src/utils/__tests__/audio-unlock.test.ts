@@ -33,9 +33,14 @@ describe('audio-unlock', () => {
             expect(isWebClient()).toBe(true);
         });
 
-        it('isWebClient - window.electronAPIが存在する場合はfalseを返すこと', () => {
-            window.electronAPI = {} as any;
+        it('isWebClient - Electronのwindow.electronAPIの場合はfalseを返すこと', () => {
+            window.electronAPI = { isWeb: false } as any;
             expect(isWebClient()).toBe(false);
+        });
+
+        it('isWebClient - WebView用ポリフィルの場合はtrueを返すこと', () => {
+            window.electronAPI = { isWeb: true } as any;
+            expect(isWebClient()).toBe(true);
         });
     });
 

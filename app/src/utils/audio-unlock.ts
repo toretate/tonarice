@@ -6,10 +6,11 @@ const SILENT_WAV = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAI
 let isUnlocked = false;
 
 /**
- * 現在の環境がWebクライアント（非Electron環境）かどうかを判定します。
+ * 現在の環境がWebクライアント（ブラウザ/WebView）かどうかを判定します。
  */
 export function isWebClient(): boolean {
-    return typeof window !== 'undefined' && typeof window.electronAPI === 'undefined';
+    return typeof window !== 'undefined'
+        && (!window.electronAPI || window.electronAPI.isWeb === true);
 }
 
 /**
@@ -57,7 +58,7 @@ export async function unlockAudio(): Promise<boolean> {
 }
 
 /**
- * Web環境において、初回の明示操作（pointerdown等）で音声解放を行うリスナーを設定します。
+ * Web環境（ブラウザ/WebView）において、初回の明示操作（pointerdown等）で音声解放を行うリスナーを設定します。
  * Electron環境では何もしません。
  * @returns リスナー解除用のクリーンアップ関数
  */

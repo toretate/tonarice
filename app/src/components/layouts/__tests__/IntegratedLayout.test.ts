@@ -154,6 +154,7 @@ describe('IntegratedLayout.vue - 統合ウィンドウのテスト', () => {
         configStore.mascotVisible = false;
         await wrapper.vm.$nextTick();
 
+        expect(wrapper.get('.integrated-container').classes()).toContain('is-mascot-hidden');
         expect(wrapper.find('.mascot-section').exists()).toBe(true);
         expect(wrapper.find('.section-splitter').exists()).toBe(true);
         expect(wrapper.find('.chat-section').exists()).toBe(true);
@@ -163,6 +164,7 @@ describe('IntegratedLayout.vue - 統合ウィンドウのテスト', () => {
         configStore.mascotVisible = true;
         await wrapper.vm.$nextTick();
 
+        expect(wrapper.get('.integrated-container').classes()).not.toContain('is-mascot-hidden');
         expect(wrapper.get('.mascot-wrapper').attributes('style') || '').not.toContain('display: none');
     });
 

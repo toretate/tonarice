@@ -11,6 +11,7 @@ import { sanitizeForIrodoriTTS } from '../../utils/irodori-sanitizer';
 import { useTaskStore } from '../../store/task';
 import { useMemoStore } from '../../store/memo';
 import { decodeAudioBinaryFrame } from '../../utils/audio-binary-frame';
+import { normalizeIrodoriSpeed } from '../../utils/irodori-tts-settings';
 
 export function useChatConnection(params: {
     messages: Ref<Message[]>;
@@ -77,6 +78,11 @@ export function useChatConnection(params: {
 
     let socket: WebSocket | null = null;
     const isWsConnected = ref(false);
+    let socketReadyPromise: Promise<boolean> | null = null;
+    let settleSocketReady: ((connected: boolean) => void) | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectEnabled = true;
+    let waitingForConnection = false;
     let pendingUserMessageId: number | null = null;
     let pendingAssistantMessageId: number | null = null;
 
@@ -113,6 +119,9 @@ export function useChatConnection(params: {
     };
 
     const failPendingMessage = async (errorMessage: string) => {
+        if (pendingUserMessageId === null && pendingAssistantMessageId === null) {
+            return;
+        }
         if (pendingUserMessageId !== null) {
             const userMessage = messages.value.find(message => message.id === pendingUserMessageId);
             if (userMessage) {
@@ -128,9 +137,28 @@ export function useChatConnection(params: {
         await saveHistory();
     };
 
-    const connectWebSocket = () => {
-        if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
-            return;
+    const connectWebSocket = (): Promise<boolean> => {
+        reconnectEnabled = true;
+        if (reconnectTimer !== null) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+
+        const currentSocket = socket;
+        if (currentSocket?.readyState === WebSocket.OPEN) {
+            return Promise.resolve(true);
+        }
+        if (currentSocket?.readyState === WebSocket.CONNECTING) {
+            return socketReadyPromise ?? Promise.resolve(false);
+        }
+        if (currentSocket) {
+            settleSocketReady?.(false);
+            socket = null;
+            try {
+                currentSocket.close();
+            } catch {
+                // 既に終了処理中のWebSocketはそのまま破棄する
+            }
         }
 
         const isSecure = window.location.protocol === 'https:';
@@ -139,27 +167,84 @@ export function useChatConnection(params: {
         const wsUrl = `${wsProtocol}//${wsHost}/ws`;
 
         console.log(`[useChatConnection] Connecting to WebSocket (Nitro): ${wsUrl}`);
-        socket = new WebSocket(wsUrl);
-        socket.binaryType = 'arraybuffer';
 
-        socket.onopen = () => {
+        let currentSocketForHandlers: WebSocket;
+        try {
+            currentSocketForHandlers = new WebSocket(wsUrl);
+        } catch (error) {
+            console.error('[useChatConnection] WebSocketの作成に失敗しました:', error);
+            socket = null;
+            isWsConnected.value = false;
+            return Promise.resolve(false);
+        }
+
+        socket = currentSocketForHandlers;
+        currentSocketForHandlers.binaryType = 'arraybuffer';
+
+        let resolveReady: (connected: boolean) => void = () => {};
+        let readySettled = false;
+        const readyPromise = new Promise<boolean>((resolve) => {
+            resolveReady = resolve;
+        });
+        socketReadyPromise = readyPromise;
+
+        const settleReady = (connected: boolean) => {
+            if (readySettled) return;
+            readySettled = true;
+            if (settleSocketReady === settleReady) {
+                settleSocketReady = null;
+            }
+            if (socketReadyPromise === readyPromise) {
+                socketReadyPromise = null;
+            }
+            resolveReady(connected);
+        };
+        settleSocketReady = settleReady;
+
+        currentSocketForHandlers.onopen = () => {
+            if (socket !== currentSocketForHandlers) return;
             console.log('[useChatConnection] WebSocket connected');
             isWsConnected.value = true;
-            socket?.send(JSON.stringify({
-                event: 'client-capabilities',
-                data: { binaryAudioV1: true }
-            }));
+            settleReady(true);
+            try {
+                currentSocketForHandlers.send(JSON.stringify({
+                    event: 'client-capabilities',
+                    data: { binaryAudioV1: true }
+                }));
+            } catch (error) {
+                console.error('[useChatConnection] WebSocket capability通知の送信に失敗しました:', error);
+            }
         };
 
-        socket.onmessage = async (event) => {
+        currentSocketForHandlers.onmessage = async (event) => {
+            if (socket !== currentSocketForHandlers) return;
+
             try {
-                if (event.data instanceof ArrayBuffer) {
+                const eventData = event.data as unknown;
+                const isBinaryData = eventData instanceof ArrayBuffer
+                    || ArrayBuffer.isView(eventData)
+                    || (eventData !== null
+                        && typeof eventData === 'object'
+                        && typeof (eventData as { arrayBuffer?: unknown }).arrayBuffer === 'function');
+                if (isBinaryData) {
                     if (useTts.value) {
-                        playlist.push(decodeAudioBinaryFrame(event.data));
+                        let audioBuffer: ArrayBufferLike | null = null;
+                        if (eventData instanceof ArrayBuffer) {
+                            audioBuffer = eventData;
+                        } else if (ArrayBuffer.isView(eventData)) {
+                            const view = eventData as ArrayBufferView;
+                            audioBuffer = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+                        } else {
+                            audioBuffer = await (eventData as Blob).arrayBuffer();
+                        }
+                        if (audioBuffer !== null) {
+                            playlist.push(decodeAudioBinaryFrame(audioBuffer));
+                        }
                     }
                     return;
                 }
-                const parsed = JSON.parse(event.data);
+
+                const parsed = JSON.parse(eventData as string);
                 const { event: wsEvent, data } = parsed;
 
                 if (wsEvent === 'chat-status') {
@@ -254,29 +339,76 @@ export function useChatConnection(params: {
             }
         };
 
-        socket.onclose = () => {
-            console.log('[useChatConnection] WebSocket disconnected');
+        currentSocketForHandlers.onclose = (event) => {
+            if (socket !== currentSocketForHandlers) return;
+            const code = typeof event?.code === 'number' ? event.code : 'unknown';
+            const reason = event?.reason || '理由なし';
+            console.log(`[useChatConnection] WebSocket disconnected (code=${code}, reason=${reason})`);
+            settleReady(false);
             isWsConnected.value = false;
             socket = null;
-            if (pendingUserMessageId !== null) {
+            if ((pendingUserMessageId !== null || pendingAssistantMessageId !== null) && !waitingForConnection) {
                 void failPendingMessage('WebSocket接続が切断されました。');
             }
-            // 常に再接続を試みる
-            setTimeout(connectWebSocket, 5000);
+            if (reconnectEnabled && reconnectTimer === null) {
+                reconnectTimer = setTimeout(() => {
+                    reconnectTimer = null;
+                    if (reconnectEnabled) {
+                        void connectWebSocket();
+                    }
+                }, 5000);
+            }
         };
 
-        socket.onerror = (err) => {
+        currentSocketForHandlers.onerror = (err) => {
+            if (socket !== currentSocketForHandlers) return;
             console.error('[useChatConnection] WebSocket connection error:', err);
-            if (pendingUserMessageId !== null) {
+            settleReady(false);
+            if ((pendingUserMessageId !== null || pendingAssistantMessageId !== null) && !waitingForConnection) {
                 void failPendingMessage('WebSocket通信でネットワークエラーが発生しました。');
             }
         };
+
+        return readyPromise;
+    };
+
+    const waitForSocketConnection = async (): Promise<boolean> => {
+        const readyPromise = connectWebSocket();
+        if (socket?.readyState === WebSocket.OPEN) {
+            return true;
+        }
+
+        return new Promise<boolean>((resolve) => {
+            let settled = false;
+            const timeoutId = setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                resolve(false);
+            }, 10000);
+            readyPromise.then((connected) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeoutId);
+                resolve(connected);
+            });
+        });
     };
 
     const disconnectWebSocket = () => {
-        if (socket) {
-            socket.close();
-            socket = null;
+        reconnectEnabled = false;
+        if (reconnectTimer !== null) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+        const currentSocket = socket;
+        socket = null;
+        settleSocketReady?.(false);
+        if (currentSocket) {
+            try {
+                currentSocket.close();
+            } catch {
+                // 既に切断されたWebSocketはそのまま破棄する
+            }
         }
         isWsConnected.value = false;
     };
@@ -418,9 +550,14 @@ export function useChatConnection(params: {
             ? mascot.aiConfig.voice.speaker_id
             : (configStore.voicevoxSpeaker !== undefined ? configStore.voicevoxSpeaker : 2);
 
-        const irodoriEndpointUrl = configStore.irodoriEndpoint || 'http://localhost:7861';
+        const irodoriEndpointUrl = configStore.irodoriEndpoint || 'http://127.0.0.1:8088';
         const irodoriModel = mascot?.aiConfig?.voice?.irodori_model || configStore.irodoriModel || 'irodori-tts-500m-v3';
         const irodoriVoice = mascot?.aiConfig?.voice?.irodori_voice || configStore.irodoriVoice || 'default';
+        const irodoriLora = mascot?.aiConfig?.voice?.irodori_lora || configStore.irodoriLora || '';
+        const irodoriSpeed = normalizeIrodoriSpeed(
+            mascot?.aiConfig?.voice?.irodori_speed ?? configStore.irodoriSpeed
+        );
+        const irodoriCaption = mascot?.aiConfig?.voice?.irodori_caption || configStore.irodoriCaption || '';
 
         let systemPrompt = '';
 
@@ -504,8 +641,10 @@ export function useChatConnection(params: {
         await nextTick();
         scrollToBottom();
 
-        if (!socket || socket.readyState !== WebSocket.OPEN) {
-            connectWebSocket();
+        waitingForConnection = true;
+        const connected = await waitForSocketConnection();
+        waitingForConnection = false;
+        if (!connected || !socket || socket.readyState !== WebSocket.OPEN) {
             await failPendingMessage('サーバーに接続されていません。再接続後に再送してください。');
             return;
         }
@@ -524,6 +663,9 @@ export function useChatConnection(params: {
                 irodoriEndpoint: irodoriEndpointUrl,
                 irodoriModel: irodoriModel,
                 irodoriVoice: irodoriVoice,
+                irodoriLora: irodoriLora,
+                irodoriSpeed: irodoriSpeed,
+                irodoriCaption: irodoriCaption,
                 engine: engine,
                 lmstudioEndpoint: lmsEndpoint,
                 temperature: temperature.value,

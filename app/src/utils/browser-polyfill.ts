@@ -391,7 +391,7 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
                 return null;
             }
         },
-        synthesizeIrodori: async (text: string, endpoint: string, model: string, voice: string, emotion?: string) => {
+        synthesizeIrodori: async (text: string, endpoint: string, model: string, voice: string, emotion?: string, loraAdapter?: string, speed?: number, caption?: string) => {
             try {
                 const response = await fetch('/api/tts', {
                     method: 'POST',
@@ -404,7 +404,10 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
                         endpoint,
                         model,
                         voice,
-                        emotion
+                        emotion,
+                        loraAdapter,
+                        speed,
+                        caption
                     })
                 });
                 if (!response.ok) throw new Error(getHttpErrorMessage(response.status));
@@ -455,6 +458,27 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
                     : { success: false, voices: [], error: data.error || 'ボイス一覧の取得に失敗しました。' };
             } catch (e: any) {
                 return { success: false, voices: [], error: e.message || '接続に失敗しました' };
+            }
+        },
+        getIrodoriLoras: async (endpoint: string) => {
+            try {
+                const response = await fetch('/api/tts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        action: 'getIrodoriLoras',
+                        endpoint
+                    })
+                });
+                if (!response.ok) throw new Error(getHttpErrorMessage(response.status));
+                const data = await response.json();
+                return data.success
+                    ? { success: true, loras: data.loras }
+                    : { success: false, loras: [], error: data.error || 'LoRA一覧の取得に失敗しました。' };
+            } catch (e: any) {
+                return { success: false, loras: [], error: e.message || '接続に失敗しました' };
             }
         },
         generateMascotExpressions: async (
