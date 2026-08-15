@@ -1,4 +1,5 @@
 import { BrowserWindow, screen } from 'electron';
+import { attachRendererConsoleLogger } from './renderer-console-logger';
 import * as path from 'path';
 
 let mascotWindow: BrowserWindow | null = null;
@@ -70,9 +71,7 @@ export function createMascotWindow(onMove?: () => void): BrowserWindow {
         }
     });
 
-    mascotWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
-        console.log(`[Renderer Log - Mascot] [Level: ${level}] ${message} (Source: ${sourceId}:${line})`);
-    });
+    attachRendererConsoleLogger(mascotWindow.webContents, 'Mascot');
 
     if (configData.alwaysOnTop) {
         mascotWindow.setAlwaysOnTop(true, 'screen-saver');

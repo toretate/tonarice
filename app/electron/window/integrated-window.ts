@@ -1,4 +1,5 @@
 import { BrowserWindow, screen } from 'electron';
+import { attachRendererConsoleLogger } from './renderer-console-logger';
 import * as path from 'path';
 
 let integratedWindow: BrowserWindow | null = null;
@@ -78,9 +79,7 @@ export function createIntegratedWindow(): BrowserWindow {
         }
     });
 
-    integratedWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
-        console.log(`[Renderer Log - Integrated] [Level: ${level}] ${message} (Source: ${sourceId}:${line})`);
-    });
+    attachRendererConsoleLogger(integratedWindow.webContents, 'Integrated');
 
     integratedWindow.once('ready-to-show', () => {
         if (integratedWindow) {
