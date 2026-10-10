@@ -185,3 +185,11 @@ ui/
   `defaultData` や設定スキーマは共通化されており、Electron 環境では `app-config.ts` を介してローカルファイルとして読み書きされますが、Web環境では `localStorage` やサーバーAPI等に差し替え可能です。
 * **API / IPC ハンドラーのモジュール化**:
   メインプロセスでの処理が IPC サービスごとに完全に分離されているため、通信層（IPC）を Web アプリケーション用の HTTP/WebSocket リクエストハンドラーに容易に置き換えることができます。
+
+## 3. AIエージェント基盤
+
+* AI応答の既存実装はVercel AI SDKを使用する。
+* MastraはNitroサーバープロセス内の任意のオーケストレーション基盤として段階導入する。
+* MastraランタイムをElectronメインプロセスやRendererへ配置しない。
+* 正式移行までは機能フラグで既存AI経路へ戻せる構成を維持する。
+* 詳細は`docs/specs/MastraIntegration.spec.md`に定める。

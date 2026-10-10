@@ -13,10 +13,33 @@ import { executeMemosTool, executeTasksTool } from '../utils/tool-executor';
 import { updateTaskInDb } from '../utils/tasks-service';
 import { isAuthBypassAllowed } from '../utils/auth-bypass';
 import { encodeAudioBinaryFrame } from '../../utils/audio-binary-frame';
+import { MastraChatService } from '../mastra/mastra-chat-service';
+import { resolveMastraChatModel } from '../mastra/model-resolver';
+import { getMastraChatErrorMessage, shouldUseMastraChat } from '../mastra/chat-route';
 
 
 // ユーザーごとの接続管理（crosswsのPeerオブジェクトをSetに保存）
 const userConnections = new Map<string, Set<any>>();
+const activeMastraRequests = new WeakMap<object, Set<AbortController>>();
+
+function registerMastraRequest(peer: object, controller: AbortController): void {
+    const requests = activeMastraRequests.get(peer) || new Set<AbortController>();
+    requests.add(controller);
+    activeMastraRequests.set(peer, requests);
+}
+
+function unregisterMastraRequest(peer: object, controller: AbortController): void {
+    const requests = activeMastraRequests.get(peer);
+    requests?.delete(controller);
+    if (requests?.size === 0) activeMastraRequests.delete(peer);
+}
+
+function abortMastraRequests(peer: object): void {
+    for (const controller of activeMastraRequests.get(peer) || []) {
+        controller.abort();
+    }
+    activeMastraRequests.delete(peer);
+}
 
 function addConnection(userId: string, peer: any) {
     if (!userConnections.has(userId)) {
@@ -151,11 +174,13 @@ export default defineWebSocketHandler({
                     enableThinking,
                     ttsDictionary
                 } = data;
+                const useMastra = shouldUseMastraChat(engine);
 
                 console.log(`=========================================`);
                 console.log(`[WS] chat-send received (Nitro)!`);
-                console.log(` - Message: "${message}"`);
+                console.log(` - Message: "${useMastra ? '[Mastra試験経路では記録しない]' : message}"`);
                 console.log(` - Engine: "${engine}"`);
+                console.log(` - Chat route: ${useMastra ? 'mastra' : 'legacy'}`);
                 console.log(` - Model: "${model}"`);
                 console.log(` - Temperature: ${temperature}`);
                 console.log(` - Frequency Penalty: ${frequencyPenalty}`);
@@ -175,96 +200,129 @@ export default defineWebSocketHandler({
                 }));
 
                 let reply = '';
+                let mastraController: AbortController | null = null;
                 try {
-                    reply = await ChatAiService.generateResponse({
-                        message,
-                        apiKey,
-                        systemPrompt,
-                        model,
-                        temperature,
-                        frequencyPenalty,
-                        repetitionPenalty,
-                        maxOutputTokens,
-                        enableThinking,
-                        engine,
-                        lmstudioEndpoint,
-                        history,
-                        attachments,
-                        tools,
-                        onToolExecute: async (toolName, args) => {
-                            const userId = ((peer as any).ctx && (peer as any).ctx.userId) || 'anonymous';
-                            console.log(`[WS] Tool execution intercept: ${toolName}`, args);
-                            if (toolName !== 'manageTasks' && toolName !== 'manageMemos') {
-                                return null;
-                            }
-                            try {
-                                if (toolName === 'manageMemos') {
-                                    return await executeMemosTool(userId, args);
+                    if (useMastra) {
+                        mastraController = new AbortController();
+                        registerMastraRequest(peer, mastraController);
+                        const resolved = resolveMastraChatModel({
+                            engine: engine || 'gemini',
+                            model,
+                            apiKey
+                        });
+                        reply = await MastraChatService.generateResponse({
+                            message,
+                            systemPrompt,
+                            resolvedModel: resolved.resolvedModel,
+                            engine: resolved.engine,
+                            modelId: resolved.modelId,
+                            temperature,
+                            frequencyPenalty,
+                            maxOutputTokens,
+                            history,
+                            attachments,
+                            abortSignal: mastraController.signal
+                        });
+                    } else {
+                        reply = await ChatAiService.generateResponse({
+                            message,
+                            apiKey,
+                            systemPrompt,
+                            model,
+                            temperature,
+                            frequencyPenalty,
+                            repetitionPenalty,
+                            maxOutputTokens,
+                            enableThinking,
+                            engine,
+                            lmstudioEndpoint,
+                            history,
+                            attachments,
+                            tools,
+                            onToolExecute: async (toolName, args) => {
+                                const userId = ((peer as any).ctx && (peer as any).ctx.userId) || 'anonymous';
+                                console.log(`[WS] Tool execution intercept: ${toolName}`, args);
+                                if (toolName !== 'manageTasks' && toolName !== 'manageMemos') {
+                                    return null;
                                 }
-                                return await executeTasksTool(userId, args);
-                            } catch (e: any) {
-                                console.error(`[WS] Intercepted tool ${toolName} (action: ${args.action}) failed:`, e.message);
-                                return JSON.stringify({
-                                    success: false,
-                                    error: e.message
-                                });
-                            }
-                        },
-                        onToolResult: (toolName, input, output) => {
-                            const userId = ((peer as any).ctx && (peer as any).ctx.userId) || 'anonymous';
-                            if (toolName !== 'manageTasks' && toolName !== 'manageMemos') {
-                                return;
-                            }
-                            if (toolName === 'manageMemos') {
                                 try {
-                                    const parsedOutput = typeof output === 'string' ? JSON.parse(output) : output;
-                                    if (!parsedOutput || !parsedOutput.success) return;
-                                    console.log(`[WS] Tool execution detected in ws.ts: ${toolName} (action: ${input.action})`, input);
-                                    peer.send(JSON.stringify({
-                                        event: 'memo-action',
-                                        data: {
-                                            action: input.action,
-                                            memoId: parsedOutput.id || input.id,
-                                            memo: parsedOutput.memo
-                                        }
-                                    }));
+                                    if (toolName === 'manageMemos') {
+                                        return await executeMemosTool(userId, args);
+                                    }
+                                    return await executeTasksTool(userId, args);
                                 } catch (e: any) {
-                                    console.error('[WS] Failed to sync tool memo action to client:', e.message);
+                                    console.error(`[WS] Intercepted tool ${toolName} (action: ${args.action}) failed:`, e.message);
+                                    return JSON.stringify({
+                                        success: false,
+                                        error: e.message
+                                    });
                                 }
-                                return;
-                            }
-                            try {
-                                const parsedOutput = typeof output === 'string' ? JSON.parse(output) : output;
-                                if (!parsedOutput || !parsedOutput.success) {
+                            },
+                            onToolResult: (toolName, input, output) => {
+                                const userId = ((peer as any).ctx && (peer as any).ctx.userId) || 'anonymous';
+                                if (toolName !== 'manageTasks' && toolName !== 'manageMemos') {
                                     return;
                                 }
-                                console.log(`[WS] Tool execution detected in ws.ts: ${toolName} (action: ${input.action})`, input);
-                                if (input.action === 'add' || input.action === 'update') {
-                                    // カテゴリの最新スナップショットを取得するため、無害な空更新でDBから再取得する
-                                    const saved = updateTaskInDb(userId, parsedOutput.id, {});
-                                    peer.send(JSON.stringify({
-                                        event: 'task-action',
-                                        data: {
-                                            action: input.action === 'add' ? (input.scheduledAt ? 'addSchedule' : 'addTask') : 'updateTask',
-                                            categories: saved.categories,
-                                            task: saved.task
-                                        }
-                                    }));
-                                } else if (input.action === 'delete') {
-                                    peer.send(JSON.stringify({
-                                        event: 'task-action',
-                                        data: {
-                                            action: 'deleteTask',
-                                            taskId: input.id
-                                        }
-                                    }));
+                                if (toolName === 'manageMemos') {
+                                    try {
+                                        const parsedOutput = typeof output === 'string' ? JSON.parse(output) : output;
+                                        if (!parsedOutput || !parsedOutput.success) return;
+                                        console.log(`[WS] Tool execution detected in ws.ts: ${toolName} (action: ${input.action})`, input);
+                                        peer.send(JSON.stringify({
+                                            event: 'memo-action',
+                                            data: {
+                                                action: input.action,
+                                                memoId: parsedOutput.id || input.id,
+                                                memo: parsedOutput.memo
+                                            }
+                                        }));
+                                    } catch (e: any) {
+                                        console.error('[WS] Failed to sync tool memo action to client:', e.message);
+                                    }
+                                    return;
                                 }
-                            } catch (e: any) {
-                                console.error('[WS] Failed to sync tool task action to client:', e.message);
+                                try {
+                                    const parsedOutput = typeof output === 'string' ? JSON.parse(output) : output;
+                                    if (!parsedOutput || !parsedOutput.success) {
+                                        return;
+                                    }
+                                    console.log(`[WS] Tool execution detected in ws.ts: ${toolName} (action: ${input.action})`, input);
+                                    if (input.action === 'add' || input.action === 'update') {
+                                        // カテゴリの最新スナップショットを取得するため、無害な空更新でDBから再取得する
+                                        const saved = updateTaskInDb(userId, parsedOutput.id, {});
+                                        peer.send(JSON.stringify({
+                                            event: 'task-action',
+                                            data: {
+                                                action: input.action === 'add' ? (input.scheduledAt ? 'addSchedule' : 'addTask') : 'updateTask',
+                                                categories: saved.categories,
+                                                task: saved.task
+                                            }
+                                        }));
+                                    } else if (input.action === 'delete') {
+                                        peer.send(JSON.stringify({
+                                            event: 'task-action',
+                                            data: {
+                                                action: 'deleteTask',
+                                                taskId: input.id
+                                            }
+                                        }));
+                                    }
+                                } catch (e: any) {
+                                    console.error('[WS] Failed to sync tool task action to client:', e.message);
+                                }
                             }
-                        }
-                    });
+                        });
+                    }
                 } catch (aiError: any) {
+                    if (useMastra) {
+                        if (mastraController?.signal.aborted) return;
+                        console.warn(`[WS] Mastra ${engine || 'gemini'}との接続エラー`);
+                        peer.send(JSON.stringify({
+                            event: 'chat-error',
+                            data: { message: `AIサーバーとの通信エラー: ${getMastraChatErrorMessage(aiError, engine || 'gemini')}` }
+                        }));
+                        return;
+                    }
                     console.error('[WS] AI Engine Error:', aiError.message);
                     let detailMessage = aiError.message;
                     const responseBodyStr = aiError.responseBody || '';
@@ -295,7 +353,10 @@ export default defineWebSocketHandler({
                         data: { message: `AIサーバーとの通信エラー: ${detailMessage}` }
                     }));
                     return;
+                } finally {
+                    if (mastraController) unregisterMastraRequest(peer, mastraController);
                 }
+                if (mastraController?.signal.aborted) return;
 
                 let timerData: { seconds: number; memo: string } | null = null;
                 const timerMatch = reply.match(/\[TIMER:(\d+),(.+?)\]/i);
@@ -418,6 +479,7 @@ export default defineWebSocketHandler({
 
     close(peer, details) {
         const userId = getPeerUserId(peer);
+        abortMastraRequests(peer);
         console.log(`[WS] Client disconnected (User: ${userId}, Details: ${JSON.stringify(details)})`);
         removeConnection(userId, peer);
     }
