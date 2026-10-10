@@ -48,10 +48,23 @@ describe('buildMastraChatMessagesのテスト', () => {
 
 describe('buildMastraChatInstructionsのテスト', () => {
     it('buildMastraChatInstructions_ペルソナと日時を保持しツール実行を装わないこと', () => {
-        const instructions = buildMastraChatInstructions('マスコットの性格', new Date('2026-10-10T00:00:00Z'));
+        const instructions = buildMastraChatInstructions('マスコットの性格', {
+            now: new Date('2026-10-10T00:00:00Z')
+        });
 
         expect(instructions).toContain('マスコットの性格');
         expect(instructions).toContain('[現在のシステム日時]');
         expect(instructions).toContain('操作を実行したと装わず');
+    });
+
+    it('buildMastraChatInstructions_天気だけを許可して他のツールを禁止すること', () => {
+        const instructions = buildMastraChatInstructions('マスコットの性格', {
+            weatherEnabled: true,
+            now: new Date('2026-10-10T00:00:00Z')
+        });
+
+        expect(instructions).toContain('getWeather');
+        expect(instructions).toContain('ウェブ検索、タスク・メモなど他のツールは利用できません');
+        expect(instructions).not.toContain('この経路ではツールを利用できません');
     });
 });

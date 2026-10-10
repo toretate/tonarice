@@ -117,6 +117,15 @@ describe('Tool Use - 各ツールの挙動テスト', () => {
         expect(result).toBe('天気予報の取得処理でエラーが発生しました。');
     });
 
+    test('getWeather_未対応都市を東京の天気として返さないこと', async () => {
+        globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+
+        const result = await weatherTool.implementation({ city: '未対応の都市' }, {} as any);
+
+        expect(result).toContain('都市名が見つかりません');
+        expect(vi.mocked(globalThis.fetch).mock.calls.every(([url]) => String(url).includes('geocoding-api.open-meteo.com'))).toBe(true);
+    });
+
     // 4. 音量調整ツール (adjustVolume)
     test('adjustVolume - 指定した音量レベルでPowerShellコマンドが実行され調整メッセージが返ること', async () => {
         const result = await volumeTool.implementation({ volume: 50 }, {} as any);
@@ -301,4 +310,3 @@ describe('Tool Use - 各ツールの挙動テスト', () => {
         });
     });
 });
-

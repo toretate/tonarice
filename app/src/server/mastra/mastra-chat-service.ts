@@ -16,6 +16,7 @@ export interface MastraChatRequest {
     maxOutputTokens?: number;
     history?: readonly MastraChatHistoryItem[];
     attachments?: readonly MastraChatAttachment[];
+    weatherEnabled?: boolean;
     abortSignal?: AbortSignal;
 }
 
@@ -31,7 +32,8 @@ export class MastraChatService {
         const requestContext = createMascotRequestContext({
             resolvedModel: params.resolvedModel,
             engine: params.engine,
-            modelId: params.modelId
+            modelId: params.modelId,
+            weatherEnabled: params.weatherEnabled
         });
         const agent = getMastraRuntime().getAgentById(MASCOT_AGENT_ID);
         const modelSettings = {
@@ -52,8 +54,11 @@ export class MastraChatService {
                 params.attachments
             ), {
                 requestContext,
-                instructions: buildMastraChatInstructions(params.systemPrompt),
+                instructions: buildMastraChatInstructions(params.systemPrompt, {
+                    weatherEnabled: params.weatherEnabled
+                }),
                 modelSettings,
+                maxSteps: params.weatherEnabled ? 3 : undefined,
                 abortSignal
             });
             console.info(`[MastraChatService] ${params.engine}との通信が完了 (${Date.now() - startedAt} ms)`);

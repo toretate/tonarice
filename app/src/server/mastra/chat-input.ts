@@ -1,5 +1,6 @@
 import type { ModelMessage } from 'ai';
 import toolUseGuidelineTemplate from '@prompt/tool-use-guideline';
+import weatherPrompt from '../../skills/tool-use/prompts/getWeather.prompt';
 
 export interface MastraChatHistoryItem {
     sender?: string;
@@ -73,11 +74,17 @@ export function buildMastraChatMessages(
 }
 
 /**
- * ツール未移行の試験経路では操作完了を装わないよう明示する。
+ * 利用可能なツールを明示し、未移行の操作完了を装わないよう指示する。
  */
-export function buildMastraChatInstructions(systemPrompt: string, now: Date = new Date()): string {
-    const toolUseGuideline = toolUseGuidelineTemplate.replace('{{toolUseSection}}',
-        '- この経路ではツールを利用できません。登録・変更・検索などの操作を実行したと装わず、必要な場合は利用できないと伝えてください。');
+export function buildMastraChatInstructions(
+    systemPrompt: string,
+    options: { weatherEnabled?: boolean; now?: Date } = {}
+): string {
+    const toolUseSection = options.weatherEnabled
+        ? `${weatherPrompt}\n- 天気ツールの結果がエラーなら現在の天気を推測しないでください。\n- この経路ではウェブ検索、タスク・メモなど他のツールは利用できません。操作を実行したと装わないでください。`
+        : '- この経路ではツールを利用できません。登録・変更・検索などの操作を実行したと装わず、必要な場合は利用できないと伝えてください。';
+    const toolUseGuideline = toolUseGuidelineTemplate.replace('{{toolUseSection}}', () => toolUseSection);
+    const now = options.now || new Date();
     const nowStr = now.toLocaleString('ja-JP', {
         year: 'numeric', month: 'numeric', day: 'numeric',
         weekday: 'short', hour: '2-digit', minute: '2-digit'

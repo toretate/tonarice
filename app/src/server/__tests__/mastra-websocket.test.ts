@@ -81,14 +81,16 @@ describe('WebSocketのMastra対話経路', () => {
         const peer = createPeer();
 
         await sendChat(peer, {
-            attachments: [{ type: 'image', name: 'sample.png', url: 'data:image/png;base64,aGVsbG8=' }]
+            attachments: [{ type: 'image', name: 'sample.png', url: 'data:image/png;base64,aGVsbG8=' }],
+            tools: { toolsWeather: true }
         });
 
         expect(serviceMocks.mastraGenerate).toHaveBeenCalledOnce();
         expect(serviceMocks.mastraGenerate.mock.calls[0][0]).toMatchObject({
             message: 'こんにちは',
             history: [{ sender: 'user', text: '前の質問' }],
-            attachments: [{ type: 'image', name: 'sample.png', url: 'data:image/png;base64,aGVsbG8=' }]
+            attachments: [{ type: 'image', name: 'sample.png', url: 'data:image/png;base64,aGVsbG8=' }],
+            weatherEnabled: true
         });
         expect(serviceMocks.legacyGenerate).not.toHaveBeenCalled();
         expect(sentEvents(peer)).toContainEqual({

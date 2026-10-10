@@ -4,12 +4,15 @@ export interface MascotAgentRequestContextValues {
     resolvedModel: unknown;
     engine: string;
     modelId: string;
+    weatherEnabled: boolean;
+    weatherUsed: boolean;
 }
 
 export interface CreateMascotRequestContextParams {
     resolvedModel: unknown;
     engine: string;
     modelId: string;
+    weatherEnabled?: boolean;
 }
 
 /**
@@ -22,6 +25,8 @@ export function createMascotRequestContext(
     return new RequestContext<MascotAgentRequestContextValues>([
         ['resolvedModel', params.resolvedModel],
         ['engine', params.engine],
-        ['modelId', params.modelId]
+        ['modelId', params.modelId],
+        ['weatherEnabled', params.weatherEnabled === true],
+        ['weatherUsed', false]
     ]);
 }

@@ -221,6 +221,7 @@ export default defineWebSocketHandler({
                             maxOutputTokens,
                             history,
                             attachments,
+                            weatherEnabled: tools?.toolsWeather === true,
                             abortSignal: mastraController.signal
                         });
                     } else {
