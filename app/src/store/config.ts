@@ -21,6 +21,7 @@ export interface AppConfig {
     selectedVideoEngine: string;
     lmstudioEndpoint: string;
     lmstudioModel: string;
+    lmstudioToolsDisabledModels?: string[];
     geminiModel: string;
     openaiModel: string;
     anthropicModel: string;
@@ -159,6 +160,7 @@ export const useConfigStore = defineStore('config', () => {
     
     const lmstudioEndpoint = ref('http://127.0.0.1:1234/v1/');
     const lmstudioModel = ref('');
+    const lmstudioToolsDisabledModels = ref<string[]>([]);
     const geminiModel = ref('gemini-2.0-flash-exp');
     const openaiModel = ref('gpt-4o');
     const anthropicModel = ref('claude-3-5-sonnet-latest');
@@ -343,6 +345,8 @@ export const useConfigStore = defineStore('config', () => {
             
             lmstudioEndpoint.value = configData.lmstudioEndpoint || 'http://127.0.0.1:1234/v1/';
             lmstudioModel.value = configData.lmstudioModel || '';
+            lmstudioToolsDisabledModels.value = Array.isArray(configData.lmstudioToolsDisabledModels)
+                ? configData.lmstudioToolsDisabledModels.filter((item: unknown): item is string => typeof item === 'string') : [];
             geminiModel.value = configData.geminiModel || 'gemini-2.0-flash-exp';
             openaiModel.value = configData.openaiModel || 'gpt-4o';
             anthropicModel.value = configData.anthropicModel || 'claude-3-5-sonnet-latest';
@@ -477,6 +481,13 @@ export const useConfigStore = defineStore('config', () => {
             
             lmstudioEndpoint.value = localStorage.getItem('lmstudioEndpoint') || 'http://127.0.0.1:1234/v1/';
             lmstudioModel.value = localStorage.getItem('lmstudioModel') || '';
+            try {
+                const disabledModels = JSON.parse(localStorage.getItem('lmstudioToolsDisabledModels') || '[]');
+                lmstudioToolsDisabledModels.value = Array.isArray(disabledModels)
+                    ? disabledModels.filter((item: unknown): item is string => typeof item === 'string') : [];
+            } catch {
+                lmstudioToolsDisabledModels.value = [];
+            }
             geminiModel.value = localStorage.getItem('geminiModel') || 'gemini-2.0-flash-exp';
             openaiModel.value = localStorage.getItem('openaiModel') || 'gpt-4o';
             anthropicModel.value = localStorage.getItem('anthropicModel') || 'claude-3-5-sonnet-latest';
@@ -645,6 +656,7 @@ export const useConfigStore = defineStore('config', () => {
             selectedVideoEngine: selectedVideoEngine.value,
             lmstudioEndpoint: lmstudioEndpoint.value,
             lmstudioModel: lmstudioModel.value,
+            lmstudioToolsDisabledModels: [...lmstudioToolsDisabledModels.value],
             geminiModel: geminiModel.value,
             openaiModel: openaiModel.value,
             anthropicModel: anthropicModel.value,
@@ -814,6 +826,7 @@ export const useConfigStore = defineStore('config', () => {
         safeSetItem('selectedVideoEngine', selectedVideoEngine.value);
         safeSetItem('lmstudioEndpoint', lmstudioEndpoint.value);
         safeSetItem('lmstudioModel', lmstudioModel.value);
+        safeSetItem('lmstudioToolsDisabledModels', JSON.stringify(lmstudioToolsDisabledModels.value));
         safeSetItem('geminiModel', geminiModel.value);
         safeSetItem('openaiModel', openaiModel.value);
         safeSetItem('anthropicModel', anthropicModel.value);
@@ -948,6 +961,7 @@ export const useConfigStore = defineStore('config', () => {
         if (newConfig.selectedVideoEngine !== undefined) selectedVideoEngine.value = newConfig.selectedVideoEngine;
         if (newConfig.lmstudioEndpoint !== undefined) lmstudioEndpoint.value = newConfig.lmstudioEndpoint;
         if (newConfig.lmstudioModel !== undefined) lmstudioModel.value = newConfig.lmstudioModel;
+        if (newConfig.lmstudioToolsDisabledModels !== undefined) lmstudioToolsDisabledModels.value = [...newConfig.lmstudioToolsDisabledModels];
         if (newConfig.geminiModel !== undefined) geminiModel.value = newConfig.geminiModel;
         if (newConfig.openaiModel !== undefined) openaiModel.value = newConfig.openaiModel;
         if (newConfig.anthropicModel !== undefined) anthropicModel.value = newConfig.anthropicModel;
@@ -1058,6 +1072,7 @@ export const useConfigStore = defineStore('config', () => {
         selectedVideoEngine,
         lmstudioEndpoint,
         lmstudioModel,
+        lmstudioToolsDisabledModels,
         geminiModel,
         openaiModel,
         anthropicModel,

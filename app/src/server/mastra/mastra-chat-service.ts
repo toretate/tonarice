@@ -17,6 +17,13 @@ export interface MastraChatRequest {
     history?: readonly MastraChatHistoryItem[];
     attachments?: readonly MastraChatAttachment[];
     weatherEnabled?: boolean;
+    webSearchEnabled?: boolean;
+    locationEnabled?: boolean;
+    volumeEnabled?: boolean;
+    appLauncherEnabled?: boolean;
+    enableThinking?: boolean;
+    executeDataTool?: (name: 'manageTasks' | 'manageMemos', input: Record<string, unknown>) => Promise<string>;
+    onDataToolResult?: (name: 'manageTasks' | 'manageMemos', input: Record<string, unknown>, output: string) => void;
     abortSignal?: AbortSignal;
 }
 
@@ -29,11 +36,30 @@ export class MastraChatService {
             throw new Error('Mastraチャット経路は無効です。');
         }
 
+        const executedMutations = new Set<string>();
+        const executeDataTool = params.executeDataTool && (async (
+            name: 'manageTasks' | 'manageMemos', input: Record<string, unknown>
+        ): Promise<string> => {
+            if (input.action !== 'search') {
+                const key = JSON.stringify([name, input]);
+                if (executedMutations.has(key)) {
+                    return JSON.stringify({ success: false, error: 'この発話では同じ変更を実行済みです。' });
+                }
+                executedMutations.add(key);
+            }
+            return params.executeDataTool!(name, input);
+        });
         const requestContext = createMascotRequestContext({
             resolvedModel: params.resolvedModel,
             engine: params.engine,
             modelId: params.modelId,
-            weatherEnabled: params.weatherEnabled
+            weatherEnabled: params.weatherEnabled,
+            webSearchEnabled: params.webSearchEnabled,
+            locationEnabled: params.locationEnabled,
+            volumeEnabled: params.volumeEnabled,
+            appLauncherEnabled: params.appLauncherEnabled,
+            executeDataTool,
+            onDataToolResult: params.onDataToolResult
         });
         const agent = getMastraRuntime().getAgentById(MASCOT_AGENT_ID);
         const modelSettings = {
@@ -51,14 +77,21 @@ export class MastraChatService {
             const response = await agent.generate(buildMastraChatMessages(
                 params.message,
                 params.history,
-                params.attachments
+                params.attachments,
+                { isLmStudio: params.engine === 'lmstudio', enableThinking: params.enableThinking }
             ), {
                 requestContext,
                 instructions: buildMastraChatInstructions(params.systemPrompt, {
-                    weatherEnabled: params.weatherEnabled
+                    weatherEnabled: params.weatherEnabled,
+                    webSearchEnabled: params.webSearchEnabled,
+                    locationEnabled: params.locationEnabled,
+                    volumeEnabled: params.volumeEnabled,
+                    appLauncherEnabled: params.appLauncherEnabled,
+                    dataToolsEnabled: !!executeDataTool
                 }),
                 modelSettings,
-                maxSteps: params.weatherEnabled ? 3 : undefined,
+                maxSteps: params.weatherEnabled || params.webSearchEnabled || params.locationEnabled
+                    || params.volumeEnabled || params.appLauncherEnabled || executeDataTool ? 6 : undefined,
                 abortSignal
             });
             console.info(`[MastraChatService] ${params.engine}との通信が完了 (${Date.now() - startedAt} ms)`);

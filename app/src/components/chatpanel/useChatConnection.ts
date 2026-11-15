@@ -12,6 +12,7 @@ import { useTaskStore } from '../../store/task';
 import { useMemoStore } from '../../store/memo';
 import { decodeAudioBinaryFrame } from '../../utils/audio-binary-frame';
 import { normalizeIrodoriSpeed } from '../../utils/irodori-tts-settings';
+import { isLmStudioToolUseEnabled } from '../../utils/lmstudio-tool-settings';
 
 export function useChatConnection(params: {
     messages: Ref<Message[]>;
@@ -61,6 +62,7 @@ export function useChatConnection(params: {
         toolsVolume,
         toolsAppLauncher,
         toolsWebSearch,
+        lmstudioToolsDisabledModels,
         saveVoice,
         showVoiceLog,
         temperature,
@@ -543,6 +545,7 @@ export function useChatConnection(params: {
         } else if (engine === 'anthropic') {
             model = configStore.anthropicModel || mascot?.aiConfig?.chat?.model || 'claude-3-5-sonnet-latest';
         }
+        const toolUseEnabled = engine !== 'lmstudio' || isLmStudioToolUseEnabled(lmstudioToolsDisabledModels.value, model);
 
         const voiceEngine = mascot?.aiConfig?.voice?.engine || configStore.selectedVoiceEngine || 'voicevox';
 
@@ -612,6 +615,10 @@ export function useChatConnection(params: {
             systemPrompt += "\n# Timer Instructions\nユーザーから「〇分後に教えて」「後でお知らせして」「カップラーメンにお湯を入れた（できたら教えて）」など、その場限りで一度だけ知らせればよい一時的なリマインドを求められた場合は、会話の応答テキストの末尾（感情タグの直前）に、必ず次のフォーマットでタイマー起動タグを付与してください。\n[TIMER:秒数,お知らせ内容]\n※秒数は半角数字で指定してください。お知らせ内容には具体的なリマインド内容を記述してください。例:「了解、3分測るね。[TIMER:180,カップラーメンができました！] [happy]」\n【重要な区別】このタイマーは一度きりの通知専用で、ユーザーのタスク一覧（TODO/予定）には保存されません。したがって『N分後に通知』などの一時的リマインドは manageTasks ツールでは登録しないでください。逆に、ユーザーが後から一覧で管理・確認したいTODOや予定（例:『明日15時に会議』『レポートを書く』）は、このタイマータグではなく必ず manageTasks ツールで登録してください。\n【履歴の扱い】会話履歴に含まれる過去のタイマー依頼は既に対応済みです。最新（今回）のメッセージで新たに『N分後に…』と頼まれたときだけタイマータグを付けてください。過去の履歴に依頼が残っていることを理由に、タイマーを再設定しないでください。";
         }
 
+        if (!toolUseEnabled) {
+            systemPrompt += '\n\n# ツール利用制限\n今回はすべてのツールが無効です。タスクやメモの操作、検索などを実行したと装わず、利用できないことを伝えてください。一時的なタイマータグは引き続き利用できます。';
+        }
+
         const currentSession = sessions.value.find(s => s.id === activeSessionId.value);
         if (currentSession && currentSession.summary) {
             systemPrompt += `\n\n# Previous Conversation Summary\n以下はこれまでのマスターとの会話履歴の要約です。この文脈を考慮して返答してください。\n${currentSession.summary}\n`;
@@ -667,6 +674,7 @@ export function useChatConnection(params: {
                 irodoriSpeed: irodoriSpeed,
                 irodoriCaption: irodoriCaption,
                 engine: engine,
+                toolUseEnabled,
                 lmstudioEndpoint: lmsEndpoint,
                 temperature: temperature.value,
                 frequencyPenalty: frequencyPenalty.value,

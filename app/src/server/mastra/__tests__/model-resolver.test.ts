@@ -52,10 +52,32 @@ describe('resolveMastraChatModelのテスト', () => {
         expect(providerCalls.openaiConfig).toHaveBeenNthCalledWith(2, { apiKey: 'second-key' });
     });
 
+    it('resolveMastraChatModel_LMStudioはChatCompletionsと指定された接続先を使うこと', () => {
+        const resolved = resolveMastraChatModel({
+            engine: 'lmstudio', model: 'local-model', apiKey: '',
+            lmstudioEndpoint: 'http://127.0.0.1:1234/v1/'
+        });
+
+        expect(providerCalls.openai).not.toHaveBeenCalled();
+        expect(providerCalls.openaiChat).toHaveBeenCalledWith('local-model');
+        expect(providerCalls.openaiConfig).toHaveBeenCalledWith(expect.objectContaining({
+            baseURL: 'http://127.0.0.1:1234/v1', apiKey: 'not-needed', name: 'lmstudio', fetch: expect.any(Function)
+        }));
+        expect(resolved.engine).toBe('lmstudio');
+    });
+
+    it('resolveMastraChatModel_LMStudio接続先をリクエスト間で共有しないこと', () => {
+        resolveMastraChatModel({ engine: 'lmstudio', apiKey: '', lmstudioEndpoint: 'http://localhost:1234' });
+        resolveMastraChatModel({ engine: 'lmstudio', apiKey: '', lmstudioEndpoint: 'http://localhost:5678/v1' });
+
+        expect(providerCalls.openaiConfig.mock.calls[0]?.[0]).toMatchObject({ baseURL: 'http://localhost:1234/v1' });
+        expect(providerCalls.openaiConfig.mock.calls[1]?.[0]).toMatchObject({ baseURL: 'http://localhost:5678/v1' });
+    });
+
     it('resolveMastraChatModel_キー未設定と未対応エンジンを拒否すること', () => {
         expect(() => resolveMastraChatModel({ engine: 'openai', apiKey: '' }))
             .toThrow('OpenAI API KEYが設定されていません');
-        expect(() => resolveMastraChatModel({ engine: 'lmstudio', apiKey: 'test-key' }))
+        expect(() => resolveMastraChatModel({ engine: 'unsupported', apiKey: 'test-key' }))
             .toThrow('未対応');
     });
 });

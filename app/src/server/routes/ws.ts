@@ -2,6 +2,7 @@ import { defineWebSocketHandler } from 'h3';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ChatAiService } from '../utils/chat-ai-service';
+import { isLmStudioTemplateError, LMSTUDIO_TEMPLATE_ERROR_MESSAGE } from '../utils/lmstudio-template-error';
 import { VoiceAiService } from '../utils/voice-ai-service';
 import { splitSentences } from '../utils/sentence-splitter';
 import { sanitizeForIrodoriTTS } from '../utils/irodori-sanitizer';
@@ -71,6 +72,66 @@ function broadcastToUser(userId: string, event: string, data: any) {
 function getPeerUserId(peer: { context: Record<string, unknown> }): string {
     const userId = peer.context.userId;
     return typeof userId === 'string' ? userId : 'anonymous';
+}
+
+/**
+ * 認証済み接続のユーザーに限定してタスク・メモを操作する。
+ */
+async function executeDataToolForPeer(
+    peer: { context: Record<string, unknown> },
+    name: 'manageTasks' | 'manageMemos',
+    input: Record<string, unknown>
+): Promise<string> {
+    const userId = getPeerUserId(peer);
+    if (userId === 'anonymous') {
+        return JSON.stringify({ success: false, error: '認証済みユーザーが必要です。' });
+    }
+    try {
+        return name === 'manageMemos'
+            ? await executeMemosTool(userId, input as never)
+            : await executeTasksTool(userId, input as never);
+    } catch {
+        console.warn(`[WS] ${name}の実行に失敗`);
+        return JSON.stringify({ success: false, error: 'データ操作に失敗しました。' });
+    }
+}
+
+/**
+ * ツールによるDB変更を既存の画面同期イベントへ変換する。
+ */
+function notifyDataToolResult(
+    peer: { context: Record<string, unknown>; send: (message: string) => void },
+    name: 'manageTasks' | 'manageMemos',
+    input: Record<string, unknown>,
+    output: unknown
+): void {
+    try {
+        const result = typeof output === 'string' ? JSON.parse(output) : output;
+        if (!result?.success) return;
+        if (name === 'manageMemos') {
+            peer.send(JSON.stringify({
+                event: 'memo-action',
+                data: { action: input.action, memoId: result.id || input.id, memo: result.memo }
+            }));
+            return;
+        }
+        if (input.action === 'add' || input.action === 'update') {
+            // カテゴリの最新スナップショットを取得するため、無害な空更新でDBから再取得する。
+            const saved = updateTaskInDb(getPeerUserId(peer), result.id, {});
+            peer.send(JSON.stringify({
+                event: 'task-action',
+                data: {
+                    action: input.action === 'add' ? (input.scheduledAt ? 'addSchedule' : 'addTask') : 'updateTask',
+                    categories: saved.categories,
+                    task: saved.task
+                }
+            }));
+        } else if (input.action === 'delete') {
+            peer.send(JSON.stringify({ event: 'task-action', data: { action: 'deleteTask', taskId: input.id } }));
+        }
+    } catch {
+        console.warn(`[WS] ${name}の画面同期に失敗`);
+    }
 }
 
 // Cookieを手動でパースするヘルパー関数
@@ -167,6 +228,7 @@ export default defineWebSocketHandler({
                     showVoiceLog,
                     attachments,
                     tools,
+                    toolUseEnabled,
                     temperature,
                     frequencyPenalty,
                     repetitionPenalty,
@@ -175,6 +237,7 @@ export default defineWebSocketHandler({
                     ttsDictionary
                 } = data;
                 const useMastra = shouldUseMastraChat(engine);
+                const enableTools = engine !== 'lmstudio' || toolUseEnabled !== false;
 
                 console.log(`=========================================`);
                 console.log(`[WS] chat-send received (Nitro)!`);
@@ -208,7 +271,10 @@ export default defineWebSocketHandler({
                         const resolved = resolveMastraChatModel({
                             engine: engine || 'gemini',
                             model,
-                            apiKey
+                            apiKey,
+                            lmstudioEndpoint,
+                            repetitionPenalty,
+                            enableThinking
                         });
                         reply = await MastraChatService.generateResponse({
                             message,
@@ -221,7 +287,16 @@ export default defineWebSocketHandler({
                             maxOutputTokens,
                             history,
                             attachments,
-                            weatherEnabled: tools?.toolsWeather === true,
+                            weatherEnabled: enableTools && tools?.toolsWeather === true,
+                            webSearchEnabled: enableTools && tools?.toolsWebSearch === true,
+                            locationEnabled: enableTools && tools?.toolsGpsLocation === true,
+                            volumeEnabled: enableTools && tools?.toolsVolume === true,
+                            appLauncherEnabled: enableTools && tools?.toolsAppLauncher === true,
+                            enableThinking,
+                            executeDataTool: !enableTools || getPeerUserId(peer) === 'anonymous'
+                                ? undefined
+                                : (name, input) => executeDataToolForPeer(peer, name, input),
+                            onDataToolResult: (name, input, output) => notifyDataToolResult(peer, name, input, output),
                             abortSignal: mastraController.signal
                         });
                     } else {
@@ -240,76 +315,14 @@ export default defineWebSocketHandler({
                             history,
                             attachments,
                             tools,
-                            onToolExecute: async (toolName, args) => {
-                                const userId = ((peer as any).ctx && (peer as any).ctx.userId) || 'anonymous';
-                                console.log(`[WS] Tool execution intercept: ${toolName}`, args);
-                                if (toolName !== 'manageTasks' && toolName !== 'manageMemos') {
-                                    return null;
-                                }
-                                try {
-                                    if (toolName === 'manageMemos') {
-                                        return await executeMemosTool(userId, args);
-                                    }
-                                    return await executeTasksTool(userId, args);
-                                } catch (e: any) {
-                                    console.error(`[WS] Intercepted tool ${toolName} (action: ${args.action}) failed:`, e.message);
-                                    return JSON.stringify({
-                                        success: false,
-                                        error: e.message
-                                    });
-                                }
-                            },
+                            toolUseEnabled: enableTools,
+                            onToolExecute: (toolName, args) =>
+                                toolName === 'manageTasks' || toolName === 'manageMemos'
+                                    ? executeDataToolForPeer(peer, toolName, args)
+                                    : Promise.resolve(null),
                             onToolResult: (toolName, input, output) => {
-                                const userId = ((peer as any).ctx && (peer as any).ctx.userId) || 'anonymous';
-                                if (toolName !== 'manageTasks' && toolName !== 'manageMemos') {
-                                    return;
-                                }
-                                if (toolName === 'manageMemos') {
-                                    try {
-                                        const parsedOutput = typeof output === 'string' ? JSON.parse(output) : output;
-                                        if (!parsedOutput || !parsedOutput.success) return;
-                                        console.log(`[WS] Tool execution detected in ws.ts: ${toolName} (action: ${input.action})`, input);
-                                        peer.send(JSON.stringify({
-                                            event: 'memo-action',
-                                            data: {
-                                                action: input.action,
-                                                memoId: parsedOutput.id || input.id,
-                                                memo: parsedOutput.memo
-                                            }
-                                        }));
-                                    } catch (e: any) {
-                                        console.error('[WS] Failed to sync tool memo action to client:', e.message);
-                                    }
-                                    return;
-                                }
-                                try {
-                                    const parsedOutput = typeof output === 'string' ? JSON.parse(output) : output;
-                                    if (!parsedOutput || !parsedOutput.success) {
-                                        return;
-                                    }
-                                    console.log(`[WS] Tool execution detected in ws.ts: ${toolName} (action: ${input.action})`, input);
-                                    if (input.action === 'add' || input.action === 'update') {
-                                        // カテゴリの最新スナップショットを取得するため、無害な空更新でDBから再取得する
-                                        const saved = updateTaskInDb(userId, parsedOutput.id, {});
-                                        peer.send(JSON.stringify({
-                                            event: 'task-action',
-                                            data: {
-                                                action: input.action === 'add' ? (input.scheduledAt ? 'addSchedule' : 'addTask') : 'updateTask',
-                                                categories: saved.categories,
-                                                task: saved.task
-                                            }
-                                        }));
-                                    } else if (input.action === 'delete') {
-                                        peer.send(JSON.stringify({
-                                            event: 'task-action',
-                                            data: {
-                                                action: 'deleteTask',
-                                                taskId: input.id
-                                            }
-                                        }));
-                                    }
-                                } catch (e: any) {
-                                    console.error('[WS] Failed to sync tool task action to client:', e.message);
+                                if (toolName === 'manageTasks' || toolName === 'manageMemos') {
+                                    notifyDataToolResult(peer, toolName, input, output);
                                 }
                             }
                         });
@@ -322,6 +335,11 @@ export default defineWebSocketHandler({
                             event: 'chat-error',
                             data: { message: `AIサーバーとの通信エラー: ${getMastraChatErrorMessage(aiError, engine || 'gemini')}` }
                         }));
+                        return;
+                    }
+                    if (engine === 'lmstudio' && isLmStudioTemplateError(aiError)) {
+                        console.warn('[WS] LM Studioのチャットテンプレートエラー');
+                        peer.send(JSON.stringify({ event: 'chat-error', data: { message: LMSTUDIO_TEMPLATE_ERROR_MESSAGE } }));
                         return;
                     }
                     console.error('[WS] AI Engine Error:', aiError.message);

@@ -20,6 +20,7 @@ export interface ConfigData {
     anthropicModel: string;
     lmstudioEndpoint: string;
     lmstudioModel: string;
+    lmstudioToolsDisabledModels?: string[];
     selectedVoiceEngine: string;
     voicevoxEndpoint: string;
     voicevoxSpeaker: number;
@@ -142,6 +143,7 @@ export const defaultData: ConfigData = {
     anthropicModel: 'claude-3-5-sonnet-latest',
     lmstudioEndpoint: 'http://127.0.0.1:1234/v1/',
     lmstudioModel: '',
+    lmstudioToolsDisabledModels: [],
     selectedVoiceEngine: 'voicevox',
     voicevoxEndpoint: 'http://localhost:50021',
     voicevoxSpeaker: 2,

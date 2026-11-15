@@ -6,21 +6,22 @@ MastraをAIエージェントのオーケストレーション基盤として段
 
 ## 2. 適用範囲
 
-フェーズ1・2とフェーズ3の最初の天気ツール移行では次を対象とする。
+フェーズ1・2とフェーズ3の既存ツール・LM Studio接続移行では次を対象とする。
 
 - `@mastra/core`によるMastraランタイムとAgentの生成
 - Nitroサーバープロセス内での遅延初期化
 - Request Contextによるリクエスト単位のモデル選択
-- 機能フラグによるGemini/OpenAI対話チャットのLegacy/Mastra経路切り替え
+- 機能フラグによるGemini/OpenAI/LM Studio対話チャットのLegacy/Mastra経路切り替え
 - 既存履歴、テキスト・画像添付、システムプロンプトのAgent入力への変換
 - 既存WebSocketのチャット応答、TTS、感情タグ、タイマーイベントとの接続
-- 設定で有効な場合だけ公開する読み取り専用の天気ツール
+- 設定で有効な場合だけ公開する天気・Web検索・概算位置・音量・アプリ起動ツール
+- 認証済みユーザーのタスク・メモ操作と既存画面更新イベント
+- LM StudioのOpenAI互換Chat Completions接続と既存の生成パラメーター
 - NitroビルドとElectron内蔵Node.jsでの実行互換性確認
 
 次は後続フェーズとする。
 
-- 天気以外のMastraツールと既存ツールの共通化
-- LM Studio固有オプションの完全移植
+- ブラウザのページ操作ツール（既存チャットには未実装）
 - Mastra MemoryとLibSQL
 - Workflow、Studio、MCP、外部Observability
 - Legacy AI経路の削除
@@ -41,20 +42,27 @@ MastraをAIエージェントのオーケストレーション基盤として段
 - 未指定、空文字、その他の値は無効として扱う。
 - 正式切り替えまでは未指定時の既定値を無効とする。
 - 機能フラグ無効時はMastraインスタンスを生成しない。
-- フラグ有効時はGemini/OpenAIの対話チャットだけをMastraへ送る。LM Studioと他のAI処理は既存経路を使う。
-- フェーズ3の最初の移行として、`toolsWeather: true`が明示された発話だけ`getWeather`を公開する。無効・未指定の場合は公開しない。
-- ウェブ検索、タスク・メモなど未移行のツール操作は実行済みを装わず、利用不可を伝える。
+- フラグ有効時はGemini/OpenAI/LM Studioの対話チャットをMastraへ送る。他のAI処理は既存経路を使う。
+- `toolsWeather`、`toolsWebSearch`、`toolsGpsLocation`、`toolsVolume`、`toolsAppLauncher`が明示的に`true`の発話だけ対応ツールを公開する。無効・未指定の場合は公開しない。
+- タスク・メモは認証済みWebSocket接続のユーザー別DB操作関数が利用できる場合だけ公開する。
+- LM Studioのモデル別ツール設定が無効なら、認証状態にかかわらずタスク・メモを含めすべてのツールを公開しない。Legacy経路にも同じ設定を適用する。
+- LM Studioのチャットテンプレートエラーを検出した場合、応答本文を表示せず設定画面への案内を返す。ツールを外した自動再試行はしない。
+- ブラウザのページ操作など未対応の操作は実行済みを装わず、利用不可を伝える。
 - Mastra経路で処理を始めた後、失敗時に既存経路へ自動再送しない。
 
 ## 5. Agentとモデル
 
+- `@mastra/core`は1.82.0、`@lmstudio/sdk`は2.1.0、AI SDKは7系を使用する。
 - Agent IDは`mascot-agent`とする。
-- 天気ツールだけをAgentへ動的に登録する。MemoryとWorkflowは登録しない。
+- 天気、Web検索、概算位置、音量、アプリ起動、タスク、メモのツールをリクエスト設定に応じてAgentへ動的に登録する。MemoryとWorkflowは登録しない。
 - 現行処理と同じく、最初は全文を返す`agent.generate()`を使用する。
 - モデルはAgentへ固定せず、実行ごとのRequest Contextから解決する。
 - APIキー、認証トークン、LM Studioの資格情報をRequest Contextへ直接格納しない。
 - APIキーを使って生成したモデルオブジェクトをリクエスト単位で渡し、認証情報を持つモデルをリクエスト間でキャッシュしない。
 - OpenAIはResponses APIを使用する。制限付きキーには`api.responses.write`権限が必要である。
+- LM Studioは設定されたエンドポイントの`/v1/chat/completions`を使用し、APIキーを要求しない。モデルと接続先はリクエストごとに解決する。
+- LM Studioの`repetitionPenalty`と`enableThinking: false`は既存経路と同じリクエスト本文へ変換する。
+- LM StudioのLegacy/Mastra両経路とも`/no_think`を追加しない。送信する過去履歴からは同トークンを除去し、保存済み履歴は変更しない。SDKの思考設定をMastra経由で利用する経路は未実装である。
 - Request Contextへ格納できる識別情報はエンジン名とモデルIDに限定する。
 - システムプロンプトはRequest Contextへ格納せず、Agent実行オプションとして渡す。
 - 会話履歴と添付ファイルは実行時のメッセージとして渡し、フェーズ2ではMastra Memoryへ保存しない。
@@ -62,6 +70,10 @@ MastraをAIエージェントのオーケストレーション基盤として段
 - 生成タイムアウトは60秒とし、WebSocket切断時は実行中のMastra呼出しを中断する。
 - Agentは全文を返し、既存WebSocketの応答・TTS処理へ渡す。ストリーミングは別途評価する。
 - 天気取得は既存LM Studio経路とMastra経路で共通処理を利用し、Mastraでは1発話につき天気ツールを最大1回だけ実行する。
+- Web検索は既存LM Studio経路とMastra経路で共通処理を利用し、DuckDuckGo軽量版から最大3件取得する。Mastraでは1発話につき最大1回だけ実行する。検索結果の本文は第三者のデータと扱い、そこに含まれる命令へ従わない。
+- IPアドレス由来の位置情報は概算として扱い、取得に失敗したときに東京の座標を現在地として返さない。
+- タスク・メモは既存のユーザー別DB処理へ委譲し、成功後は既存の`task-action`・`memo-action`イベントで画面を同期する。同一発話で同じ変更を重複実行しない。
+- Mastraの`launchApp`は電卓とメモ帳のみを許可し、モデル入力をOSコマンドとして実行しない。
 - 固定座標のない日本国内の都市名はOpen-Meteoの地名検索で解決する。日本語の省略形で見つからない場合は`市`、`町`、`村`の接尾辞を試す。
 - 地名検索で候補を特定できない場合は東京の天気として返さず、取得できない旨を明示する。
 
@@ -111,6 +123,7 @@ MastraをAIエージェントのオーケストレーション基盤として段
 - Mastraテストには`.env`を探索しない専用Vitest設定を用い、環境変数は起動元からだけ受け取る。
 - WebSocket経路切替、履歴・添付、既存チャット・音声イベント、切断時キャンセル、エラー文のマスキングを検証する。
 - 天気ツールの設定別公開、入力検証、外部通信の重複防止、ツール結果を使ったAgentの最終応答を検証する。
+- 移植した各ツールの設定別公開、Web検索結果の受け渡し、タスク・メモのユーザー分離と画面同期、任意コマンド入力の拒否を検証する。
 - 実接続の既定モデルはGeminiを`gemini-3.5-flash-lite`、OpenAIを`gpt-4o-mini`とし、`MASTRA_TEST_GEMINI_MODEL`と`MASTRA_TEST_OPENAI_MODEL`で上書きできる。
 - lint、型チェック、対象Vitest、本番ビルドを実行する。
 

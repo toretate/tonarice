@@ -1,6 +1,14 @@
 import { Agent } from '@mastra/core/agent';
 import type { MascotAgentRequestContextValues } from './request-context';
 import { mastraWeatherTool } from './weather-tool';
+import { mastraWebSearchTool } from './web-search-tool';
+import { mastraLocationTool } from './location-tool';
+import { mastraTasksTool, mastraMemosTool } from './data-tools';
+import { mastraVolumeTool, mastraAppLauncherTool } from './desktop-tools';
+
+type MascotTool = typeof mastraWeatherTool | typeof mastraWebSearchTool
+    | typeof mastraLocationTool | typeof mastraTasksTool | typeof mastraMemosTool
+    | typeof mastraVolumeTool | typeof mastraAppLauncherTool;
 
 export const MASCOT_AGENT_ID = 'mascot-agent';
 
@@ -10,7 +18,7 @@ export const MASCOT_AGENT_ID = 'mascot-agent';
  */
 export function createMascotAgent(): Agent<
     typeof MASCOT_AGENT_ID,
-    Record<string, typeof mastraWeatherTool>,
+    Record<string, MascotTool>,
     undefined,
     MascotAgentRequestContextValues
 > {
@@ -27,11 +35,28 @@ export function createMascotAgent(): Agent<
             // AI SDK v6モデルとMastra内部の複数世代モデル型の境界をここへ限定する。
             return resolvedModel as never;
         },
-        tools: ({ requestContext }): Record<string, typeof mastraWeatherTool> => {
+        tools: ({ requestContext }): Record<string, MascotTool> => {
+            const tools: Record<string, MascotTool> = {};
             if (requestContext.get('weatherEnabled')) {
-                return { getWeather: mastraWeatherTool };
+                tools.getWeather = mastraWeatherTool;
             }
-            return {};
+            if (requestContext.get('webSearchEnabled')) {
+                tools.searchWeb = mastraWebSearchTool;
+            }
+            if (requestContext.get('locationEnabled')) {
+                tools.getGPSLocation = mastraLocationTool;
+            }
+            if (requestContext.get('dataToolsEnabled')) {
+                tools.manageTasks = mastraTasksTool;
+                tools.manageMemos = mastraMemosTool;
+            }
+            if (requestContext.get('volumeEnabled')) {
+                tools.adjustVolume = mastraVolumeTool;
+            }
+            if (requestContext.get('appLauncherEnabled')) {
+                tools.launchApp = mastraAppLauncherTool;
+            }
+            return tools;
         }
     });
 }

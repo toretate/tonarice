@@ -18,4 +18,14 @@ describe('createMascotRequestContextのテスト', () => {
         expect(serialized).toContain('gemini-test');
         expect(serialized).not.toContain('secret-api-key');
     });
+
+    it('createMascotRequestContext_ユーザー別DB関数の内部情報をスパンへ展開しないこと', () => {
+        const secret = 'private-user-identifier';
+        const requestContext = createMascotRequestContext({
+            resolvedModel: {}, engine: 'gemini', modelId: 'gemini-test',
+            executeDataTool: async () => JSON.stringify({ secret })
+        });
+
+        expect(JSON.stringify(requestContext.serializeForSpan())).not.toContain(secret);
+    });
 });

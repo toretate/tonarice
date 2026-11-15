@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const serviceMocks = vi.hoisted(() => ({
     mastraGenerate: vi.fn(),
     legacyGenerate: vi.fn(),
-    synthesize: vi.fn()
+    synthesize: vi.fn(),
+    executeMemos: vi.fn(),
+    executeTasks: vi.fn()
 }));
 
 vi.mock('h3', () => ({ defineWebSocketHandler: (handler: unknown) => handler }));
@@ -17,8 +19,8 @@ vi.mock('../utils/voice-ai-service', () => ({
     VoiceAiService: { synthesize: serviceMocks.synthesize }
 }));
 vi.mock('../utils/tool-executor', () => ({
-    executeMemosTool: vi.fn(),
-    executeTasksTool: vi.fn()
+    executeMemosTool: serviceMocks.executeMemos,
+    executeTasksTool: serviceMocks.executeTasks
 }));
 vi.mock('../utils/tasks-service', () => ({ updateTaskInDb: vi.fn() }));
 vi.mock('../middleware/auth', () => ({ authenticateUserToken: vi.fn() }));
@@ -65,6 +67,8 @@ describe('WebSocketのMastra対話経路', () => {
         serviceMocks.mastraGenerate.mockReset();
         serviceMocks.legacyGenerate.mockReset();
         serviceMocks.synthesize.mockReset();
+        serviceMocks.executeMemos.mockReset();
+        serviceMocks.executeTasks.mockReset();
         vi.spyOn(console, 'log').mockImplementation(() => {});
         vi.spyOn(console, 'warn').mockImplementation(() => {});
         process.env.MASTRA_CHAT_ENABLED = 'true';
@@ -82,7 +86,7 @@ describe('WebSocketのMastra対話経路', () => {
 
         await sendChat(peer, {
             attachments: [{ type: 'image', name: 'sample.png', url: 'data:image/png;base64,aGVsbG8=' }],
-            tools: { toolsWeather: true }
+            tools: { toolsWeather: true, toolsWebSearch: true, toolsGpsLocation: true, toolsVolume: true, toolsAppLauncher: true }
         });
 
         expect(serviceMocks.mastraGenerate).toHaveBeenCalledOnce();
@@ -90,7 +94,11 @@ describe('WebSocketのMastra対話経路', () => {
             message: 'こんにちは',
             history: [{ sender: 'user', text: '前の質問' }],
             attachments: [{ type: 'image', name: 'sample.png', url: 'data:image/png;base64,aGVsbG8=' }],
-            weatherEnabled: true
+            weatherEnabled: true,
+            webSearchEnabled: true,
+            locationEnabled: true,
+            volumeEnabled: true,
+            appLauncherEnabled: true
         });
         expect(serviceMocks.legacyGenerate).not.toHaveBeenCalled();
         expect(sentEvents(peer)).toContainEqual({
@@ -99,15 +107,68 @@ describe('WebSocketのMastra対話経路', () => {
         });
     });
 
+    it('message_Mastraのメモ操作を認証ユーザーのDBと画面イベントへ接続すること', async () => {
+        serviceMocks.executeMemos.mockResolvedValue(JSON.stringify({ success: true, action: 'add', id: 'memo-1', memo: { id: 'memo-1', content: '買い物' } }));
+        serviceMocks.mastraGenerate.mockImplementation(async (params) => {
+            const output = await params.executeDataTool('manageMemos', { action: 'add', content: '買い物' });
+            params.onDataToolResult('manageMemos', { action: 'add', content: '買い物' }, output);
+            return 'メモしました。';
+        });
+        const peer = createPeer();
+
+        await sendChat(peer);
+
+        expect(serviceMocks.executeMemos).toHaveBeenCalledWith('user-test', { action: 'add', content: '買い物' });
+        expect(sentEvents(peer)).toContainEqual({
+            event: 'memo-action',
+            data: { action: 'add', memoId: 'memo-1', memo: { id: 'memo-1', content: '買い物' } }
+        });
+    });
+
     it('message_フラグ無効時と未対応エンジンでは既存経路を使うこと', async () => {
         serviceMocks.legacyGenerate.mockResolvedValue('既存応答 [neutral]');
         process.env.MASTRA_CHAT_ENABLED = 'false';
         await sendChat(createPeer());
         process.env.MASTRA_CHAT_ENABLED = 'true';
-        await sendChat(createPeer(), { engine: 'lmstudio' });
+        await sendChat(createPeer(), { engine: 'unsupported' });
 
         expect(serviceMocks.legacyGenerate).toHaveBeenCalledTimes(2);
         expect(serviceMocks.mastraGenerate).not.toHaveBeenCalled();
+    });
+
+    it('message_LMStudio設定をMastraのモデル解決と応答へ渡すこと', async () => {
+        serviceMocks.mastraGenerate.mockResolvedValue('ローカルモデルの応答');
+        const peer = createPeer();
+
+        await sendChat(peer, {
+            engine: 'lmstudio', model: 'local-model', apiKey: '',
+            lmstudioEndpoint: 'http://127.0.0.1:1234/v1/', repetitionPenalty: 1.2, enableThinking: false
+        });
+
+        expect(serviceMocks.legacyGenerate).not.toHaveBeenCalled();
+        expect(serviceMocks.mastraGenerate).toHaveBeenCalledWith(expect.objectContaining({
+            engine: 'lmstudio', modelId: 'local-model', enableThinking: false
+        }));
+        expect(sentEvents(peer).some(item => item.event === 'chat-response')).toBe(true);
+    });
+
+    it('message_LMStudioでツール無効時はデータ操作を含め全ツールを公開しないこと', async () => {
+        serviceMocks.mastraGenerate.mockResolvedValue('応答');
+        await sendChat(createPeer(), {
+            engine: 'lmstudio', model: 'local-model', apiKey: '', toolUseEnabled: false,
+            tools: { toolsWeather: true, toolsWebSearch: true, toolsGpsLocation: true, toolsVolume: true, toolsAppLauncher: true }
+        });
+        expect(serviceMocks.mastraGenerate).toHaveBeenCalledWith(expect.objectContaining({
+            weatherEnabled: false, webSearchEnabled: false, locationEnabled: false,
+            volumeEnabled: false, appLauncherEnabled: false, executeDataTool: undefined
+        }));
+    });
+
+    it('message_旧経路でもLMStudioのツール無効設定を渡すこと', async () => {
+        process.env.MASTRA_CHAT_ENABLED = 'false';
+        serviceMocks.legacyGenerate.mockResolvedValue('応答');
+        await sendChat(createPeer(), { engine: 'lmstudio', model: 'local-model', toolUseEnabled: false });
+        expect(serviceMocks.legacyGenerate).toHaveBeenCalledWith(expect.objectContaining({ toolUseEnabled: false }));
     });
 
     it('message_Mastra応答を既存の音声イベントへ接続すること', async () => {

@@ -1,10 +1,14 @@
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
+import { createLmStudioFetch, normalizeLmStudioBaseUrl } from '../utils/lmstudio-fetch';
 
 export interface MastraModelRequest {
     engine: string;
     model?: string;
     apiKey: string;
+    lmstudioEndpoint?: string;
+    repetitionPenalty?: number;
+    enableThinking?: boolean;
 }
 
 /**
@@ -12,7 +16,7 @@ export interface MastraModelRequest {
  */
 export function resolveMastraChatModel(params: MastraModelRequest): {
     resolvedModel: unknown;
-    engine: 'gemini' | 'openai';
+    engine: 'gemini' | 'openai' | 'lmstudio';
     modelId: string;
 } {
     const engine = params.engine || 'gemini';
@@ -37,6 +41,19 @@ export function resolveMastraChatModel(params: MastraModelRequest): {
         return {
             // 現在の制限付きキーはResponsesへのWriteを許可している。
             resolvedModel: createOpenAI({ apiKey })(modelId),
+            engine,
+            modelId
+        };
+    }
+    if (engine === 'lmstudio') {
+        const modelId = params.model?.trim() || 'unspecified';
+        return {
+            resolvedModel: createOpenAI({
+                baseURL: normalizeLmStudioBaseUrl(params.lmstudioEndpoint),
+                apiKey: 'not-needed',
+                name: 'lmstudio',
+                fetch: createLmStudioFetch(params.repetitionPenalty, params.enableThinking)
+            }).chat(modelId),
             engine,
             modelId
         };

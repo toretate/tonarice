@@ -6,6 +6,17 @@ export interface MascotAgentRequestContextValues {
     modelId: string;
     weatherEnabled: boolean;
     weatherUsed: boolean;
+    webSearchEnabled: boolean;
+    webSearchUsed: boolean;
+    locationEnabled: boolean;
+    locationUsed: boolean;
+    volumeEnabled: boolean;
+    volumeUsed: boolean;
+    appLauncherEnabled: boolean;
+    appLauncherUsed: boolean;
+    dataToolsEnabled: boolean;
+    executeDataTool?: (name: 'manageTasks' | 'manageMemos', input: Record<string, unknown>) => Promise<string>;
+    onDataToolResult?: (name: 'manageTasks' | 'manageMemos', input: Record<string, unknown>, output: string) => void;
 }
 
 export interface CreateMascotRequestContextParams {
@@ -13,6 +24,12 @@ export interface CreateMascotRequestContextParams {
     engine: string;
     modelId: string;
     weatherEnabled?: boolean;
+    webSearchEnabled?: boolean;
+    locationEnabled?: boolean;
+    volumeEnabled?: boolean;
+    appLauncherEnabled?: boolean;
+    executeDataTool?: MascotAgentRequestContextValues['executeDataTool'];
+    onDataToolResult?: MascotAgentRequestContextValues['onDataToolResult'];
 }
 
 /**
@@ -27,6 +44,17 @@ export function createMascotRequestContext(
         ['engine', params.engine],
         ['modelId', params.modelId],
         ['weatherEnabled', params.weatherEnabled === true],
-        ['weatherUsed', false]
+        ['weatherUsed', false],
+        ['webSearchEnabled', params.webSearchEnabled === true],
+        ['webSearchUsed', false],
+        ['locationEnabled', params.locationEnabled === true],
+        ['locationUsed', false],
+        ['volumeEnabled', params.volumeEnabled === true],
+        ['volumeUsed', false],
+        ['appLauncherEnabled', params.appLauncherEnabled === true],
+        ['appLauncherUsed', false],
+        ['dataToolsEnabled', typeof params.executeDataTool === 'function'],
+        ['executeDataTool', params.executeDataTool],
+        ['onDataToolResult', params.onDataToolResult]
     ]);
 }
