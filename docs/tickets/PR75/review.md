@@ -71,4 +71,27 @@ R1・R2は両レビューで重複する内容を統合した。R4はCodex、R3�
 npx vitest run --config vitest.config.ts src/server/mastra src/server/__tests__/mastra-websocket.test.ts src/server/utils/__tests__/irodori-loras.test.ts src/server/utils/__tests__/lmstudio-model-management.test.ts src/server/api/lmstudio/__tests__/reload.test.ts src/components/chatpanel/__tests__/useChatHistory.test.ts src/components/chatpanel/__tests__/useChatConnection.test.ts src/components/layouts/__tests__/IntegratedLayout.test.ts
 ```
 
-修正は `codex/pr75-review-notes` ブランチで管理する。コミット・プッシュはユーザーの明示的な指示に従う。GitHubへのレビュー投稿は行っていない。
+## 再レビュー後の残課題・マージ前対応（2026-11-22 Gemini再確認）
+
+コミット `07b0158` にて R1〜R10 の修正が反映されていること、および `npm run lint`（443ファイル）・`npm run typecheck`・`npm run typecheck:electron`・対象テスト128件成功（実APIテスト2件スキップ、未処理エラー0件）を再確認した。残課題とマージ前作業は次の通り。
+
+| ID | 優先度 | 問題・タスク | 対応方針 | 状態 |
+| --- | --- | --- | --- | --- |
+| R11 | P3 | `useChatHistory.ts` の `selectionKey` が参照する `authStore.user?.id` はチャット起動時に未取得（`checkAuthStatus` が `WindowSettingsPanel.vue` のみで呼ばれる）のため、途中で設定画面を開くと保存キーが `'local'` からユーザーIDへ切り替わり選択復元が割れる | `GET /api/mastra-history` から利用者分離用識別子を返すか、チャット初期化時に認証状態を確認してからキーを決定する | 修正済み |
+| R12 | 軽微 | 履歴削除失敗（`deleteFromMastra`）も `historyError` に表示されるため、削除エラーバナーにも履歴再読み込みを行う「再試行」ボタンが出る | 読み込み未完了（`!isHistoryLoaded`）時のみ「再試行」を出し、削除エラー時は「閉じる」表示などに分ける | 修正済み |
+| O1 | 運用 | 修正コミットがサブブランチ `codex/pr75-review-notes` 上にあり、PR #75 の head（`codex/mastra-introduction-plan`）へ未統合 | 残課題対応後、サブブランチ `codex/pr75-review-notes` を PR #75 の head ブランチ `codex/mastra-introduction-plan` へ統合する | 未対応 |
+| O2 | 運用 | レビュー記録ファイル（`docs/tickets/PR75/review*.md`）がコミットに含まれている | `docs/tickets/PR75/review*.md` は最終的に main（`master`）へは反映しない（PR #75 統合・マージ前に除外・削除する） | 未対応 |
+
+### R11・R12の対応結果（Codex）
+
+- R11: 認証済みの履歴APIから、ユーザーIDを直接含まない安定した `selectionScope` を返し、会話選択の保存キーに使用する。設定画面の認証ストアの読み込み時期に依存しない。APIが識別子を返さない場合は共通の `local` キーへ保存しない。
+- R12: 履歴未取得時のみ「再試行」を表示し、読み込み済みの削除エラーでは「閉じる」を表示する。エラーを閉じても再取得や表示中のメッセージ変更は行わない。
+- 最終依存構成の隔離コピーで、履歴・レイアウト・履歴APIの対象テスト19件成功、lint（444ファイル）成功、Vue/Nuxt型チェック成功。設定画面で後から認証状態が変わっても選択が復元できること、APIの利用者分離、削除エラーを閉じた際に再取得しないことを確認した。
+- この追記対応では本番ビルド、Electron実行時検証の再実行は行っていない。
+- O1・O2はマージ前作業として残す。今回の追加修正は `codex/pr75-review-notes` ブランチで管理する。
+
+### 把握事項（軽微・現状許容）
+
+- 応答待ち中に別マスコットへ切り替えた場合、送信元のメッセージ・送信状態の更新は解消済みだが、`completePendingMessage()` / `failPendingMessage()` の `saveHistory()` が切替先マスコットに対して走る点（切替先セッションの `timestamp` 更新）と `mascotStore.setEmotion(emotion)` が切替先へ適用される点は残る。
+
+修正は `codex/pr75-review-notes` ブランチで管理し、最終的に `docs/tickets/PR75/review*.md` は main（`master`）へ反映せず、PR #75 の head ブランチ（`codex/mastra-introduction-plan`）へサブブランチを統合する。コミット・プッシュはユーザーの明示的な指示に従う。GitHubへのレビュー投稿は行っていない。

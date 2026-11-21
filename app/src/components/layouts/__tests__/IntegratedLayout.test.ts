@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import IntegratedLayout from '../IntegratedLayout.vue';
 import MascotViewer from '../../MascotViewer.vue';
+import MessageList from '../../chatpanel/MessageList.vue';
 import { useConfigStore } from '../../../store/config';
 import { useMusicStore } from '../../../store/music';
 
@@ -75,6 +76,31 @@ describe('IntegratedLayout.vue - 統合ウィンドウのテスト', () => {
         historyAvailable = true;
         await wrapper.get('.history-error button').trigger('click');
         await vi.waitFor(() => expect(wrapper.find('.history-error').exists()).toBe(false));
+        wrapper.unmount();
+    });
+
+    it('deleteMessage_削除エラーの閉じるボタンでは履歴を再読込しないこと', async () => {
+        const configStore = useConfigStore();
+        configStore.isLoaded = true;
+        configStore.windowMode = 'integrated';
+        const fetchMock = vi.fn().mockImplementation(async (_url, options) => ({
+            ok: options?.method !== 'DELETE',
+            json: async () => ({ enabled: true, selectionScope: 'test-scope', sessions: [
+                { id: 'session', title: '会話', timestamp: 1000, messages: [{ id: 1000, sender: 'user', text: '質問' }] }
+            ] })
+        }));
+        vi.stubGlobal('fetch', fetchMock);
+        const wrapper = mount(IntegratedLayout);
+        await vi.waitFor(() => expect(wrapper.findComponent(MessageList).props('messages')).toHaveLength(1));
+        wrapper.findComponent(MessageList).vm.$emit('delete-message', 1000);
+        await vi.waitFor(() => expect(wrapper.find('.history-error').exists()).toBe(true));
+        expect(wrapper.get('.history-error button').text()).toBe('閉じる');
+        const historyRequests = () => fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/mastra-history'));
+        const count = historyRequests().length;
+        await wrapper.get('.history-error button').trigger('click');
+        expect(wrapper.find('.history-error').exists()).toBe(false);
+        expect(historyRequests()).toHaveLength(count);
+        expect(wrapper.findComponent(MessageList).props('messages')).toHaveLength(1);
         wrapper.unmount();
     });
 

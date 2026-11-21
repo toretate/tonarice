@@ -749,7 +749,8 @@ onMounted(() => {
         <template v-else-if="conversationKind === 'chat'">
             <div v-if="historyError" class="history-error" role="alert">
                 <span>{{ historyError }}</span>
-                <button type="button" :disabled="isHistoryLoading || isAiResponding" @click="loadHistory">再試行</button>
+                <button v-if="!isHistoryLoaded" type="button" :disabled="isHistoryLoading || isAiResponding" @click="loadHistory">再試行</button>
+                <button v-else type="button" @click="historyError = ''">閉じる</button>
             </div>
             <!-- メッセージスクロール領域 -->
             <MessageList

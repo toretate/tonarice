@@ -5,6 +5,7 @@ import { useChatHistory } from '../useChatHistory';
 import { useMascotStore } from '../../../store/mascot';
 import { useConfigStore } from '../../../store/config';
 import { nextTick } from 'vue';
+import { useAuthStore } from '../../../store/auth';
 
 describe('useChatHistory.ts のテスト', () => {
     beforeEach(() => {
@@ -78,7 +79,7 @@ describe('useChatHistory.ts のテスト', () => {
     });
 
     it('loadHistory_選択中の会話IDを本文とは別に復元すること', async () => {
-        vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ enabled: true, sessions: [
+        vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ enabled: true, selectionScope: 'user-scope', sessions: [
             { id: 'new', title: '新しい会話', timestamp: 2000, messages: [] },
             { id: 'old', title: '前の会話', timestamp: 1000, messages: [] }
         ] }) } as Response);
@@ -86,6 +87,7 @@ describe('useChatHistory.ts のテスト', () => {
         await first.loadHistory();
         first.selectSession('old');
         await nextTick();
+        useAuthStore().user = { id: 'loaded-after-settings', email: '', sub: '', role: 'user' };
         const second = useChatHistory(vi.fn());
         await second.loadHistory();
         expect(second.activeSessionId.value).toBe('old');

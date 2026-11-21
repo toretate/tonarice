@@ -2,7 +2,6 @@ import { ref, nextTick, computed, watch, ComputedRef } from 'vue';
 import { useConfigStore } from '../../store/config';
 import { useMascotStore } from '../../store/mascot';
 import { storeToRefs } from 'pinia';
-import { useAuthStore } from '../../store/auth';
 import { createChatSessionTitle } from '../../utils/chat-session-title';
 
 export interface MessageAttachment {
@@ -45,7 +44,6 @@ export interface MascotHistory {
 export function useChatHistory(scrollToBottom: () => void) {
     const configStore = useConfigStore();
     const mascotStore = useMascotStore();
-    const authStore = useAuthStore();
 
     const { activeMascot } = storeToRefs(configStore);
     const { isSecretMode } = storeToRefs(mascotStore);
@@ -62,11 +60,14 @@ export function useChatHistory(scrollToBottom: () => void) {
     const loadedMemoryMascots = new Set<string>();
     let historyRequest = 0;
     let hasStartedHistoryLoad = false;
+    let selectionScope: string | undefined;
 
     // 本文を複製せず、利用者・接続先・マスコットごとの選択だけを保存する。
-    const selectionKey = (mascotId: string) => `mastra-active-session:${JSON.stringify([window.location.origin, authStore.user?.id || 'local', mascotId])}`;
+    const selectionKey = (mascotId: string) => selectionScope
+        ? `mastra-active-session:${JSON.stringify([window.location.origin, selectionScope, mascotId])}` : undefined;
     const loadSelection = (mascotId: string) => {
-        try { return localStorage.getItem(selectionKey(mascotId)) || undefined; }
+        const key = selectionKey(mascotId);
+        try { return key ? localStorage.getItem(key) || undefined : undefined; }
         catch { return undefined; }
     };
 
@@ -193,10 +194,17 @@ export function useChatHistory(scrollToBottom: () => void) {
         const query = new URLSearchParams({ mascotId });
         const response = await fetch(`/api/mastra-history?${query}`, { credentials: 'include', cache: 'no-store' });
         if (!response.ok) throw new Error('履歴の読み込みに失敗しました。');
-        const data = await response.json() as { enabled: boolean; sessions?: ChatSession[] };
+        const data = await response.json() as { enabled: boolean; selectionScope?: string; sessions?: ChatSession[] };
         if (request !== historyRequest || (activeMascot.value?.id || 'default') !== mascotId) return;
         usesMastraHistory.value = data.enabled === true;
         if (data.enabled) {
+            // 認証済みAPIが返す識別子で固定し、設定画面の認証状態に依存しない。
+            const nextScope = typeof data.selectionScope === 'string' && data.selectionScope ? data.selectionScope : undefined;
+            if (selectionScope !== nextScope) {
+                allHistories.value = {};
+                loadedMemoryMascots.clear();
+            }
+            selectionScope = nextScope;
             loadedMemoryMascots.add(mascotId);
             const existing = allHistories.value[mascotId];
             allHistories.value[mascotId] = {
@@ -269,7 +277,8 @@ export function useChatHistory(scrollToBottom: () => void) {
             allHistories.value[mascotId].activeSessionId = activeSessionId.value || undefined;
             allHistories.value[mascotId].sessions = sessions.value;
             if (usesMastraHistory.value && activeSessionId.value) {
-                try { localStorage.setItem(selectionKey(mascotId), activeSessionId.value); }
+                const key = selectionKey(mascotId);
+                try { if (key) localStorage.setItem(key, activeSessionId.value); }
                 catch { /* 保存容量がない場合も会話は継続できる。 */ }
             }
         }
