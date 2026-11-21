@@ -188,8 +188,8 @@ ui/
 
 ## 3. AIエージェント基盤
 
-* AI応答の既存実装はVercel AI SDKを使用する。
-* MastraはNitroサーバープロセス内の任意のオーケストレーション基盤として段階導入する。
+* Gemini/OpenAI/LM Studioの対話チャットはNitroサーバープロセス内のMastraを使用する。
+* CoWorkの定期実行、要約、読み辞書などのAI処理は既存のVercel AI SDK経路を使用する。
 * MastraランタイムをElectronメインプロセスやRendererへ配置しない。
-* 正式移行までは機能フラグで既存AI経路へ戻せる構成を維持する。
+* 旧チャット経路および機能フラグによる切り戻しは廃止する。切り戻しには前のリリースを使用する。
 * 詳細は`docs/specs/MastraIntegration.spec.md`に定める。

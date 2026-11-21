@@ -1,10 +1,16 @@
 import { isLmStudioTemplateError, LMSTUDIO_TEMPLATE_ERROR_MESSAGE } from '../utils/lmstudio-template-error';
+import { isContextLimitError } from '../utils/context-limit-error';
 
 /**
  * API応答本文や認証情報を画面・ログへ転送しないエラー文へ変換する。
  */
 export function getMastraChatErrorMessage(error: unknown, engine: string): string {
     if (engine === 'lmstudio' && isLmStudioTemplateError(error)) return LMSTUDIO_TEMPLATE_ERROR_MESSAGE;
+    if (isContextLimitError(error)) {
+        return engine === 'lmstudio'
+            ? 'AIのコンテキスト長の上限を超えました。新しい話題を開始するか、Chat AI設定でモデルのコンテキストサイズを大きくして再ロードしてください。'
+            : 'AIのコンテキスト長の上限を超えました。添付を減らすか、新しい話題を開始してください。';
+    }
     if (error instanceof Error && error.message.includes('API KEYが設定されていません')) {
         return `${engine === 'openai' ? 'OpenAI' : 'Gemini'} API KEYが設定されていません。設定画面の「APIキー」から設定してください。`;
     }

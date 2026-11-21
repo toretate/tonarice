@@ -162,6 +162,24 @@ describe('WebSocketのMastra対話経路', () => {
         expect(serviceMocks.executeMemos).not.toHaveBeenCalled();
     });
 
+    it('message_承認待ちで切断された後に承認が届いても変更しないこと', async () => {
+        let approve!: (value: boolean) => void;
+        vi.mocked(requestToolApproval).mockImplementation(() => new Promise(resolve => { approve = resolve; }));
+        serviceMocks.mastraGenerate.mockImplementation(async params => {
+            await params.executeDataTool('manageMemos', { action: 'add', content: '試験' });
+            return '完了';
+        });
+        const peer = createPeer();
+        const pending = sendChat(peer);
+        await vi.waitFor(() => expect(approve).toBeDefined());
+        (handler as any).close(peer, {});
+        approve(true);
+        await pending;
+        expect(claimMutation).not.toHaveBeenCalled();
+        expect(serviceMocks.executeMemos).not.toHaveBeenCalled();
+        expect(sentEvents(peer).map(item => item.event)).toEqual(['chat-status']);
+    });
+
     it('message_試行済みの変更は承認後でも再実行しないこと', async () => {
         vi.mocked(claimMutation).mockReturnValue(false);
         serviceMocks.mastraGenerate.mockImplementation(async params => {
@@ -183,6 +201,17 @@ describe('WebSocketのMastra対話経路', () => {
         await sendChat(peer);
         expect(sentEvents(peer)).toContainEqual({ event: 'tool-status', data: { name: 'searchWeb', status: 'started' } });
         expect(sentEvents(peer)).toContainEqual({ event: 'tool-status', data: { name: 'searchWeb', status: 'failed' } });
+    });
+
+    it('message_処理終了後の遅れたツール通知を送らないこと', async () => {
+        let request: any;
+        serviceMocks.mastraGenerate.mockImplementation(async params => { request = params; return '完了'; });
+        const peer = createPeer();
+        await sendChat(peer);
+        const count = sentEvents(peer).length;
+        request.onToolStatus('manageMemos', 'succeeded');
+        request.onDataToolResult('manageMemos', { action: 'add' }, JSON.stringify({ success: true, id: 'memo-1', memo: {} }));
+        expect(sentEvents(peer)).toHaveLength(count);
     });
 
     it('message_未対応エンジンではモデルを呼ばずエラーを返すこと', async () => {

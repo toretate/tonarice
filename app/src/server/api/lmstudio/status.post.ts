@@ -7,7 +7,7 @@ export default defineEventHandler(async (event) => {
         return await getLmStudioModelStatus(body?.endpoint, body?.modelKey || '');
     } catch (error) {
         const statusCode = error instanceof LmStudioManagementError ? error.statusCode : 400;
-        const statusMessage = error instanceof Error ? error.message : 'モデル情報の取得に失敗しました。';
-        throw createError({ statusCode, statusMessage });
+        const message = error instanceof Error ? error.message : 'モデル情報の取得に失敗しました。';
+        throw createError({ statusCode, message });
     }
 });

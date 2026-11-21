@@ -4,6 +4,7 @@ import { getMastraRuntime } from './runtime';
 import { buildMastraChatInstructions, buildMastraChatMessages } from './chat-input';
 import type { MastraChatAttachment, MastraChatHistoryItem } from './chat-input';
 import type { ToolStatusCallback } from './tool-observation';
+import { GenerationBudget } from './generation-budget';
 
 function stableValue(value: unknown): unknown {
     if (Array.isArray(value)) return value.map(stableValue);
@@ -35,6 +36,7 @@ export interface MastraChatRequest {
     onToolStatus?: ToolStatusCallback;
     authorizeSideEffect?: (name: string, input: Record<string, unknown>) => Promise<string | null>;
     abortSignal?: AbortSignal;
+    generationBudget?: GenerationBudget;
 }
 
 /**
@@ -75,13 +77,12 @@ export class MastraChatService {
             frequencyPenalty: params.frequencyPenalty ?? 0,
             maxOutputTokens: params.maxOutputTokens ?? 2048
         };
-        const timeoutSignal = AbortSignal.timeout(60000);
-        const abortSignal = params.abortSignal
-            ? AbortSignal.any([params.abortSignal, timeoutSignal])
-            : timeoutSignal;
+        const budget = params.generationBudget ?? new GenerationBudget(params.abortSignal);
+        const abortSignal = budget.signal;
         const startedAt = Date.now();
         console.info(`[MastraChatService] ${params.engine}との通信を開始`);
         try {
+            abortSignal.throwIfAborted();
             const response = await agent.generate(buildMastraChatMessages(
                 params.message,
                 params.history,
@@ -102,6 +103,7 @@ export class MastraChatService {
                     || params.volumeEnabled || params.appLauncherEnabled || executeDataTool ? 6 : undefined,
                 abortSignal
             });
+            abortSignal.throwIfAborted();
             console.info(`[MastraChatService] ${params.engine}との通信が完了 (${Date.now() - startedAt} ms)`);
 
             return response.text?.trim()
@@ -109,6 +111,8 @@ export class MastraChatService {
         } catch (error) {
             console.warn(`[MastraChatService] ${params.engine}との接続エラー`);
             throw error;
+        } finally {
+            if (!params.generationBudget) budget.dispose();
         }
     }
 }
