@@ -49,7 +49,7 @@ MastraをAIエージェントのオーケストレーション基盤として段
 
 ## 5. Agentとモデル
 
-- `@mastra/core`は1.82.0、`@lmstudio/sdk`は2.1.0、AI SDKは7系を使用する。
+- `@mastra/core`は1.83.0、`@mastra/memory`は1.41.1、`@mastra/libsql`は1.30.0、`@lmstudio/sdk`は2.1.0、AI SDKは7系を使用する。
 - Agent IDは`mascot-agent`とする。
 - 天気、Web検索、概算位置、音量、アプリ起動、タスク、メモのツールをリクエスト設定に応じてAgentへ動的に登録する。Workflowは登録しない。
 - 現行処理と同じく、最初は全文を返す`agent.generate()`を使用する。
