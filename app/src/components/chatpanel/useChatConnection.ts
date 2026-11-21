@@ -18,6 +18,8 @@ import { toolApprovalLabels, type ToolApprovalRequest } from './tool-approval-di
 export function useChatConnection(params: {
     messages: Ref<Message[]>;
     activeSessionId: Ref<string | null>;
+    usesMastraHistory?: Ref<boolean>;
+    isHistoryLoaded?: Ref<boolean>;
     sessions: Ref<ChatSession[]>;
     inputText: Ref<string>;
     saveHistory: () => Promise<void>;
@@ -116,6 +118,7 @@ export function useChatConnection(params: {
                 pendingMessage.timestamp = Date.now();
                 return;
             }
+            if (params.usesMastraHistory?.value) return;
         }
         for (let i = messages.value.length - 1; i >= 0; i--) {
             if (messages.value[i].sender === 'mascot') {
@@ -481,6 +484,11 @@ export function useChatConnection(params: {
     };
 
     const sendMessage = async (isActiveTalk: boolean = false, retryMessageId?: number) => {
+        if (params.isHistoryLoaded && !params.isHistoryLoaded.value) return;
+        const sentSessionId = activeSessionId.value;
+        const sentMascotId = activeMascot.value?.id || 'default';
+        const shouldPersist = params.usesMastraHistory?.value && !mascotStore.isSecretMode && !isActiveTalk;
+        if (shouldPersist && !sentSessionId) return;
         const retryTarget = retryMessageId !== undefined
             ? messages.value.find(message => message.id === retryMessageId && message.sender === 'user')
             : undefined;
@@ -657,7 +665,7 @@ export function useChatConnection(params: {
         }
 
         const currentSession = sessions.value.find(s => s.id === activeSessionId.value);
-        if (currentSession && currentSession.summary) {
+        if (!params.usesMastraHistory?.value && currentSession && currentSession.summary) {
             systemPrompt += `\n\n# Previous Conversation Summary\n以下はこれまでのマスターとの会話履歴の要約です。この文脈を考慮して返答してください。\n${currentSession.summary}\n`;
         }
 
@@ -698,7 +706,12 @@ export function useChatConnection(params: {
                 event: 'chat-send',
                 data: {
                 message: userQuery,
-                turnId: userMessage ? `${activeSessionId.value || 'default'}:${userMessage.id}` : crypto.randomUUID(),
+                turnId: userMessage ? `${sentSessionId || 'default'}:${userMessage.id}` : crypto.randomUUID(),
+                ...(shouldPersist && userMessage ? {
+                    memorySessionId: sentSessionId,
+                    memoryUserMessageId: userMessage.id,
+                    memoryAssistantMessageId: aiMessageId
+                } : {}),
                 apiKey: apiKey,
                 systemPrompt: systemPrompt,
                 model: model,
@@ -719,12 +732,12 @@ export function useChatConnection(params: {
                 repetitionPenalty: repetitionPenalty.value,
                 maxOutputTokens: maxOutputTokens.value,
                 enableThinking: enableThinking.value,
-                history: historyToSend,
+                history: shouldPersist ? undefined : historyToSend,
                 useTts: useTts.value,
                 ttsReadNarrative: ttsReadNarrative.value,
                 saveVoice: saveVoice.value,
                 showVoiceLog: showVoiceLog.value,
-                activeMascotId: activeMascot.value?.id || 'default',
+                activeMascotId: sentMascotId,
                 ttsDictionary: activeMascot.value?.aiConfig?.ttsDictionary,
                 attachments: attachments.length > 0 ? attachments : undefined,
                 tools: {

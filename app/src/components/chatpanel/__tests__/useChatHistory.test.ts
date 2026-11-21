@@ -30,6 +30,38 @@ describe('useChatHistory.ts のテスト', () => {
         }) as any;
     });
 
+    it('loadHistory_Mastra履歴を表示し、削除が成功した場合だけ画面から除くこと', async () => {
+        const request = vi.mocked(fetch)
+            .mockResolvedValueOnce({ ok: true, json: async () => ({
+                enabled: true,
+                sessions: [{ id: 'memory-session', title: '記憶', timestamp: 1000, messages: [{ id: 1000, sender: 'user', text: '合言葉' }] }]
+            }) } as Response)
+            .mockResolvedValueOnce({ ok: false } as Response)
+            .mockResolvedValueOnce({ ok: true } as Response)
+            .mockResolvedValueOnce({ ok: true } as Response);
+        const alert = vi.fn();
+        vi.stubGlobal('alert', alert);
+        try {
+            const history = useChatHistory(vi.fn());
+            await history.loadHistory();
+            expect(history.messages.value[0].text).toBe('合言葉');
+            expect(window.electronAPI!.getChatHistory).not.toHaveBeenCalled();
+            await history.deleteMessage(1000);
+            expect(history.messages.value).toHaveLength(1);
+            expect(alert).toHaveBeenCalled();
+            await history.deleteMessage(1000);
+            expect(JSON.parse(String(request.mock.calls[2][1]?.body))).toEqual({
+                kind: 'message', sessionId: 'memory-session', messageId: 1000, mascotId: 'default'
+            });
+            expect(history.messages.value).toHaveLength(0);
+            await history.deleteSession('memory-session', new Event('click'));
+            expect(history.sessions.value.some(session => session.id === 'memory-session')).toBe(false);
+            expect(window.electronAPI!.saveChatHistory).not.toHaveBeenCalled();
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
     it('applyActiveMascotHistory_通常モード時は通常セッションをロードし、シークレットモード時はシークレットセッションをロードすること', async () => {
         const scrollToBottom = vi.fn();
         const history = useChatHistory(scrollToBottom);

@@ -53,6 +53,24 @@ export function useChatHistory(scrollToBottom: () => void) {
     const messages = ref<Message[]>([]);
     const showHistoryList = ref(false);
     const isHistoryLoaded = ref(false);
+    const usesMastraHistory = ref(false);
+    const loadedMemoryMascots = new Set<string>();
+
+    const deleteFromMastra = async (kind: 'message' | 'thread', sessionId: string, messageId?: number) => {
+        try {
+            const response = await fetch('/api/mastra-history', {
+                method: 'DELETE',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ kind, sessionId, messageId, mascotId: activeMascot.value?.id || 'default' })
+            });
+            if (response.ok) return true;
+        } catch {
+            // 保存先に接続できない場合は画面上にも残す。
+        }
+        window.alert('履歴を削除できませんでした。応答が完了してから、もう一度お試しください。');
+        return false;
+    };
 
     const getDefaultMessage = () => {
         return {
@@ -157,8 +175,33 @@ export function useChatHistory(scrollToBottom: () => void) {
         nextTick(() => scrollToBottom());
     };
 
+    async function loadMemoryHistory(mascotId: string) {
+        const query = new URLSearchParams({ mascotId });
+        const response = await fetch(`/api/mastra-history?${query}`, { credentials: 'include', cache: 'no-store' });
+        if (!response.ok) throw new Error('履歴の読み込みに失敗しました。');
+        const data = await response.json() as { enabled: boolean; sessions?: ChatSession[] };
+        if ((activeMascot.value?.id || 'default') !== mascotId) return;
+        usesMastraHistory.value = data.enabled === true;
+        if (data.enabled) {
+            loadedMemoryMascots.add(mascotId);
+            const existing = allHistories.value[mascotId];
+            allHistories.value[mascotId] = {
+                ...existing,
+                sessions: data.sessions ?? [],
+                activeSessionId: existing?.activeSessionId
+            };
+        }
+    }
+
     const loadHistory = async () => {
-        if (window.electronAPI) {
+        const mascotId = activeMascot.value?.id || 'default';
+        try {
+            await loadMemoryHistory(mascotId);
+        } catch {
+            window.alert('チャット履歴を読み込めませんでした。画面を開き直してお試しください。');
+            return;
+        }
+        if (!usesMastraHistory.value && window.electronAPI) {
             try {
                 const history = await window.electronAPI.getChatHistory();
                 allHistories.value = history || {};
@@ -203,7 +246,7 @@ export function useChatHistory(scrollToBottom: () => void) {
             allHistories.value[mascotId].sessions = sessions.value;
         }
         
-        if (window.electronAPI) {
+        if (!usesMastraHistory.value && window.electronAPI) {
             try {
                 const rawHistory = JSON.parse(JSON.stringify(allHistories.value));
                 await window.electronAPI.saveChatHistory(rawHistory);
@@ -220,7 +263,7 @@ export function useChatHistory(scrollToBottom: () => void) {
     };
 
     const clearHistory = async () => {
-        if (!isHistoryLoaded.value) return;
+        if (!isHistoryLoaded.value || (usesMastraHistory.value && mascotStore.isLoading)) return;
         const newSession = createNewSession(isSecretMode.value);
         sessions.value.unshift(newSession);
         activeSessionId.value = newSession.id;
@@ -230,6 +273,7 @@ export function useChatHistory(scrollToBottom: () => void) {
     };
 
     const selectSession = (sessionId: string) => {
+        if (usesMastraHistory.value && mascotStore.isLoading) return;
         activeSessionId.value = sessionId;
         const currentSession = sessions.value.find(s => s.id === sessionId);
         if (currentSession) {
@@ -250,6 +294,11 @@ export function useChatHistory(scrollToBottom: () => void) {
 
     const deleteSession = async (sessionId: string, event: Event) => {
         event.stopPropagation();
+        const originalSessions = sessions.value;
+        if (usesMastraHistory.value && !isSecretMode.value) {
+            if (mascotStore.isLoading || !await deleteFromMastra('thread', sessionId)) return;
+            if (sessions.value !== originalSessions) return;
+        }
         
         sessions.value = sessions.value.filter(s => s.id !== sessionId);
         
@@ -278,6 +327,7 @@ export function useChatHistory(scrollToBottom: () => void) {
     };
 
     const runCompaction = async (mascotId: string, sessionId: string) => {
+        if (usesMastraHistory.value) return;
         const session = sessions.value.find(s => s.id === sessionId);
         const COMPACTION_THRESHOLD = 15;
         const PRESERVE_COUNT = 6;
@@ -457,8 +507,24 @@ export function useChatHistory(scrollToBottom: () => void) {
     };
 
     // マスコット切り替え時の履歴適用
-    watch(() => activeMascot.value?.id, (newId, oldId) => {
+    watch(() => activeMascot.value?.id, async (newId, oldId) => {
         if (!isHistoryLoaded.value) return;
+        const mascotId = newId || 'default';
+        if (usesMastraHistory.value) {
+            if (!loadedMemoryMascots.has(mascotId)) {
+                isHistoryLoaded.value = false;
+                try {
+                    await loadMemoryHistory(mascotId);
+                } catch {
+                    window.alert('チャット履歴を読み込めませんでした。');
+                } finally {
+                    isHistoryLoaded.value = true;
+                }
+                if ((activeMascot.value?.id || 'default') !== mascotId) await loadHistory();
+            }
+            applyActiveMascotHistory();
+            return;
+        }
         if (oldId && newId && newId !== oldId) {
             saveHistoryForMascot(oldId);
         }
@@ -488,6 +554,12 @@ export function useChatHistory(scrollToBottom: () => void) {
     });
 
     const deleteMessage = async (messageId: number) => {
+        const sessionId = activeSessionId.value;
+        const originalSessions = sessions.value;
+        if (usesMastraHistory.value && !isSecretMode.value && sessionId) {
+            if (mascotStore.isLoading || !await deleteFromMastra('message', sessionId, messageId)) return;
+            if (sessionId !== activeSessionId.value || originalSessions !== sessions.value) return;
+        }
         messages.value = messages.value.filter(m => m.id !== messageId);
         await saveHistory();
     };
@@ -499,6 +571,7 @@ export function useChatHistory(scrollToBottom: () => void) {
         messages,
         showHistoryList,
         isHistoryLoaded,
+        usesMastraHistory,
         loadHistory,
         saveHistory,
         saveHistoryForMascot,

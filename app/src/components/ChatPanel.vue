@@ -226,6 +226,7 @@ const {
     messages,
     showHistoryList,
     isHistoryLoaded,
+    usesMastraHistory,
     loadHistory,
     saveHistory,
     clearHistory,
@@ -252,6 +253,8 @@ const {
 } = useChatConnection({
     messages,
     activeSessionId,
+    isHistoryLoaded,
+    usesMastraHistory,
     sessions,
     inputText,
     saveHistory,

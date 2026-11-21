@@ -30,6 +30,10 @@ vi.mock('../mastra/mutation-claim', () => ({ claimMutation: vi.fn().mockReturnVa
 import handler from '../routes/ws';
 import { requestToolApproval } from '../mastra/tool-approval';
 import { claimMutation } from '../mastra/mutation-claim';
+import * as memoryStore from '../mastra/memory-store';
+import { listMemorySessions } from '../mastra/memory-history';
+import { Memory } from '@mastra/memory';
+import { LibSQLStore } from '@mastra/libsql';
 
 interface TestPeer {
     context: Record<string, unknown>;
@@ -85,6 +89,29 @@ describe('WebSocketのMastra対話経路', () => {
         vi.restoreAllMocks();
         if (originalFlag === undefined) delete process.env.MASTRA_CHAT_ENABLED;
         else process.env.MASTRA_CHAT_ENABLED = originalFlag;
+    });
+
+    it('message_Memoryで履歴を読み書きし同じ再送でツール付き生成を繰り返さないこと', async () => {
+        const storage = new LibSQLStore({ id: 'ws-memory-test', url: ':memory:' });
+        const memory = new Memory({ storage });
+        vi.spyOn(memoryStore, 'getMemoryStore').mockReturnValue({ memory, storage });
+        serviceMocks.mastraGenerate.mockResolvedValue('了解 [happy]');
+        const peer = createPeer();
+        const base = { activeMascotId: 'mascot-test', memorySessionId: 'session-memory' };
+        const first = { ...base, message: '青いリボン', memoryUserMessageId: 1000, memoryAssistantMessageId: 1001 };
+        try {
+            await sendChat(peer, first);
+            expect(serviceMocks.mastraGenerate.mock.calls[0][0].history).toEqual([]);
+            await sendChat(peer, first);
+            expect(serviceMocks.mastraGenerate).toHaveBeenCalledTimes(1);
+            await sendChat(peer, { ...base, memoryUserMessageId: 1002, memoryAssistantMessageId: 1003 });
+            expect(serviceMocks.mastraGenerate.mock.calls[1][0].history).toEqual([
+                { sender: 'user', text: '青いリボン' }, { sender: 'mascot', text: '了解' }
+            ]);
+            expect((await listMemorySessions(memory, 'user-test', 'mascot-test'))[0]?.messages).toHaveLength(4);
+        } finally {
+            await storage.close();
+        }
     });
 
     it('message_機能フラグ有効時にMastra応答を既存チャットイベントへ接続すること', async () => {

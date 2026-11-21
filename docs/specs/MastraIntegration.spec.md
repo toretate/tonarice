@@ -22,7 +22,7 @@ MastraをAIエージェントのオーケストレーション基盤として段
 次は後続フェーズとする。
 
 - ブラウザのページ操作ツール（既存チャットには未実装）
-- Mastra MemoryとLibSQL
+- Mastra Memoryの観察型記憶・意味検索と配布物の検証
 - Workflow、Studio、MCP、外部Observability
 - Legacy AI経路の削除
 
@@ -54,7 +54,7 @@ MastraをAIエージェントのオーケストレーション基盤として段
 
 - `@mastra/core`は1.82.0、`@lmstudio/sdk`は2.1.0、AI SDKは7系を使用する。
 - Agent IDは`mascot-agent`とする。
-- 天気、Web検索、概算位置、音量、アプリ起動、タスク、メモのツールをリクエスト設定に応じてAgentへ動的に登録する。MemoryとWorkflowは登録しない。
+- 天気、Web検索、概算位置、音量、アプリ起動、タスク、メモのツールをリクエスト設定に応じてAgentへ動的に登録する。Workflowは登録しない。
 - 現行処理と同じく、最初は全文を返す`agent.generate()`を使用する。
 - モデルはAgentへ固定せず、実行ごとのRequest Contextから解決する。
 - APIキー、認証トークン、LM Studioの資格情報をRequest Contextへ直接格納しない。
@@ -65,7 +65,9 @@ MastraをAIエージェントのオーケストレーション基盤として段
 - LM StudioのLegacy/Mastra両経路とも`/no_think`を追加しない。送信する過去履歴からは同トークンを除去し、保存済み履歴は変更しない。SDKの思考設定をMastra経由で利用する経路は未実装である。
 - Request Contextへ格納できる識別情報はエンジン名とモデルIDに限定する。
 - システムプロンプトはRequest Contextへ格納せず、Agent実行オプションとして渡す。
-- 会話履歴と添付ファイルは実行時のメッセージとして渡し、フェーズ2ではMastra Memoryへ保存しない。
+- Mastra有効時の通常チャットでは、Mastra Memory（`@mastra/memory`）とlibSQLが会話履歴の正本となる。WebSocket側で成功した発話・表示用の応答と添付を保存し、次回の生成には保存済みの直近10件のテキストを使用する。システムプロンプト、ツール呼び出しの生データ、失敗時の応答は保存しない。
+- 画面の履歴取得・削除には認証付きの`/api/mastra-history`を使用する。ユーザーとマスコットから保存範囲を導出し、会話IDで会話を分離する。削除は保存先の処理が成功した場合にのみ画面へ反映する。生成中の同一会話の削除は拒否する。
+- 旧履歴は取り込まない。Mastra有効時は旧履歴の一括保存と自動要約を行わない。シークレット会話と自発発話はMastra Memoryに保存しない。既存のマスコット設定・長期記憶ファイルは変更しない。
 - 画像はBase64データをリクエストへ直接含めるため、OpenAI Files APIへの事前アップロードを行わない。
 - 生成タイムアウトは60秒とし、WebSocket切断時は実行中のMastra呼出しを中断する。
 - Agentは全文を返し、既存WebSocketの応答・TTS処理へ渡す。ストリーミングは別途評価する。
