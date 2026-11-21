@@ -1,16 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getMastraChatErrorMessage, shouldUseMastraChat } from '../chat-route';
-
-describe('shouldUseMastraChatのテスト', () => {
-    it('shouldUseMastraChat_有効時の3エンジンだけを選択すること', () => {
-        const env = { MASTRA_CHAT_ENABLED: 'true' };
-        expect(shouldUseMastraChat('gemini', env)).toBe(true);
-        expect(shouldUseMastraChat('openai', env)).toBe(true);
-        expect(shouldUseMastraChat('lmstudio', env)).toBe(true);
-        expect(shouldUseMastraChat('unsupported', env)).toBe(false);
-        expect(shouldUseMastraChat('gemini', { MASTRA_CHAT_ENABLED: 'false' })).toBe(false);
-    });
-});
+import { getMastraChatErrorMessage } from '../chat-route';
 
 describe('getMastraChatErrorMessageのテスト', () => {
     it('getMastraChatErrorMessage_API応答本文と認証情報を表示しないこと', () => {

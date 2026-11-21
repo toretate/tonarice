@@ -29,19 +29,11 @@ function createSanitizedError(
 }
 
 describe.skipIf(!liveTestEnabled)('MastraChatService.generateResponseの実接続テスト', () => {
-    const originalFeatureFlag = process.env.MASTRA_CHAT_ENABLED;
-
     beforeAll(() => {
-        process.env.MASTRA_CHAT_ENABLED = 'true';
         resetMastraRuntimeForTest();
     });
 
     afterAll(() => {
-        if (originalFeatureFlag === undefined) {
-            delete process.env.MASTRA_CHAT_ENABLED;
-        } else {
-            process.env.MASTRA_CHAT_ENABLED = originalFeatureFlag;
-        }
         resetMastraRuntimeForTest();
     });
 

@@ -1,4 +1,3 @@
-import { isMastraChatEnabled } from './feature-flag';
 import { MASCOT_AGENT_ID } from './mascot-agent';
 import { createMascotRequestContext } from './request-context';
 import { getMastraRuntime } from './runtime';
@@ -39,14 +38,10 @@ export interface MastraChatRequest {
 }
 
 /**
- * 既存ChatAiServiceと並行して導入するMastraチャット境界。
+ * 対話チャットをMastra Agentで実行する。
  */
 export class MastraChatService {
     public static async generateResponse(params: MastraChatRequest): Promise<string> {
-        if (!isMastraChatEnabled()) {
-            throw new Error('Mastraチャット経路は無効です。');
-        }
-
         const executedMutations = new Set<string>();
         const executeDataTool = params.executeDataTool && (async (
             name: 'manageTasks' | 'manageMemos', input: Record<string, unknown>

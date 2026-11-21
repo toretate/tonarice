@@ -1,8 +1,6 @@
 import { defineWebSocketHandler } from 'h3';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ChatAiService } from '../utils/chat-ai-service';
-import { isLmStudioTemplateError, LMSTUDIO_TEMPLATE_ERROR_MESSAGE } from '../utils/lmstudio-template-error';
 import { VoiceAiService } from '../utils/voice-ai-service';
 import { splitSentences } from '../utils/sentence-splitter';
 import { sanitizeForIrodoriTTS } from '../utils/irodori-sanitizer';
@@ -16,7 +14,7 @@ import { isAuthBypassAllowed } from '../utils/auth-bypass';
 import { encodeAudioBinaryFrame } from '../../utils/audio-binary-frame';
 import { MastraChatService } from '../mastra/mastra-chat-service';
 import { resolveMastraChatModel } from '../mastra/model-resolver';
-import { getMastraChatErrorMessage, shouldUseMastraChat } from '../mastra/chat-route';
+import { getMastraChatErrorMessage } from '../mastra/chat-route';
 import { appendMemoryTurn, listMemoryMessages, lockMemoryThread, memoryMessageId, memoryMessageText, type HistoryScope } from '../mastra/memory-history';
 import { getMemoryStore } from '../mastra/memory-store';
 import { requestToolApproval, respondToolApproval } from '../mastra/tool-approval';
@@ -246,14 +244,12 @@ export default defineWebSocketHandler({
                     enableThinking,
                     ttsDictionary
                 } = data;
-                const useMastra = shouldUseMastraChat(engine);
                 const enableTools = engine !== 'lmstudio' || toolUseEnabled !== false;
 
                 console.log(`=========================================`);
                 console.log(`[WS] chat-send received (Nitro)!`);
-                console.log(` - Message: "${useMastra ? '[Mastra試験経路では記録しない]' : message}"`);
                 console.log(` - Engine: "${engine}"`);
-                console.log(` - Chat route: ${useMastra ? 'mastra' : 'legacy'}`);
+                console.log(' - Chat route: mastra');
                 console.log(` - Model: "${model}"`);
                 console.log(` - Temperature: ${temperature}`);
                 console.log(` - Frequency Penalty: ${frequencyPenalty}`);
@@ -273,192 +269,121 @@ export default defineWebSocketHandler({
                 }));
 
                 let reply = '';
-                let mastraController: AbortController | null = null;
+                const mastraController = new AbortController();
                 let releaseMemory: (() => void) | undefined;
+                registerMastraRequest(peer, mastraController);
                 try {
-                    if (!useMastra && data.memorySessionId !== undefined) {
-                        peer.send(JSON.stringify({ event: 'chat-error', data: { message: 'このチャット経路では Mastra の履歴を利用できません。' } }));
-                        return;
-                    }
-                    if (useMastra) {
-                        mastraController = new AbortController();
-                        registerMastraRequest(peer, mastraController);
-                        let historyForModel = history;
-                        let memoryScope: HistoryScope | undefined;
-                        const { memorySessionId, memoryUserMessageId, memoryAssistantMessageId, activeMascotId } = data;
-                        if (memorySessionId !== undefined) {
-                            if (userId === 'anonymous' || typeof memorySessionId !== 'string' || !memorySessionId || memorySessionId.length > 200
-                                || typeof activeMascotId !== 'string' || !activeMascotId || activeMascotId.length > 200
-                                || !Number.isSafeInteger(memoryUserMessageId) || !Number.isSafeInteger(memoryAssistantMessageId)
-                                || memoryUserMessageId <= 1 || memoryAssistantMessageId <= memoryUserMessageId || memoryAssistantMessageId > 8640000000000000) {
-                                peer.send(JSON.stringify({ event: 'chat-error', data: { message: '履歴を保存する会話を特定できません。' } }));
-                                return;
-                            }
-                            memoryScope = { userId, mascotId: activeMascotId, sessionId: memorySessionId, isSecret: false };
-                            releaseMemory = lockMemoryThread(memoryScope);
-                            if (!releaseMemory) {
-                                peer.send(JSON.stringify({ event: 'chat-error', data: { message: 'この会話は別の処理を実行中です。' } }));
-                                return;
-                            }
-                            const stored = await listMemoryMessages(getMemoryStore().memory, memoryScope);
-                            const savedReply = stored.find(item => item.role === 'assistant' && item.id === memoryMessageId(memoryScope!, memoryAssistantMessageId));
-                            if (savedReply) {
-                                const text = memoryMessageText(savedReply);
-                                peer.send(JSON.stringify({ event: 'chat-response', data: { text, speechText: text, emotion: 'neutral' } }));
-                                return;
-                            }
-                            historyForModel = stored.filter(item => (item.role === 'assistant' || item.role === 'user')
-                                && item.id !== memoryMessageId(memoryScope!, memoryUserMessageId))
-                                .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).slice(-10)
-                                .map(item => ({ sender: item.role === 'user' ? 'user' : 'mascot', text: memoryMessageText(item) }));
+                    let historyForModel = history;
+                    let memoryScope: HistoryScope | undefined;
+                    const { memorySessionId, memoryUserMessageId, memoryAssistantMessageId, activeMascotId } = data;
+                    if (memorySessionId !== undefined) {
+                        if (userId === 'anonymous' || typeof memorySessionId !== 'string' || !memorySessionId || memorySessionId.length > 200
+                            || typeof activeMascotId !== 'string' || !activeMascotId || activeMascotId.length > 200
+                            || !Number.isSafeInteger(memoryUserMessageId) || !Number.isSafeInteger(memoryAssistantMessageId)
+                            || memoryUserMessageId <= 1 || memoryAssistantMessageId <= memoryUserMessageId || memoryAssistantMessageId > 8640000000000000) {
+                            peer.send(JSON.stringify({ event: 'chat-error', data: { message: '履歴を保存する会話を特定できません。' } }));
+                            return;
                         }
-                        const authorizeSideEffect = async (name: string, input: Record<string, unknown>): Promise<string | null> => {
-                            if (typeof turnId !== 'string' || turnId.length < 1 || turnId.length > 200) {
-                                return '操作識別子がないため変更できません。画面を更新してください。';
-                            }
-                            if (!await requestToolApproval(peer, name, input, mastraController!.signal)) {
-                                return 'ユーザーが承認しなかったため操作しませんでした。';
-                            }
-                            if (mastraController!.signal.aborted) return '接続が終了したため操作しませんでした。';
-                            try {
-                                if (!claimMutation(path.join(USERS_DIR, '.tool-mutation-claims'), getPeerUserId(peer), turnId, name, input)) {
-                                    return '同じ発話の操作は既に試行されています。再実行せず結果を確認してください。';
-                                }
-                            } catch {
-                                return '操作記録を保存できないため実行しませんでした。';
-                            }
-                            return null;
-                        };
-                        const resolved = resolveMastraChatModel({
-                            engine: engine || 'gemini',
-                            model,
-                            apiKey,
-                            lmstudioEndpoint,
-                            repetitionPenalty,
-                            enableThinking
-                        });
-                        reply = await MastraChatService.generateResponse({
-                            message,
-                            systemPrompt,
-                            resolvedModel: resolved.resolvedModel,
-                            engine: resolved.engine,
-                            modelId: resolved.modelId,
-                            temperature,
-                            frequencyPenalty,
-                            maxOutputTokens,
-                            history: historyForModel,
-                            attachments,
-                            weatherEnabled: enableTools && tools?.toolsWeather === true,
-                            webSearchEnabled: enableTools && tools?.toolsWebSearch === true,
-                            locationEnabled: enableTools && tools?.toolsGpsLocation === true,
-                            volumeEnabled: enableTools && tools?.toolsVolume === true,
-                            appLauncherEnabled: enableTools && tools?.toolsAppLauncher === true,
-                            enableThinking,
-                            authorizeSideEffect,
-                            executeDataTool: !enableTools || getPeerUserId(peer) === 'anonymous'
-                                ? undefined
-                                : async (name, input) => {
-                                    if (input.action === 'search') return executeDataToolForPeer(peer, name, input);
-                                    const refusal = await authorizeSideEffect(name, input);
-                                    if (refusal) return JSON.stringify({ success: false, error: refusal });
-                                    return executeDataToolForPeer(peer, name, input);
-                                },
-                            onDataToolResult: (name, input, output) => notifyDataToolResult(peer, name, input, output),
-                            onToolStatus: (name, status) => {
-                                if (!mastraController?.signal.aborted) peer.send(JSON.stringify({ event: 'tool-status', data: { name, status } }));
-                            },
-                            abortSignal: mastraController.signal
-                        });
-                        if (memoryScope && !mastraController.signal.aborted) {
-                            await appendMemoryTurn(getMemoryStore().memory, memoryScope, {
-                                userId: memoryUserMessageId,
-                                assistantId: memoryAssistantMessageId,
-                                message,
-                                reply: reply.replace(/\[TIMER:.*?\]/gi, '').replace(/\[\w+\]/g, '').trim(),
-                                attachments: Array.isArray(attachments) ? attachments.flatMap(item =>
-                                    (item?.type === 'image' || item?.type === 'file') && typeof item.name === 'string'
-                                    && typeof item.url === 'string' && item.url.startsWith('data:')
-                                        ? [{ type: item.type, name: item.name, url: item.url }] : []) : undefined
-                            });
+                        memoryScope = { userId, mascotId: activeMascotId, sessionId: memorySessionId, isSecret: false };
+                        releaseMemory = lockMemoryThread(memoryScope);
+                        if (!releaseMemory) {
+                            peer.send(JSON.stringify({ event: 'chat-error', data: { message: 'この会話は別の処理を実行中です。' } }));
+                            return;
                         }
-                    } else {
-                        reply = await ChatAiService.generateResponse({
-                            message,
-                            apiKey,
-                            systemPrompt,
-                            model,
-                            temperature,
-                            frequencyPenalty,
-                            repetitionPenalty,
-                            maxOutputTokens,
-                            enableThinking,
-                            engine,
-                            lmstudioEndpoint,
-                            history,
-                            attachments,
-                            tools,
-                            toolUseEnabled: enableTools,
-                            onToolExecute: (toolName, args) =>
-                                toolName === 'manageTasks' || toolName === 'manageMemos'
-                                    ? executeDataToolForPeer(peer, toolName, args)
-                                    : Promise.resolve(null),
-                            onToolResult: (toolName, input, output) => {
-                                if (toolName === 'manageTasks' || toolName === 'manageMemos') {
-                                    notifyDataToolResult(peer, toolName, input, output);
-                                }
-                            }
-                        });
+                        const stored = await listMemoryMessages(getMemoryStore().memory, memoryScope);
+                        const savedReply = stored.find(item => item.role === 'assistant' && item.id === memoryMessageId(memoryScope!, memoryAssistantMessageId));
+                        if (savedReply) {
+                            const text = memoryMessageText(savedReply);
+                            peer.send(JSON.stringify({ event: 'chat-response', data: { text, speechText: text, emotion: 'neutral' } }));
+                            return;
+                        }
+                        historyForModel = stored.filter(item => (item.role === 'assistant' || item.role === 'user')
+                            && item.id !== memoryMessageId(memoryScope!, memoryUserMessageId))
+                            .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).slice(-10)
+                            .map(item => ({ sender: item.role === 'user' ? 'user' : 'mascot', text: memoryMessageText(item) }));
                     }
-                } catch (aiError: any) {
-                    if (useMastra) {
-                        if (mastraController?.signal.aborted) return;
-                        console.warn(`[WS] Mastra ${engine || 'gemini'}との接続エラー`);
-                        peer.send(JSON.stringify({
-                            event: 'chat-error',
-                            data: { message: `AIサーバーとの通信エラー: ${getMastraChatErrorMessage(aiError, engine || 'gemini')}` }
-                        }));
-                        return;
-                    }
-                    if (engine === 'lmstudio' && isLmStudioTemplateError(aiError)) {
-                        console.warn('[WS] LM Studioのチャットテンプレートエラー');
-                        peer.send(JSON.stringify({ event: 'chat-error', data: { message: LMSTUDIO_TEMPLATE_ERROR_MESSAGE } }));
-                        return;
-                    }
-                    console.error('[WS] AI Engine Error:', aiError.message);
-                    let detailMessage = aiError.message;
-                    const responseBodyStr = aiError.responseBody || '';
-                    const errorStr = (detailMessage + ' ' + responseBodyStr).toLowerCase();
-
-                    // コンテキスト制限エラーのときは分かりやすい日本語メッセージにする
-                    if (
-                        errorStr.includes('context size') ||
-                        errorStr.includes('context length') ||
-                        errorStr.includes('context_length_exceeded') ||
-                        errorStr.includes('context exceeded')
-                    ) {
-                        detailMessage = 'AIのコンテキスト長（一度に処理できる会話量）の上限を超えました。LM Studio等の設定画面で「Context Length」を 4096 や 8192 以上に引き上げてください。';
-                    } else if (aiError.responseBody) {
+                    const authorizeSideEffect = async (name: string, input: Record<string, unknown>): Promise<string | null> => {
+                        if (typeof turnId !== 'string' || turnId.length < 1 || turnId.length > 200) {
+                            return '操作識別子がないため変更できません。画面を更新してください。';
+                        }
+                        if (!await requestToolApproval(peer, name, input, mastraController.signal)) {
+                            return 'ユーザーが承認しなかったため操作しませんでした。';
+                        }
+                        if (mastraController.signal.aborted) return '接続が終了したため操作しませんでした。';
                         try {
-                            const parsedBody = JSON.parse(aiError.responseBody);
-                            if (parsedBody.error) {
-                                detailMessage += ` (${parsedBody.error})`;
-                            } else {
-                                detailMessage += ` (${aiError.responseBody})`;
+                            if (!claimMutation(path.join(USERS_DIR, '.tool-mutation-claims'), getPeerUserId(peer), turnId, name, input)) {
+                                return '同じ発話の操作は既に試行されています。再実行せず結果を確認してください。';
                             }
                         } catch {
-                            detailMessage += ` (${aiError.responseBody})`;
+                            return '操作記録を保存できないため実行しませんでした。';
                         }
+                        return null;
+                    };
+                    const resolved = resolveMastraChatModel({
+                        engine: engine || 'gemini',
+                        model,
+                        apiKey,
+                        lmstudioEndpoint,
+                        repetitionPenalty,
+                        enableThinking
+                    });
+                    reply = await MastraChatService.generateResponse({
+                        message,
+                        systemPrompt,
+                        resolvedModel: resolved.resolvedModel,
+                        engine: resolved.engine,
+                        modelId: resolved.modelId,
+                        temperature,
+                        frequencyPenalty,
+                        maxOutputTokens,
+                        history: historyForModel,
+                        attachments,
+                        weatherEnabled: enableTools && tools?.toolsWeather === true,
+                        webSearchEnabled: enableTools && tools?.toolsWebSearch === true,
+                        locationEnabled: enableTools && tools?.toolsGpsLocation === true,
+                        volumeEnabled: enableTools && tools?.toolsVolume === true,
+                        appLauncherEnabled: enableTools && tools?.toolsAppLauncher === true,
+                        enableThinking,
+                        authorizeSideEffect,
+                        executeDataTool: !enableTools || getPeerUserId(peer) === 'anonymous'
+                            ? undefined
+                            : async (name, input) => {
+                                if (input.action === 'search') return executeDataToolForPeer(peer, name, input);
+                                const refusal = await authorizeSideEffect(name, input);
+                                if (refusal) return JSON.stringify({ success: false, error: refusal });
+                                return executeDataToolForPeer(peer, name, input);
+                            },
+                        onDataToolResult: (name, input, output) => notifyDataToolResult(peer, name, input, output),
+                        onToolStatus: (name, status) => {
+                            if (!mastraController.signal.aborted) peer.send(JSON.stringify({ event: 'tool-status', data: { name, status } }));
+                        },
+                        abortSignal: mastraController.signal
+                    });
+                    if (memoryScope && !mastraController.signal.aborted) {
+                        await appendMemoryTurn(getMemoryStore().memory, memoryScope, {
+                            userId: memoryUserMessageId,
+                            assistantId: memoryAssistantMessageId,
+                            message,
+                            reply: reply.replace(/\[TIMER:.*?\]/gi, '').replace(/\[\w+\]/g, '').trim(),
+                            attachments: Array.isArray(attachments) ? attachments.flatMap(item =>
+                                (item?.type === 'image' || item?.type === 'file') && typeof item.name === 'string'
+                                && typeof item.url === 'string' && item.url.startsWith('data:')
+                                    ? [{ type: item.type, name: item.name, url: item.url }] : []) : undefined
+                        });
                     }
+                } catch (aiError) {
+                    if (mastraController.signal.aborted) return;
+                    console.warn('[WS] Mastraチャットの処理に失敗');
                     peer.send(JSON.stringify({
                         event: 'chat-error',
-                        data: { message: `AIサーバーとの通信エラー: ${detailMessage}` }
+                        data: { message: `AIサーバーとの通信エラー: ${getMastraChatErrorMessage(aiError, engine || 'gemini')}` }
                     }));
                     return;
                 } finally {
                     releaseMemory?.();
-                    if (mastraController) unregisterMastraRequest(peer, mastraController);
+                    unregisterMastraRequest(peer, mastraController);
                 }
-                if (mastraController?.signal.aborted) return;
+                if (mastraController.signal.aborted) return;
 
                 let timerData: { seconds: number; memo: string } | null = null;
                 const timerMatch = reply.match(/\[TIMER:(\d+),(.+?)\]/i);

@@ -18,16 +18,11 @@ function createContext(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Mastraツール移植のテスト', () => {
-    const originalFlag = process.env.MASTRA_CHAT_ENABLED;
-
     beforeEach(() => {
-        process.env.MASTRA_CHAT_ENABLED = 'true';
         resetMastraRuntimeForTest();
     });
 
     afterEach(() => {
-        if (originalFlag === undefined) delete process.env.MASTRA_CHAT_ENABLED;
-        else process.env.MASTRA_CHAT_ENABLED = originalFlag;
         resetMastraRuntimeForTest();
         vi.unstubAllGlobals();
         vi.restoreAllMocks();

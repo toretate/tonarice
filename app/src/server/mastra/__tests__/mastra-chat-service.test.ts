@@ -4,19 +4,11 @@ import { MastraChatService } from '../mastra-chat-service';
 import { resetMastraRuntimeForTest } from '../runtime';
 
 describe('MastraChatService.generateResponseのテスト', () => {
-    const originalFeatureFlag = process.env.MASTRA_CHAT_ENABLED;
-
     beforeEach(() => {
-        process.env.MASTRA_CHAT_ENABLED = 'true';
         resetMastraRuntimeForTest();
     });
 
     afterEach(() => {
-        if (originalFeatureFlag === undefined) {
-            delete process.env.MASTRA_CHAT_ENABLED;
-        } else {
-            process.env.MASTRA_CHAT_ENABLED = originalFeatureFlag;
-        }
         resetMastraRuntimeForTest();
         vi.unstubAllGlobals();
         vi.restoreAllMocks();
@@ -49,22 +41,6 @@ describe('MastraChatService.generateResponseのテスト', () => {
 
         expect(first).toBe('最初のモデルの応答');
         expect(second).toBe('次のモデルの応答');
-    });
-
-    it('generateResponse_機能フラグが無効な場合はAgentを実行しないこと', async () => {
-        process.env.MASTRA_CHAT_ENABLED = 'false';
-        const model = createMockModel({
-            mockText: '呼び出されない応答',
-            version: 'v2'
-        });
-
-        await expect(MastraChatService.generateResponse({
-            message: 'こんにちは',
-            systemPrompt: '簡潔に回答してください。',
-            resolvedModel: model,
-            engine: 'gemini',
-            modelId: 'disabled-model'
-        })).rejects.toThrow('Mastraチャット経路は無効です。');
     });
 
     it('generateResponse_履歴と添付画像をAgentへ渡すこと', async () => {

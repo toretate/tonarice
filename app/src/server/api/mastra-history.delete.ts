@@ -1,12 +1,10 @@
 import { createError, defineEventHandler, readBody } from 'h3';
-import { isMastraChatEnabled } from '../mastra/feature-flag';
 import { getMemoryStore } from '../mastra/memory-store';
 import { deleteMemoryMessage, deleteMemoryThread, lockMemoryThread, memoryMessageId } from '../mastra/memory-history';
 
 export default defineEventHandler(async event => {
     const userId = event.context.user?.id;
     if (typeof userId !== 'string' || !userId) throw createError({ statusCode: 401 });
-    if (!isMastraChatEnabled()) throw createError({ statusCode: 409 });
     const body = await readBody(event);
     if (typeof body?.mascotId !== 'string' || !body.mascotId || body.mascotId.length > 200
         || typeof body.sessionId !== 'string' || !body.sessionId || body.sessionId.length > 200

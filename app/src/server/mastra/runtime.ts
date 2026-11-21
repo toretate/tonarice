@@ -1,5 +1,4 @@
 import { Mastra } from '@mastra/core/mastra';
-import { isMastraChatEnabled } from './feature-flag';
 import { createMascotAgent, MASCOT_AGENT_ID } from './mascot-agent';
 
 let runtime: Mastra | null = null;
@@ -28,7 +27,7 @@ export function getMastraRuntime(): Mastra {
  */
 export function getMastraRuntimeStatus(): MastraRuntimeStatus {
     return {
-        enabled: isMastraChatEnabled(),
+        enabled: true,
         initialized: runtime !== null
     };
 }

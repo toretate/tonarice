@@ -4,16 +4,11 @@ import { resolveMastraChatModel } from '../model-resolver';
 import { resetMastraRuntimeForTest } from '../runtime';
 
 describe('LMStudioのMastra接続テスト', () => {
-    const originalFlag = process.env.MASTRA_CHAT_ENABLED;
-
     beforeEach(() => {
-        process.env.MASTRA_CHAT_ENABLED = 'true';
         resetMastraRuntimeForTest();
     });
 
     afterEach(() => {
-        if (originalFlag === undefined) delete process.env.MASTRA_CHAT_ENABLED;
-        else process.env.MASTRA_CHAT_ENABLED = originalFlag;
         resetMastraRuntimeForTest();
         vi.unstubAllGlobals();
     });
