@@ -92,8 +92,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('synthesize-voicevox', text, speakerId, endpoint),
 
     // irodori-ttsによる音声合成を呼び出す（Base64データと形式情報が返る）
-    synthesizeIrodori: (text: string, endpoint: string, model: string, voice: string, emotion?: string) =>
-        ipcRenderer.invoke('synthesize-irodori', text, endpoint, model, voice, emotion),
+    synthesizeIrodori: (text: string, endpoint: string, model: string, voice: string, emotion?: string, loraAdapter?: string, speed?: number, caption?: string) =>
+        ipcRenderer.invoke('synthesize-irodori', text, endpoint, model, voice, emotion, loraAdapter, speed, caption),
         
     // VOICEVOX (ローカル)疎通確認および話者（スタイル）一覧取得を呼び出す
     getVoicevoxSpeakers: (endpoint: string) =>
@@ -102,6 +102,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // irodori-tts (ローカル)疎通確認およびボイス一覧取得を呼び出す
     getIrodoriVoices: (endpoint: string) =>
         ipcRenderer.invoke('get-irodori-voices', endpoint),
+
+    // irodori-tts (ローカル)の LoRA アダプター一覧取得を呼び出す
+    getIrodoriLoras: (endpoint: string) =>
+        ipcRenderer.invoke('get-irodori-loras', endpoint),
     
     // AIによる表情スプライト生成
     generateMascotExpressions: (base64Image: string, apiKey: string, emotions: { name: string, label: string }[], userPromptTemplate: string, engine?: string, model?: string, history?: any[]) =>

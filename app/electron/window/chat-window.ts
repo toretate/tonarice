@@ -1,4 +1,5 @@
 import { BrowserWindow, screen, ipcMain } from 'electron';
+import { attachRendererConsoleLogger } from './renderer-console-logger';
 import * as path from 'path';
 import { getMascotWindow } from './mascot-window';
 
@@ -188,9 +189,7 @@ export function createChatWindow(initialX: number, initialY: number, mascotWidth
         }
     });
 
-    chatWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
-        console.log(`[Renderer Log - Chat] [Level: ${level}] ${message} (Source: ${sourceId}:${line})`);
-    });
+    attachRendererConsoleLogger(chatWindow.webContents, 'Chat');
 
     if (initialChatAlwaysOnTop) {
         chatWindow.setAlwaysOnTop(true, 'floating');

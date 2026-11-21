@@ -34,6 +34,9 @@ interface MascotData {
             style?: string;
             irodori_voice?: string;
             irodori_model?: string;
+            irodori_lora?: string;
+            irodori_speed?: number;
+            irodori_caption?: string;
         };
     };
     assets: {
@@ -109,6 +112,10 @@ const getVoiceEngineName = (engine?: string) => {
                     <div class="flex justify-content-between align-items-center border-top border-gray-100 dark:border-gray-700 pt-1.5">
                         <span class="font-medium text-gray-500">使用ボイス (voice):</span>
                         <span class="font-semibold">{{ props.editingMascot.aiConfig.voice.irodori_voice || '未設定 (グローバルボイスを使用)' }}</span>
+                    </div>
+                    <div class="flex justify-content-between align-items-center border-top border-gray-100 dark:border-gray-700 pt-1.5">
+                        <span class="font-medium text-gray-500">使用 LoRA:</span>
+                        <span class="font-semibold">{{ props.editingMascot.aiConfig.voice.irodori_lora || '未設定 (ベースモデルを使用)' }}</span>
                     </div>
                 </template>
                 

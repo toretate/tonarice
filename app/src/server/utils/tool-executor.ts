@@ -43,6 +43,7 @@ export async function executeMemosTool(userId: string, args: MemosToolArgs): Pro
             const memos = searchMemosFromDb(userId, args.query);
             return JSON.stringify({
                 success: true,
+                count: memos.length,
                 message: formatMemoSearchResults(memos)
             });
         }
@@ -95,6 +96,7 @@ export async function executeTasksTool(userId: string, args: TasksToolArgs): Pro
             const tasks = searchTasksFromDb(userId, args.query, args.date, args.completed);
             return JSON.stringify({
                 success: true,
+                count: tasks.length,
                 message: formatTaskSearchResults(tasks)
             });
         }

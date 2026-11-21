@@ -51,7 +51,7 @@ interface MascotData {
     defaultExpressionId?: string;
     aiConfig: {
         chat: { engine: string; model: string; temperature: number; };
-        voice: { engine?: string; speaker_id?: number; style?: string; irodori_voice?: string; irodori_model?: string; };
+        voice: { engine?: string; speaker_id?: number; style?: string; irodori_voice?: string; irodori_model?: string; irodori_lora?: string; irodori_speed?: number; irodori_caption?: string; };
     };
     assets: { outfits: MascotAsset[]; expressions: MascotAsset[]; poses: MascotAsset[]; };
 }

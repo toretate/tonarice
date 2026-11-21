@@ -1,34 +1,14 @@
 import { filterEnabledTools } from '../skills/tool-use';
+import { isLmStudioTemplateError } from './lmstudio-template-error';
 import { generateText, ModelMessage, stepCountIs, ToolSet } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import { convertLmStudioToolToVercel } from './tool-adapter';
+import { createLmStudioFetch, normalizeLmStudioBaseUrl } from './lmstudio-fetch';
+import { stripNoThinkDirective } from './lmstudio-thinking-prompt';
 
 // 共通ガイドラインテンプレートの読み込み
 import toolUseGuidelineTemplate from '@prompt/tool-use-guideline';
-
-function createLmStudioFetch(repetitionPenalty?: number, enableThinking?: boolean): typeof fetch {
-    return async (input, init) => {
-        if (!init?.body || typeof init.body !== 'string') {
-            return fetch(input, init);
-        }
-
-        try {
-            const body = JSON.parse(init.body) as Record<string, unknown>;
-            if (repetitionPenalty !== undefined) {
-                body.repetition_penalty = repetitionPenalty;
-            }
-            if (enableThinking === false) {
-                body.reasoning_format = 'none';
-                body.include_reasoning = false;
-            }
-            return fetch(input, { ...init, body: JSON.stringify(body) });
-        } catch {
-            // JSON以外の要求は加工せず、そのまま送信する。
-            return fetch(input, init);
-        }
-    };
-}
 
 function extractToolResultMessage(output: unknown): string | null {
     if (typeof output === 'string') {
@@ -216,10 +196,11 @@ export class ChatAiService {
         history?: any[];
         attachments?: any[];
         tools?: any;
+        toolUseEnabled?: boolean;
         onToolResult?: (toolName: string, input: any, output: any) => void;
         onToolExecute?: (toolName: string, args: any) => Promise<any>;
     }): Promise<string> {
-        const { message, apiKey, systemPrompt, model, engine, lmstudioEndpoint, temperature, frequencyPenalty, repetitionPenalty, maxOutputTokens, enableThinking, history, attachments, tools, onToolResult, onToolExecute } = params;
+        const { message, apiKey, systemPrompt, model, engine, lmstudioEndpoint, temperature, frequencyPenalty, repetitionPenalty, maxOutputTokens, enableThinking, history, attachments, tools, toolUseEnabled, onToolResult, onToolExecute } = params;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 60000);
 
@@ -234,7 +215,7 @@ export class ChatAiService {
             const timeInstruction = `\n\n[現在のシステム日時]\n${nowStr}`;
 
             // ツール有効・無効に基づくフィルタリング
-            const filteredTools = filterEnabledTools(tools);
+            const filteredTools = toolUseEnabled === false ? [] : filterEnabledTools(tools);
 
             const currentEngine = engine || 'gemini';
             if (currentEngine === 'gemini' && !apiKey.trim()) {
@@ -299,7 +280,9 @@ export class ChatAiService {
 
                 history.forEach((msg: any) => {
                     const role = msg.sender === 'user' ? 'user' : 'assistant';
-                    const text = msg.text || '';
+                    const text = currentEngine === 'lmstudio'
+                        ? stripNoThinkDirective(msg.text || '')
+                        : msg.text || '';
                     if (text.trim()) {
                         messages.push({
                             role,
@@ -328,7 +311,11 @@ export class ChatAiService {
                 }
             }
 
-            const userContent: any[] = [{ type: 'text', text: finalMessage.trim() || 'こんにちは' }];
+            const promptText = finalMessage.trim() || 'こんにちは';
+            const userContent: any[] = [{
+                type: 'text',
+                text: promptText
+            }];
 
             // 画像の添付
             if (attachments && attachments.length > 0) {
@@ -375,11 +362,7 @@ export class ChatAiService {
             let modelProvider: any;
 
             if (currentEngine === 'lmstudio') {
-                const baseEndpoint = (lmstudioEndpoint || '').trim() || 'http://localhost:1234/v1';
-                let finalEndpoint = baseEndpoint;
-                if (!finalEndpoint.endsWith('/v1') && !finalEndpoint.endsWith('/v1/')) {
-                    finalEndpoint = finalEndpoint.endsWith('/') ? `${finalEndpoint}v1` : `${finalEndpoint}/v1`;
-                }
+                const finalEndpoint = normalizeLmStudioBaseUrl(lmstudioEndpoint);
                 console.log(`[ChatAiService] Routing to LM Studio via Vercel AI SDK: ${finalEndpoint} (Model: ${model || 'unspecified'})`);
 
                 const lmstudio = createOpenAI({
@@ -449,26 +432,7 @@ export class ChatAiService {
                     });
                 }
             } catch (firstTryError: any) {
-                const isLmStudio = currentEngine === 'lmstudio';
-                // 400 エラーかつ Jinja2 テンプレート関連のエラーと思われる文言が含まれる場合にフォールバック
-                const errorStr = (firstTryError.message || '') + (firstTryError.responseBody || '');
-                const isTemplateError = firstTryError.statusCode === 400 &&
-                    (errorStr.includes('template') || errorStr.includes('jinja') || errorStr.includes('UndefinedValue'));
-
-                if (isLmStudio && hasTools && isTemplateError) {
-                    console.warn('[ChatAiService] LM Studio のプロンプトテンプレートエラーを検知しました。ツール呼び出しを無効化して再試行します。', firstTryError.message);
-                    // jinja テンプレートエラーの具体的な原因を追えるよう、レスポンス本文をそのまま出力する。
-                    // （ツールを無効化するとタスク／予定の追加・削除が実行されないため、根本原因の特定が重要）
-                    if (firstTryError.responseBody) {
-                        console.warn('[ChatAiService] テンプレートエラーの詳細(responseBody):', firstTryError.responseBody);
-                    }
-                    const retryOptions = { ...generateOptions };
-                    delete retryOptions.tools;
-                    delete retryOptions.stopWhen;
-                    response = await generateText(retryOptions);
-                } else {
-                    throw firstTryError;
-                }
+                throw firstTryError;
             }
 
             clearTimeout(timeoutId);
@@ -535,6 +499,10 @@ export class ChatAiService {
 
         } catch (aiError: any) {
             clearTimeout(timeoutId);
+            if (engine === 'lmstudio' && isLmStudioTemplateError(aiError)) {
+                console.warn('[ChatAiService] LM Studioのチャットテンプレートエラー');
+                throw aiError;
+            }
             console.error(`[ChatAiService] 詳細なエラー情報:`, aiError);
             if (aiError.responseBody) {
                 console.error(`[ChatAiService] APIレスポンス本文:`, aiError.responseBody);

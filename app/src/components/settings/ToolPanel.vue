@@ -11,7 +11,8 @@ const {
     toolsWeather,
     toolsVolume,
     toolsAppLauncher,
-    toolsWebSearch
+    toolsWebSearch,
+    toolApprovalSkipped
 } = storeToRefs(configStore);
 
 const saveStatus = ref('設定を保存');
@@ -127,6 +128,15 @@ const saveSettings = async () => {
                     <span class="text-xs text-gray-400 pl-6">
                         インターネット検索を行って、最新の情報をAIが調べられるようにします。
                     </span>
+                </div>
+
+                <div class="flex flex-column gap-2">
+                    <strong>操作前の確認</strong>
+                    <small>確認を省略しているツールは、変更・削除を含め確認なしで実行されます。チェックを外して保存すると確認を再開します。</small>
+                    <label v-for="tool in [{ id: 'manageTasks', label: 'タスク' }, { id: 'manageMemos', label: 'メモ' }, { id: 'adjustVolume', label: '音量調整' }, { id: 'launchApp', label: 'アプリ起動' }]" :key="tool.id" class="flex align-items-center gap-2">
+                        <input v-model="toolApprovalSkipped" type="checkbox" :value="tool.id" />
+                        {{ tool.label }}の確認を省略する
+                    </label>
                 </div>
 
                 <div class="flex justify-content-end mt-4">

@@ -13,7 +13,7 @@ Electronによるデスクトップアプリ版に加え、Webブラウザでの
 - **表情スプライト自動位置合わせ**: 決定論的アルゴリズムやGemini Visionを用いて、表情スプライトの位置やスケールを自動アライメント。
 - **インタラクティブ操作**: ドラッグ移動、ウィンドウの追従、ダブルクリックや右クリックメニューによる切り替え。
 - **環境設定**: API接続設定（LLM、TTS、画像生成）、マスコットパラメータ調整をGUIから容易に実行。
-- **クロスプラットフォーム対応**: Electronによるデスクトップ版（透過対応）と、Webブラウザで動作するWeb版を提供。
+- **クロスプラットフォーム対応**: Electronによるデスクトップ版（透過対応）、Webブラウザ版、Android WebView版を提供。
 
 ## プロジェクト構成
 
@@ -54,7 +54,8 @@ tonarice/
 ## 動作要件
 
 - **OS**: Windows 11 (Electronまたはブラウザが動作する環境)
-- **Node.js**: 18.0 以降
+- **Node.js**: 22.13.0 以降（Mastraの実行要件）
+- **Android版の開発**: Android Studio、JDK 17、Android SDK Platform 35（詳細は `android/README.md`）
 - **外部AIサービス**（任意）:
     - **対話 (LLM)**: [LM Studio](https://lmstudio.ai/) などのローカルLLMサーバー
     - **音声合成 (TTS)**: [VOICEVOX](https://voicevox.hiroshiba.jp/)、[Style-Bert-VITS2](https://github.com/litagin02/Style-Bert-VITS2)、Irodori TTS
@@ -92,6 +93,9 @@ npm run build
   cd app
   npm run dev        # 開発サーバー (http://localhost:3000) をブラウザで開く
   ```
+
+- **Android WebView版**:
+  Android Studio で `android/` を開き、接続先設定画面で URL を入力するか、Nuxt 起動時に表示される QR コードをカメラで読み取ります。詳細は [android/README.md](android/README.md) と [Android 仕様書](docs/specs/Android.md) を参照してください。
 
 - **LAN内の別端末からWeb版を利用する場合**:
   ```bash

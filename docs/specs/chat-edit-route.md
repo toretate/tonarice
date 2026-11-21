@@ -102,6 +102,8 @@ LLM から最終的なテキスト応答が得られた後、UIや音声（TTS�
       `normalizeTextForTts` → `filterDialogue` → `stripResidualAsterisks` → `splitSentences`
       （※アスタリスク文字自体の除去 `stripResidualAsterisks` は、`filterDialogue` の判定完了後の最後に適用されます）
     - 合成された音声バイナリは Base64 形式で `chat-audio` イベントを介してクライアントに送信され、UI側で再生されます。
+    - Irodori-TTSの設定では、`speed`（0.25〜4.0、標準値1.0）と、v4以降のVoiceDesign対応モデルで使用する `irodori.caption` を指定できます。captionが空の場合はcaptionを送信せず、LoRAなど他のIrodori固有設定がある場合のみ `irodori` オプションを送信します。
+    - 音声設定の「TTS送信時のデバッグログを出力する」が有効な場合、送信ごとにサーバー／Electronのログへ合成エンジン、本文、`voiceId`、`lora`（未使用時は「なし」）、`speed`、`caption`（未使用時は「なし」）を出力します。
 
 ---
 

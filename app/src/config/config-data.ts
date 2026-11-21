@@ -20,12 +20,16 @@ export interface ConfigData {
     anthropicModel: string;
     lmstudioEndpoint: string;
     lmstudioModel: string;
+    lmstudioToolsDisabledModels?: string[];
     selectedVoiceEngine: string;
     voicevoxEndpoint: string;
     voicevoxSpeaker: number;
     irodoriEndpoint: string;
     irodoriModel: string;
     irodoriVoice: string;
+    irodoriLora: string;
+    irodoriSpeed: number;
+    irodoriCaption: string;
     selectedImageEngine: string;
     geminiImageModel: string;
     geminiImageAspectRatio: string;
@@ -100,6 +104,7 @@ export interface ConfigData {
     toolsVolume: boolean;
     toolsAppLauncher: boolean;
     toolsWebSearch: boolean;
+    toolApprovalSkipped?: string[];
 
     // 音声保存設定
     saveVoice: boolean;
@@ -139,12 +144,16 @@ export const defaultData: ConfigData = {
     anthropicModel: 'claude-3-5-sonnet-latest',
     lmstudioEndpoint: 'http://127.0.0.1:1234/v1/',
     lmstudioModel: '',
+    lmstudioToolsDisabledModels: [],
     selectedVoiceEngine: 'voicevox',
     voicevoxEndpoint: 'http://localhost:50021',
     voicevoxSpeaker: 2,
     irodoriEndpoint: 'http://127.0.0.1:8088',
     irodoriModel: 'irodori-tts',
     irodoriVoice: 'default',
+    irodoriLora: '',
+    irodoriSpeed: 1.0,
+    irodoriCaption: '',
     selectedImageEngine: 'openai_image',
     geminiImageModel: 'gemini-3.1-flash-image',
     geminiImageAspectRatio: '1:1',
@@ -208,6 +217,7 @@ export const defaultData: ConfigData = {
     toolsVolume: true,
     toolsAppLauncher: true,
     toolsWebSearch: true,
+    toolApprovalSkipped: [],
     saveVoice: false,
     showVoiceLog: true,
     forgeEndpoint: 'http://127.0.0.1:5555',

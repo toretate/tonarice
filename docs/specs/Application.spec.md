@@ -185,3 +185,11 @@ ui/
   `defaultData` や設定スキーマは共通化されており、Electron 環境では `app-config.ts` を介してローカルファイルとして読み書きされますが、Web環境では `localStorage` やサーバーAPI等に差し替え可能です。
 * **API / IPC ハンドラーのモジュール化**:
   メインプロセスでの処理が IPC サービスごとに完全に分離されているため、通信層（IPC）を Web アプリケーション用の HTTP/WebSocket リクエストハンドラーに容易に置き換えることができます。
+
+## 3. AIエージェント基盤
+
+* Gemini/OpenAI/LM Studioの対話チャットはNitroサーバープロセス内のMastraを使用する。
+* CoWorkの定期実行、要約、読み辞書などのAI処理は既存のVercel AI SDK経路を使用する。
+* MastraランタイムをElectronメインプロセスやRendererへ配置しない。
+* 旧チャット経路および機能フラグによる切り戻しは廃止する。切り戻しには前のリリースを使用する。
+* 詳細は`docs/specs/MastraIntegration.spec.md`に定める。

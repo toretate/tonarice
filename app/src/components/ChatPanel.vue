@@ -14,6 +14,7 @@ import ImageGenerationFooter from './chatpanel/ImageGenerationFooter.vue';
 import ChatHeader from './chatpanel/ChatHeader.vue';
 import MessageList from './chatpanel/MessageList.vue';
 import ChatInputForm from './chatpanel/ChatInputForm.vue';
+import ToolApprovalDialog from './chatpanel/ToolApprovalDialog.vue';
 import { extractImagePrompt } from '../utils/png-metadata';
 import TaskManagement from './TaskManagement.vue';
 import { useTaskStore } from '../store/task';
@@ -225,6 +226,9 @@ const {
     messages,
     showHistoryList,
     isHistoryLoaded,
+    usesMastraHistory,
+    historyError,
+    isHistoryLoading,
     loadHistory,
     saveHistory,
     clearHistory,
@@ -244,11 +248,15 @@ const {
     disconnectWebSocket,
     handleKeyDown,
     pendingAttachments,
+    pendingToolApproval,
+    respondToToolApproval,
     attachFiles,
     removeAttachment
 } = useChatConnection({
     messages,
     activeSessionId,
+    isHistoryLoaded,
+    usesMastraHistory,
     sessions,
     inputText,
     saveHistory,
@@ -369,6 +377,9 @@ const replayMessageTts = async (text: string) => {
                 endpoint,
                 model: mascot.aiConfig?.voice?.irodori_model || configStore.irodoriModel,
                 voice: mascot.aiConfig?.voice?.irodori_voice || configStore.irodoriVoice,
+                loraAdapter: mascot.aiConfig?.voice?.irodori_lora || configStore.irodoriLora,
+                speed: mascot.aiConfig?.voice?.irodori_speed ?? configStore.irodoriSpeed,
+                caption: mascot.aiConfig?.voice?.irodori_caption || configStore.irodoriCaption,
                 speakerId: mascot.aiConfig?.voice?.speaker_id ?? configStore.voicevoxSpeaker,
                 emotion: 'neutral',
                 ttsDictionary: mascot.aiConfig?.ttsDictionary,
@@ -736,6 +747,11 @@ onMounted(() => {
             <MemoWidget />
         </div>
         <template v-else-if="conversationKind === 'chat'">
+            <div v-if="historyError" class="history-error" role="alert">
+                <span>{{ historyError }}</span>
+                <button v-if="!isHistoryLoaded" type="button" :disabled="isHistoryLoading || isAiResponding" @click="loadHistory">再試行</button>
+                <button v-else type="button" @click="historyError = ''">閉じる</button>
+            </div>
             <!-- メッセージスクロール領域 -->
             <MessageList
                 v-if="!showHistoryList"
@@ -778,6 +794,7 @@ onMounted(() => {
         </template>
 
         <!-- 画像拡大モーダル -->
+        <ToolApprovalDialog :request="pendingToolApproval" :can-remember="configStore.isLoaded" @decide="respondToToolApproval" />
         <AttachmentImageModal :url="activeImageUrl" @close="activeImageUrl = null" @use-i2i="useAsI2iSource" />
 
         <div v-if="ttsDictionaryNotice" class="tts-dictionary-notice" :class="ttsDictionaryNotice.type">
@@ -791,6 +808,14 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.history-error {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    color: var(--p-red-700, #b91c1c);
+}
+
 .chat-wrapper {
     position: relative;
     z-index: 1;

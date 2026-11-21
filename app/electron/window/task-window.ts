@@ -1,4 +1,5 @@
 import { BrowserWindow } from 'electron';
+import { attachRendererConsoleLogger } from './renderer-console-logger';
 import * as path from 'path';
 
 let tasksWindow: BrowserWindow | null = null;
@@ -37,9 +38,7 @@ export function createTasksWindow(): BrowserWindow {
         }
     });
 
-    tasksWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
-        console.log(`[Renderer Log - Tasks] [Level: ${level}] ${message} (Source: ${sourceId}:${line})`);
-    });
+    attachRendererConsoleLogger(tasksWindow.webContents, 'Tasks');
 
     tasksWindow.setAlwaysOnTop(true, 'screen-saver');
 

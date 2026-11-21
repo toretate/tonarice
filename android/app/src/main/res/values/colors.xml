@@ -1,0 +1,7 @@
+<resources>
+    <color name="tonarice_primary">#7C5CFC</color>
+    <color name="tonarice_background">#171923</color>
+    <color name="tonarice_surface">#242735</color>
+    <color name="tonarice_on_surface">#F4F4F5</color>
+    <color name="tonarice_error">#FFB4AB</color>
+</resources>

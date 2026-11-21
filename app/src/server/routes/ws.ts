@@ -1,7 +1,6 @@
 import { defineWebSocketHandler } from 'h3';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ChatAiService } from '../utils/chat-ai-service';
 import { VoiceAiService } from '../utils/voice-ai-service';
 import { splitSentences } from '../utils/sentence-splitter';
 import { sanitizeForIrodoriTTS } from '../utils/irodori-sanitizer';
@@ -13,10 +12,37 @@ import { executeMemosTool, executeTasksTool } from '../utils/tool-executor';
 import { updateTaskInDb } from '../utils/tasks-service';
 import { isAuthBypassAllowed } from '../utils/auth-bypass';
 import { encodeAudioBinaryFrame } from '../../utils/audio-binary-frame';
+import { MastraChatService } from '../mastra/mastra-chat-service';
+import { resolveMastraChatModel } from '../mastra/model-resolver';
+import { getMastraChatErrorMessage } from '../mastra/chat-route';
+import { openChatMemoryTurn } from '../mastra/chat-memory-turn';
+import { requestToolApproval, respondToolApproval } from '../mastra/tool-approval';
+import { claimMutation } from '../mastra/mutation-claim';
+import { GenerationBudget } from '../mastra/generation-budget';
 
 
 // ユーザーごとの接続管理（crosswsのPeerオブジェクトをSetに保存）
 const userConnections = new Map<string, Set<any>>();
+const activeMastraRequests = new WeakMap<object, Set<AbortController>>();
+
+function registerMastraRequest(peer: object, controller: AbortController): void {
+    const requests = activeMastraRequests.get(peer) || new Set<AbortController>();
+    requests.add(controller);
+    activeMastraRequests.set(peer, requests);
+}
+
+function unregisterMastraRequest(peer: object, controller: AbortController): void {
+    const requests = activeMastraRequests.get(peer);
+    requests?.delete(controller);
+    if (requests?.size === 0) activeMastraRequests.delete(peer);
+}
+
+function abortMastraRequests(peer: object): void {
+    for (const controller of activeMastraRequests.get(peer) || []) {
+        controller.abort();
+    }
+    activeMastraRequests.delete(peer);
+}
 
 function addConnection(userId: string, peer: any) {
     if (!userConnections.has(userId)) {
@@ -48,6 +74,66 @@ function broadcastToUser(userId: string, event: string, data: any) {
 function getPeerUserId(peer: { context: Record<string, unknown> }): string {
     const userId = peer.context.userId;
     return typeof userId === 'string' ? userId : 'anonymous';
+}
+
+/**
+ * 認証済み接続のユーザーに限定してタスク・メモを操作する。
+ */
+async function executeDataToolForPeer(
+    peer: { context: Record<string, unknown> },
+    name: 'manageTasks' | 'manageMemos',
+    input: Record<string, unknown>
+): Promise<string> {
+    const userId = getPeerUserId(peer);
+    if (userId === 'anonymous') {
+        return JSON.stringify({ success: false, error: '認証済みユーザーが必要です。' });
+    }
+    try {
+        return name === 'manageMemos'
+            ? await executeMemosTool(userId, input as never)
+            : await executeTasksTool(userId, input as never);
+    } catch {
+        console.warn(`[WS] ${name}の実行に失敗`);
+        return JSON.stringify({ success: false, error: 'データ操作に失敗しました。' });
+    }
+}
+
+/**
+ * ツールによるDB変更を既存の画面同期イベントへ変換する。
+ */
+function notifyDataToolResult(
+    peer: { context: Record<string, unknown>; send: (message: string) => void },
+    name: 'manageTasks' | 'manageMemos',
+    input: Record<string, unknown>,
+    output: unknown
+): void {
+    try {
+        const result = typeof output === 'string' ? JSON.parse(output) : output;
+        if (!result?.success) return;
+        if (name === 'manageMemos') {
+            peer.send(JSON.stringify({
+                event: 'memo-action',
+                data: { action: input.action, memoId: result.id || input.id, memo: result.memo }
+            }));
+            return;
+        }
+        if (input.action === 'add' || input.action === 'update') {
+            // カテゴリの最新スナップショットを取得するため、無害な空更新でDBから再取得する。
+            const saved = updateTaskInDb(getPeerUserId(peer), result.id, {});
+            peer.send(JSON.stringify({
+                event: 'task-action',
+                data: {
+                    action: input.action === 'add' ? (input.scheduledAt ? 'addSchedule' : 'addTask') : 'updateTask',
+                    categories: saved.categories,
+                    task: saved.task
+                }
+            }));
+        } else if (input.action === 'delete') {
+            peer.send(JSON.stringify({ event: 'task-action', data: { action: 'deleteTask', taskId: input.id } }));
+        }
+    } catch {
+        console.warn(`[WS] ${name}の画面同期に失敗`);
+    }
 }
 
 // Cookieを手動でパースするヘルパー関数
@@ -115,6 +201,11 @@ export default defineWebSocketHandler({
             const parsed = JSON.parse(rawMessage);
             const { event, data } = parsed;
 
+            if (event === 'tool-approval-response') {
+                respondToolApproval(peer, data?.id, data?.approved);
+                return;
+            }
+
             if (event === 'client-capabilities') {
                 peer.context.binaryAudioV1 = data?.binaryAudioV1 === true;
                 return;
@@ -132,6 +223,9 @@ export default defineWebSocketHandler({
                     irodoriEndpoint,
                     irodoriModel,
                     irodoriVoice,
+                    irodoriLora,
+                    irodoriSpeed,
+                    irodoriCaption,
                     engine,
                     lmstudioEndpoint,
                     history,
@@ -141,6 +235,8 @@ export default defineWebSocketHandler({
                     showVoiceLog,
                     attachments,
                     tools,
+                    turnId,
+                    toolUseEnabled,
                     temperature,
                     frequencyPenalty,
                     repetitionPenalty,
@@ -148,11 +244,12 @@ export default defineWebSocketHandler({
                     enableThinking,
                     ttsDictionary
                 } = data;
+                const enableTools = engine !== 'lmstudio' || toolUseEnabled !== false;
 
                 console.log(`=========================================`);
                 console.log(`[WS] chat-send received (Nitro)!`);
-                console.log(` - Message: "${message}"`);
                 console.log(` - Engine: "${engine}"`);
+                console.log(' - Chat route: mastra');
                 console.log(` - Model: "${model}"`);
                 console.log(` - Temperature: ${temperature}`);
                 console.log(` - Frequency Penalty: ${frequencyPenalty}`);
@@ -172,127 +269,102 @@ export default defineWebSocketHandler({
                 }));
 
                 let reply = '';
+                const mastraController = new AbortController();
+                const generationBudget = new GenerationBudget(mastraController.signal);
+                let releaseMemory: (() => void) | undefined;
+                registerMastraRequest(peer, mastraController);
                 try {
-                    reply = await ChatAiService.generateResponse({
-                        message,
-                        apiKey,
-                        systemPrompt,
-                        model,
-                        temperature,
-                        frequencyPenalty,
-                        repetitionPenalty,
-                        maxOutputTokens,
-                        enableThinking,
-                        engine,
-                        lmstudioEndpoint,
-                        history,
-                        attachments,
-                        tools,
-                        onToolExecute: async (toolName, args) => {
-                            const userId = ((peer as any).ctx && (peer as any).ctx.userId) || 'anonymous';
-                            console.log(`[WS] Tool execution intercept: ${toolName}`, args);
-                            if (toolName !== 'manageTasks' && toolName !== 'manageMemos') {
-                                return null;
-                            }
-                            try {
-                                if (toolName === 'manageMemos') {
-                                    return await executeMemosTool(userId, args);
-                                }
-                                return await executeTasksTool(userId, args);
-                            } catch (e: any) {
-                                console.error(`[WS] Intercepted tool ${toolName} (action: ${args.action}) failed:`, e.message);
-                                return JSON.stringify({
-                                    success: false,
-                                    error: e.message
-                                });
-                            }
-                        },
-                        onToolResult: (toolName, input, output) => {
-                            const userId = ((peer as any).ctx && (peer as any).ctx.userId) || 'anonymous';
-                            if (toolName !== 'manageTasks' && toolName !== 'manageMemos') {
-                                return;
-                            }
-                            if (toolName === 'manageMemos') {
-                                try {
-                                    const parsedOutput = typeof output === 'string' ? JSON.parse(output) : output;
-                                    if (!parsedOutput || !parsedOutput.success) return;
-                                    console.log(`[WS] Tool execution detected in ws.ts: ${toolName} (action: ${input.action})`, input);
-                                    peer.send(JSON.stringify({
-                                        event: 'memo-action',
-                                        data: {
-                                            action: input.action,
-                                            memoId: parsedOutput.id || input.id,
-                                            memo: parsedOutput.memo
-                                        }
-                                    }));
-                                } catch (e: any) {
-                                    console.error('[WS] Failed to sync tool memo action to client:', e.message);
-                                }
-                                return;
-                            }
-                            try {
-                                const parsedOutput = typeof output === 'string' ? JSON.parse(output) : output;
-                                if (!parsedOutput || !parsedOutput.success) {
-                                    return;
-                                }
-                                console.log(`[WS] Tool execution detected in ws.ts: ${toolName} (action: ${input.action})`, input);
-                                if (input.action === 'add' || input.action === 'update') {
-                                    // カテゴリの最新スナップショットを取得するため、無害な空更新でDBから再取得する
-                                    const saved = updateTaskInDb(userId, parsedOutput.id, {});
-                                    peer.send(JSON.stringify({
-                                        event: 'task-action',
-                                        data: {
-                                            action: input.action === 'add' ? (input.scheduledAt ? 'addSchedule' : 'addTask') : 'updateTask',
-                                            categories: saved.categories,
-                                            task: saved.task
-                                        }
-                                    }));
-                                } else if (input.action === 'delete') {
-                                    peer.send(JSON.stringify({
-                                        event: 'task-action',
-                                        data: {
-                                            action: 'deleteTask',
-                                            taskId: input.id
-                                        }
-                                    }));
-                                }
-                            } catch (e: any) {
-                                console.error('[WS] Failed to sync tool task action to client:', e.message);
-                            }
-                        }
-                    });
-                } catch (aiError: any) {
-                    console.error('[WS] AI Engine Error:', aiError.message);
-                    let detailMessage = aiError.message;
-                    const responseBodyStr = aiError.responseBody || '';
-                    const errorStr = (detailMessage + ' ' + responseBodyStr).toLowerCase();
-
-                    // コンテキスト制限エラーのときは分かりやすい日本語メッセージにする
-                    if (
-                        errorStr.includes('context size') ||
-                        errorStr.includes('context length') ||
-                        errorStr.includes('context_length_exceeded') ||
-                        errorStr.includes('context exceeded')
-                    ) {
-                        detailMessage = 'AIのコンテキスト長（一度に処理できる会話量）の上限を超えました。LM Studio等の設定画面で「Context Length」を 4096 や 8192 以上に引き上げてください。';
-                    } else if (aiError.responseBody) {
-                        try {
-                            const parsedBody = JSON.parse(aiError.responseBody);
-                            if (parsedBody.error) {
-                                detailMessage += ` (${parsedBody.error})`;
-                            } else {
-                                detailMessage += ` (${aiError.responseBody})`;
-                            }
-                        } catch {
-                            detailMessage += ` (${aiError.responseBody})`;
+                    const memoryTurn = await openChatMemoryTurn(userId, data);
+                    if (memoryTurn.kind === 'rejected') {
+                        peer.send(JSON.stringify({ event: 'chat-error', data: { message: memoryTurn.message } }));
+                        return;
+                    }
+                    if (memoryTurn.kind === 'persistent') {
+                        releaseMemory = memoryTurn.release;
+                        if (memoryTurn.savedReply !== undefined) {
+                            const text = memoryTurn.savedReply;
+                            peer.send(JSON.stringify({ event: 'chat-response', data: { text, speechText: text, emotion: 'neutral' } }));
+                            return;
                         }
                     }
+                    const authorizeSideEffect = async (name: string, input: Record<string, unknown>): Promise<string | null> => {
+                        if (typeof turnId !== 'string' || turnId.length < 1 || turnId.length > 200) {
+                            return '操作識別子がないため変更できません。画面を更新してください。';
+                        }
+                        if (!await generationBudget.waitForApproval(() => requestToolApproval(peer, name, input, generationBudget.signal))) {
+                            return 'ユーザーが承認しなかったため操作しませんでした。';
+                        }
+                        generationBudget.signal.throwIfAborted();
+                        try {
+                            if (!claimMutation(path.join(USERS_DIR, '.tool-mutation-claims'), getPeerUserId(peer), turnId, name, input)) {
+                                return '同じ発話の操作は既に試行されています。再実行せず結果を確認してください。';
+                            }
+                        } catch {
+                            return '操作記録を保存できないため実行しませんでした。';
+                        }
+                        return null;
+                    };
+                    const resolved = resolveMastraChatModel({
+                        engine: engine || 'gemini',
+                        model,
+                        apiKey,
+                        lmstudioEndpoint,
+                        repetitionPenalty,
+                        enableThinking
+                    });
+                    reply = await MastraChatService.generateResponse({
+                        message,
+                        systemPrompt,
+                        resolvedModel: resolved.resolvedModel,
+                        engine: resolved.engine,
+                        modelId: resolved.modelId,
+                        temperature,
+                        frequencyPenalty,
+                        maxOutputTokens,
+                        history: memoryTurn.kind === 'persistent' ? memoryTurn.history : history,
+                        attachments,
+                        weatherEnabled: enableTools && tools?.toolsWeather === true,
+                        webSearchEnabled: enableTools && tools?.toolsWebSearch === true,
+                        locationEnabled: enableTools && tools?.toolsGpsLocation === true,
+                        volumeEnabled: enableTools && tools?.toolsVolume === true,
+                        appLauncherEnabled: enableTools && tools?.toolsAppLauncher === true,
+                        enableThinking,
+                        authorizeSideEffect,
+                        executeDataTool: !enableTools || getPeerUserId(peer) === 'anonymous'
+                            ? undefined
+                            : async (name, input) => {
+                                if (input.action === 'search') return executeDataToolForPeer(peer, name, input);
+                                const refusal = await authorizeSideEffect(name, input);
+                                if (refusal) return JSON.stringify({ success: false, error: refusal });
+                                return executeDataToolForPeer(peer, name, input);
+                            },
+                        onDataToolResult: (name, input, output) => {
+                            if (!generationBudget.signal.aborted) notifyDataToolResult(peer, name, input, output);
+                        },
+                        onToolStatus: (name, status) => {
+                            if (!generationBudget.signal.aborted) peer.send(JSON.stringify({ event: 'tool-status', data: { name, status } }));
+                        },
+                        abortSignal: generationBudget.signal,
+                        generationBudget
+                    });
+                    generationBudget.signal.throwIfAborted();
+                    if (memoryTurn.kind === 'persistent') {
+                        await memoryTurn.save(message, reply.replace(/\[TIMER:.*?\]/gi, '').replace(/\[\w+\]/g, '').trim(), attachments);
+                    }
+                } catch (aiError) {
+                    if (mastraController.signal.aborted) return;
+                    console.warn('[WS] Mastraチャットの処理に失敗');
                     peer.send(JSON.stringify({
                         event: 'chat-error',
-                        data: { message: `AIサーバーとの通信エラー: ${detailMessage}` }
+                        data: { message: `AIサーバーとの通信エラー: ${getMastraChatErrorMessage(aiError, engine || 'gemini')}` }
                     }));
                     return;
+                } finally {
+                    generationBudget.dispose();
+                    releaseMemory?.();
+                    unregisterMastraRequest(peer, mastraController);
                 }
+                if (mastraController.signal.aborted) return;
 
                 let timerData: { seconds: number; memo: string } | null = null;
                 const timerMatch = reply.match(/\[TIMER:(\d+),(.+?)\]/i);
@@ -338,7 +410,7 @@ export default defineWebSocketHandler({
                     const voiceEngine = selectedVoiceEngine || 'voicevox';
                     const baseUrl = voicevoxEndpoint || 'http://localhost:50021';
                     const speaker = voicevoxSpeakerId !== undefined ? voicevoxSpeakerId : 2;
-                    const irodoriUrl = irodoriEndpoint || 'http://localhost:7861';
+                    const irodoriUrl = irodoriEndpoint || 'http://127.0.0.1:8088';
                     const irodoriModelName = irodoriModel || 'irodori-tts-500m-v3';
                     const irodoriVoiceName = irodoriVoice || 'default';
 
@@ -353,7 +425,9 @@ export default defineWebSocketHandler({
 
                         const synthPromises = processedSentences.map(sentence => {
                             if (voiceEngine === 'irodori') {
-                                return VoiceAiService.synthesizeIrodori(sentence, irodoriUrl, irodoriModelName, irodoriVoiceName, detectedEmotion, showVoiceLog !== false);
+                                return irodoriLora
+                                    ? VoiceAiService.synthesizeIrodori(sentence, irodoriUrl, irodoriModelName, irodoriVoiceName, detectedEmotion, showVoiceLog !== false, irodoriLora, irodoriSpeed, irodoriCaption)
+                                    : VoiceAiService.synthesizeIrodori(sentence, irodoriUrl, irodoriModelName, irodoriVoiceName, detectedEmotion, showVoiceLog !== false, undefined, irodoriSpeed, irodoriCaption);
                             } else {
                                 return VoiceAiService.synthesize(sentence, speaker, baseUrl, showVoiceLog !== false);
                             }
@@ -413,6 +487,7 @@ export default defineWebSocketHandler({
 
     close(peer, details) {
         const userId = getPeerUserId(peer);
+        abortMastraRequests(peer);
         console.log(`[WS] Client disconnected (User: ${userId}, Details: ${JSON.stringify(details)})`);
         removeConnection(userId, peer);
     }

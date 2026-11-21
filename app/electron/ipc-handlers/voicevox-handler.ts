@@ -13,7 +13,12 @@ export function registerVoicevoxHandlers(config: any) {
 
         try {
             if (showVoiceLog) {
-                console.log(`[VoiceVox] 音声合成クエリ作成開始: ${text}`);
+                console.log(`[VoiceVox] TTS送信内容デバッグ: ${JSON.stringify({
+                    engine: 'voicevox',
+                    content: text,
+                    lora: 'なし',
+                    voiceId: speakerId
+                })}`);
             }
             const encodedText = encodeURIComponent(text);
             const queryUrl = baseUrl.endsWith('/')

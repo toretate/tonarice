@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import Card from 'primevue/card';
 import Select from 'primevue/select';
 import Button from 'primevue/button';
@@ -9,12 +9,14 @@ import Textarea from 'primevue/textarea';
 import { useConfigStore } from '@/store/config';
 import { storeToRefs } from 'pinia';
 import radioIcon from '../../assets/radio_icon.svg';
+import { isLmStudioToolUseEnabled, setLmStudioToolUseEnabled } from '../../utils/lmstudio-tool-settings';
 
 const configStore = useConfigStore();
 const {
     selectedEngine,
     lmstudioEndpoint,
     lmstudioModel,
+    lmstudioToolsDisabledModels,
     geminiModel,
     openaiModel,
     anthropicModel,
@@ -33,6 +35,23 @@ const {
     summaryLmstudioModel,
     summaryMaxCharLimit
 } = storeToRefs(configStore);
+
+const lmstudioToolUseEnabled = computed({
+    get: () => isLmStudioToolUseEnabled(lmstudioToolsDisabledModels.value, lmstudioModel.value),
+    set: (enabled: boolean) => {
+        lmstudioToolsDisabledModels.value = setLmStudioToolUseEnabled(lmstudioToolsDisabledModels.value, lmstudioModel.value, enabled);
+    }
+});
+
+const templateRepairMacro = `{%- macro format_type_argument(type_value) -%}
+    {%- if type_value is string -%}
+        {{- '<|"|>' + (type_value | upper) + '<|"|>' -}}
+    {%- elif type_value is iterable -%}
+        [{%- for item in type_value -%}<|"|>{{- item | upper -}}<|"|>{%- if not loop.last %},{% endif -%}{%- endfor -%}]
+    {%- else -%}
+        {{- format_argument(type_value) -}}
+    {%- endif -%}
+{%- endmacro -%}`;
 
 // --- AIエンジンのデータ定義 ---
 const aiEngines = ref([
@@ -101,6 +120,103 @@ const isTestingConnection = ref(false);
 const connectionState = ref<'idle' | 'success' | 'failed'>('idle');
 const connectionErrorMsg = ref('');
 const lmstudioModels = ref<any[]>([]);
+interface LmStudioModelStatus {
+    modelKey: string;
+    maxContextLength: number | null;
+    loadedInstances: { id: string; contextLength: number | null }[];
+}
+const lmstudioStatus = ref<LmStudioModelStatus | null>(null);
+const contextLengthInput = ref('8192');
+const contextLengthTouched = ref(false);
+const isLoadingModelStatus = ref(false);
+const isReloadingModel = ref(false);
+const reloadMessage = ref('');
+const reloadError = ref('');
+let modelStatusRequest = 0;
+
+async function readLmStudioError(response: Response): Promise<string> {
+    const body = await response.json().catch(() => null) as { message?: string; statusMessage?: string } | null;
+    return body?.message || body?.statusMessage || `LM Studioへの要求に失敗しました (${response.status})。`;
+}
+
+async function fetchLmStudioModelStatus() {
+    const request = ++modelStatusRequest;
+    lmstudioStatus.value = null;
+    reloadMessage.value = '';
+    reloadError.value = '';
+    if (selectedEngine.value !== 'lmstudio' || !lmstudioModel.value?.trim()) return;
+    isLoadingModelStatus.value = true;
+    try {
+        const response = await fetch('/api/lmstudio/status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: lmstudioEndpoint.value, modelKey: lmstudioModel.value })
+        });
+        if (!response.ok) throw new Error(await readLmStudioError(response));
+        const status = await response.json() as LmStudioModelStatus;
+        if (request !== modelStatusRequest) return;
+        lmstudioStatus.value = status;
+        if (!contextLengthTouched.value) {
+            contextLengthInput.value = String(status.loadedInstances[0]?.contextLength || Math.min(8192, status.maxContextLength || 8192));
+        }
+    } catch (error) {
+        if (request === modelStatusRequest) {
+            reloadError.value = error instanceof Error ? error.message : 'モデル情報を取得できませんでした。';
+        }
+    } finally {
+        if (request === modelStatusRequest) isLoadingModelStatus.value = false;
+    }
+}
+
+watch([selectedEngine, lmstudioModel], () => {
+    contextLengthTouched.value = false;
+    void fetchLmStudioModelStatus();
+});
+watch(lmstudioEndpoint, () => {
+    modelStatusRequest++;
+    lmstudioStatus.value = null;
+    isLoadingModelStatus.value = false;
+    reloadMessage.value = '';
+    reloadError.value = '';
+});
+
+async function reloadLmStudioModel() {
+    reloadMessage.value = '';
+    reloadError.value = '';
+    const input = String(contextLengthInput.value).trim();
+    const contextLength = Number(input);
+    if (!/^\d+$/.test(input) || !Number.isSafeInteger(contextLength) || contextLength < 1024 ||
+        (lmstudioStatus.value?.maxContextLength && contextLength > lmstudioStatus.value.maxContextLength)) {
+        reloadError.value = `1024以上${lmstudioStatus.value?.maxContextLength ? `・最大${lmstudioStatus.value.maxContextLength}以下` : ''}の整数を指定してください。`;
+        return;
+    }
+    if (!lmstudioStatus.value || lmstudioStatus.value.modelKey !== lmstudioModel.value) {
+        reloadError.value = 'モデル情報を取得してから再試行してください。';
+        return;
+    }
+    if (!window.confirm(`LM Studioの「${lmstudioModel.value}」をコンテキストサイズ ${contextLength} で再ロードします。進行中の会話は中断される可能性があります。続けますか？`)) return;
+
+    const requestedModel = lmstudioModel.value;
+    const requestedEndpoint = lmstudioEndpoint.value;
+    isReloadingModel.value = true;
+    try {
+        const response = await fetch('/api/lmstudio/reload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: requestedEndpoint, modelKey: requestedModel, contextLength })
+        });
+        if (!response.ok) throw new Error(await readLmStudioError(response));
+        const result = await response.json() as { unchanged: boolean };
+        if (requestedModel === lmstudioModel.value && requestedEndpoint === lmstudioEndpoint.value) {
+            await fetchLmStudioModelStatus();
+        }
+        reloadMessage.value = result.unchanged ? `「${requestedModel}」はすでに指定サイズでロードされています。` : `「${requestedModel}」をコンテキストサイズ ${contextLength} で再ロードしました。`;
+    } catch (error) {
+        reloadError.value = `「${requestedModel}」の再ロードに失敗: ${error instanceof Error ? error.message : '不明なエラー'}`;
+    } finally {
+        isReloadingModel.value = false;
+    }
+}
 
 const saveStatus = ref('設定を保存');
 const isSaving = ref(false);
@@ -173,6 +289,7 @@ const testLmStudioConnection = async () => {
                 if (!lmstudioModel.value && result.models.length > 0) {
                     lmstudioModel.value = result.models[0].id;
                 }
+                void fetchLmStudioModelStatus();
             } else {
                 connectionState.value = 'failed';
                 connectionErrorMsg.value = result.error || '接続に失敗しました。';
@@ -343,7 +460,7 @@ const connectionIcon = computed(() => {
 });
 
 const connectionText = computed(() => {
-    if (connectionState.value === 'success') return `接続成功 (ロード済みモデル数: ${lmstudioModels.value.length})`;
+    if (connectionState.value === 'success') return `接続成功 (取得モデル数: ${lmstudioModels.value.length})`;
     if (connectionState.value === 'failed') return `接続失敗: ${connectionErrorMsg.value}`;
     return 'エンドポイントを入力して接続テストを行ってください。';
 });
@@ -677,6 +794,54 @@ onMounted(async () => {
                             </div>
                         </template>
                     </Select>
+
+                    <div v-if="selectedEngine === 'lmstudio'" class="flex flex-column gap-2 mt-3">
+                        <div class="flex align-items-center gap-2">
+                            <input id="lmstudio-tool-use" v-model="lmstudioToolUseEnabled" type="checkbox" :disabled="!lmstudioModel?.trim()" aria-describedby="lmstudio-tool-use-help" />
+                            <label for="lmstudio-tool-use">このモデルでツールを使用する</label>
+                        </div>
+                        <small id="lmstudio-tool-use-help" class="text-color-secondary">モデルごとに保存されます。無効にすると、検索・天気・タスク・メモなどすべてのツールを使用しません。変更後は保存してください。</small>
+                        <details>
+                            <summary>チャットテンプレートの修正案内</summary>
+                            <p>LM Studio のログに format_type_argument が未定義と表示される場合の修正例です。すべてのモデルに使えるものではありません。現在のテンプレートをバックアップし、同名のマクロがないことと format_argument が定義されていることを確認してから、既存テンプレートの先頭に追加してください。テンプレート全体を置き換えないでください。</p>
+                            <label for="lmstudio-template-repair">追加するマクロ（選択してコピー）</label>
+                            <textarea id="lmstudio-template-repair" :value="templateRepairMacro" readonly rows="9" class="p-inputtext w-full" spellcheck="false"></textarea>
+                            <small>変更は LM Studio 側で手動で行います。このアプリはテンプレートを変更しません。修正後は通常の会話とツール使用の両方を確認してください。</small>
+                        </details>
+                        <label for="lmstudio-context-length" class="font-medium">コンテキストサイズ（トークン）</label>
+                        <div class="flex align-items-center gap-2 flex-wrap">
+                            <input
+                                id="lmstudio-context-length"
+                                v-model="contextLengthInput"
+                                type="number"
+                                min="1024"
+                                :max="lmstudioStatus?.maxContextLength || undefined"
+                                step="1"
+                                class="p-inputtext p-component"
+                                :aria-invalid="!!reloadError"
+                                aria-describedby="lmstudio-context-help lmstudio-reload-feedback"
+                                style="width: 180px"
+                                @input="contextLengthTouched = true; reloadError = ''; reloadMessage = ''"
+                            />
+                            <Button
+                                label="指定サイズで再ロード"
+                                icon="pi pi-refresh"
+                                class="p-button-outlined"
+                                :loading="isReloadingModel"
+                                :disabled="isLoadingModelStatus || isReloadingModel || !lmstudioStatus || lmstudioStatus.loadedInstances.length > 1"
+                                @click="reloadLmStudioModel"
+                            />
+                        </div>
+                        <small id="lmstudio-context-help" class="text-color-secondary">
+                            現在: {{ lmstudioStatus?.loadedInstances[0]?.contextLength || '未ロード・不明' }}
+                            <template v-if="lmstudioStatus?.maxContextLength"> / 最大: {{ lmstudioStatus.maxContextLength }}</template>
+                            。再ロード中はこのモデルを使う会話が中断される場合があります。
+                            <template v-if="lmstudioStatus && lmstudioStatus.loadedInstances.length > 1"> 複数インスタンスがロードされているため、LM Studioで一つにしてください。</template>
+                        </small>
+                        <small id="lmstudio-reload-feedback" role="status" aria-live="polite" :class="reloadError ? 'text-red-600' : 'text-green-600'">
+                            {{ reloadError || reloadMessage || (isLoadingModelStatus ? 'モデル情報を確認しています…' : '') }}
+                        </small>
+                    </div>
 
                     <!-- モデル対応機能のアイコン表示 -->
                     <div v-if="currentModelCapabilities && (currentModelCapabilities.isThought || currentModelCapabilities.isToolUse || currentModelCapabilities.isImageGeneration || currentModelCapabilities.isVision || currentModelCapabilities.isAudio || currentModelCapabilities.isStructuredOutput || currentModelCapabilities.isLongContext || currentModelCapabilities.isVideo || currentModelCapabilities.isLocal)" class="model-capabilities-badges flex flex-wrap gap-2 mt-2">

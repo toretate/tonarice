@@ -29,10 +29,12 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
         // WebSocketのモック設定
         originalWebSocket = global.WebSocket;
         class MockWebSocket {
+            static CONNECTING = 0;
             static OPEN = 1;
+            static CLOSED = 3;
             send = vi.fn();
             close = vi.fn();
-            readyState = 1;
+            readyState = MockWebSocket.CONNECTING;
             onopen: any = null;
             onmessage: any = null;
             onclose: any = null;
@@ -47,6 +49,106 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
 
     afterEach(() => {
         global.WebSocket = originalWebSocket;
+    });
+
+    it('toolApproval_今回のみ承認し設定を変更しないこと', async () => {
+        const store = useConfigStore();
+        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: vi.fn(), runCompaction: vi.fn(), scrollToBottom: vi.fn() });
+        connection.connectWebSocket();
+        mockWebSocket.readyState = 1;
+        await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '1', name: 'manageMemos', input: { action: 'add', content: 'テスト' } } }) });
+        expect(connection.pendingToolApproval.value?.name).toBe('manageMemos');
+        connection.respondToToolApproval('approve');
+        expect(JSON.parse(mockWebSocket.send.mock.calls.at(-1)[0])).toEqual({ event: 'tool-approval-response', data: { id: '1', approved: true } });
+        expect(store.toolApprovalSkipped).toEqual([]);
+    });
+
+    it('sendMessage_別の会話の表示中も送信元の応答と送信状態を更新すること', async () => {
+        const sourceMessages = ref<any[]>([]);
+        const sessions = ref<any[]>([{ id: 'source', title: '新しい話題', messages: [] }]);
+        const sourceSession = sessions.value[0];
+        const activeSessionId = ref('source');
+        const connection = useChatConnection({ messages: sourceMessages, activeSessionId, sessions,
+            inputText: ref('試験'), usesMastraHistory: ref(true), saveHistory: async () => {},
+            runCompaction: async () => {}, scrollToBottom: () => {} });
+        const pending = connection.sendMessage();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        mockWebSocket.readyState = 1;
+        mockWebSocket.onopen?.();
+        await pending;
+        const targetMessages = sourceMessages.value;
+        sourceMessages.value = [{ id: 1, sender: 'mascot', text: '別の会話' }];
+        activeSessionId.value = 'other';
+        await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'chat-response', data: { text: '元の会話への回答', emotion: 'neutral' } }) });
+        expect(targetMessages.find(item => item.sender === 'user').deliveryStatus).toBeUndefined();
+        expect(sourceSession.messages.at(-1).text).toBe('元の会話への回答');
+        expect(sourceMessages.value[0].text).toBe('別の会話');
+        connection.disconnectWebSocket();
+    });
+
+    it('toolApproval_サーバーが承認を終了したら確認画面を閉じること', async () => {
+        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: async () => {}, runCompaction: async () => {}, scrollToBottom: () => {} });
+        connection.connectWebSocket();
+        mockWebSocket.readyState = 1;
+        await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '1', name: 'manageMemos', input: { action: 'add' } } }) });
+        await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-finished', data: { id: '1' } }) });
+        expect(connection.pendingToolApproval.value).toBeNull();
+        connection.disconnectWebSocket();
+    });
+
+    it('disconnectWebSocket_手動切断でも承認画面を閉じ拒否を返すこと', async () => {
+        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: async () => {}, runCompaction: async () => {}, scrollToBottom: () => {} });
+        connection.connectWebSocket();
+        mockWebSocket.readyState = 1;
+        await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '1', name: 'manageMemos', input: { action: 'add' } } }) });
+        connection.disconnectWebSocket();
+        expect(connection.pendingToolApproval.value).toBeNull();
+        expect(JSON.parse(mockWebSocket.send.mock.calls.at(-1)[0])).toEqual({ event: 'tool-approval-response', data: { id: '1', approved: false } });
+    });
+
+    it('sendMessage_時計が巻き戻っても発話と応答のIDを逆転させないこと', async () => {
+        const connection = useChatConnection({ messages: ref([{ id: 5000, sender: 'mascot' as const, text: '前の応答' }]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref('試験'), usesMastraHistory: ref(true), saveHistory: async () => {}, runCompaction: async () => {}, scrollToBottom: () => {} });
+        connection.connectWebSocket();
+        mockWebSocket.readyState = 1;
+        const clock = vi.spyOn(Date, 'now').mockReturnValue(1000);
+        try {
+            await connection.sendMessage();
+            const sent = JSON.parse(mockWebSocket.send.mock.calls.at(-1)[0]).data;
+            expect(sent.memoryUserMessageId).toBeGreaterThan(5000);
+            expect(sent.memoryAssistantMessageId).toBeGreaterThan(sent.memoryUserMessageId);
+        } finally {
+            clock.mockRestore();
+            connection.disconnectWebSocket();
+        }
+    });
+
+    it('toolApproval_確認省略設定は対象ツールのみ承認すること', async () => {
+        const store = useConfigStore();
+        store.toolApprovalSkipped = ['manageMemos'];
+        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: vi.fn(), runCompaction: vi.fn(), scrollToBottom: vi.fn() });
+        connection.connectWebSocket();
+        mockWebSocket.readyState = 1;
+        await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '1', name: 'manageMemos', input: { action: 'add' } } }) });
+        expect(connection.pendingToolApproval.value).toBeNull();
+        expect(JSON.parse(mockWebSocket.send.mock.calls.at(-1)[0]).data.approved).toBe(true);
+        await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '2', name: 'manageTasks', input: { action: 'delete' } } }) });
+        expect(connection.pendingToolApproval.value?.name).toBe('manageTasks');
+        connection.respondToToolApproval('deny');
+        expect(JSON.parse(mockWebSocket.send.mock.calls.at(-1)[0]).data.approved).toBe(false);
+    });
+
+    it('toolApproval_今後確認しない選択を対象ツールに保存すること', async () => {
+        const store = useConfigStore();
+        store.isLoaded = true;
+        const saveConfig = vi.spyOn(store, 'saveConfig').mockResolvedValue(undefined);
+        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: vi.fn(), runCompaction: vi.fn(), scrollToBottom: vi.fn() });
+        connection.connectWebSocket();
+        mockWebSocket.readyState = 1;
+        await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '1', name: 'manageMemos', input: { action: 'add' } } }) });
+        connection.respondToToolApproval('remember');
+        expect(store.toolApprovalSkipped).toEqual(['manageMemos']);
+        expect(saveConfig).toHaveBeenCalledOnce();
+        expect(JSON.parse(mockWebSocket.send.mock.calls.at(-1)[0]).data.approved).toBe(true);
     });
 
     it('WebSocketから task-action (addSchedule, categoryId: private) を受信した際、重複せず既存の private カテゴリにタスクが追加されること', async () => {
@@ -252,7 +354,11 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
             scrollToBottom: vi.fn()
         });
 
-        await connection.sendMessage();
+        const sendPromise = connection.sendMessage();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        mockWebSocket.onclose?.({ code: 1006, reason: 'test' });
+        await sendPromise;
+        connection.disconnectWebSocket();
 
         const userMessage = messages.value.find(message => message.sender === 'user');
         expect(userMessage).toMatchObject({
@@ -275,12 +381,21 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
             scrollToBottom: vi.fn()
         });
 
-        // 初回は未接続のため失敗し、内部で再接続用WebSocketが作成される
-        await connection.sendMessage();
+        // 初回は接続完了前に切断されるため失敗し、内部で再接続用WebSocketが作成される
+        const firstSendPromise = connection.sendMessage();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        mockWebSocket.onclose?.({ code: 1006, reason: 'test' });
+        await firstSendPromise;
         const failedMessage = messages.value.find(message => message.sender === 'user');
+        connection.disconnectWebSocket();
 
-        await connection.retryMessage(failedMessage.id);
-        expect(mockWebSocket.send).toHaveBeenCalledOnce();
+        const retryPromise = connection.retryMessage(failedMessage.id);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        mockWebSocket.readyState = 1;
+        mockWebSocket.onopen?.();
+        await retryPromise;
+        expect(mockWebSocket.send).toHaveBeenCalledTimes(2);
+        expect(JSON.parse(mockWebSocket.send.mock.calls[1][0])).toMatchObject({ event: 'chat-send' });
         expect(messages.value.filter(message => message.sender === 'user')).toHaveLength(1);
         expect(failedMessage.deliveryStatus).toBe('sending');
 

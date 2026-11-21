@@ -306,7 +306,10 @@ describe('TTS正規化 統合・経路テスト', () => {
             'irodori-tts',
             'default',
             'neutral',
-            true
+            true,
+            undefined,
+            undefined,
+            undefined
         );
         expect(VoiceAiService.synthesizeIrodori).toHaveBeenNthCalledWith(
             2,
@@ -315,7 +318,45 @@ describe('TTS正規化 統合・経路テスト', () => {
             'irodori-tts',
             'default',
             'neutral',
-            true
+            true,
+            undefined,
+            undefined,
+            undefined
+        );
+    });
+
+    test('3-3. TTS再送経路 - 指定したLoRAアダプターのパスを音声合成サービスへ渡すこと', async () => {
+        vi.mocked(VoiceAiService.synthesizeIrodori).mockClear();
+        vi.mocked(h3.readBody).mockResolvedValue({
+            action: 'synthesizeBatch',
+            engine: 'irodori',
+            text: 'LoRAを使う。',
+            endpoint: 'http://localhost:8088',
+            model: 'irodori-tts',
+            voice: 'default',
+            emotion: 'neutral',
+            loraAdapter: 'models/adapters/speaker-a',
+            speed: 1.25,
+            caption: '落ち着いた声で話す',
+            ttsReadNarrative: true
+        });
+
+        const response = await ttsPostHandler({} as any);
+
+        expect(response).toEqual({
+            success: true,
+            audios: [mockAudio]
+        });
+        expect(VoiceAiService.synthesizeIrodori).toHaveBeenCalledWith(
+            'LoRAを使う。',
+            'http://localhost:8088',
+            'irodori-tts',
+            'default',
+            'neutral',
+            true,
+            'models/adapters/speaker-a',
+            1.25,
+            '落ち着いた声で話す'
         );
     });
 

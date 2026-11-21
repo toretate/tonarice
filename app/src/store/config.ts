@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { DEFAULT_ACCENT_COLOR } from '../config/theme';
+import { IRODORI_SPEED_DEFAULT, normalizeIrodoriSpeed } from '../utils/irodori-tts-settings';
 
 // アプリケーション全体の共通設定インターフェース
 export interface AppConfig {
@@ -20,6 +21,7 @@ export interface AppConfig {
     selectedVideoEngine: string;
     lmstudioEndpoint: string;
     lmstudioModel: string;
+    lmstudioToolsDisabledModels?: string[];
     geminiModel: string;
     openaiModel: string;
     anthropicModel: string;
@@ -28,6 +30,9 @@ export interface AppConfig {
     irodoriEndpoint: string;
     irodoriModel: string;
     irodoriVoice: string;
+    irodoriLora: string;
+    irodoriSpeed: number;
+    irodoriCaption: string;
     temperature: number;
     frequencyPenalty: number;
     repetitionPenalty: number;
@@ -112,6 +117,7 @@ export interface AppConfig {
     toolsVolume: boolean;
     toolsAppLauncher: boolean;
     toolsWebSearch: boolean;
+    toolApprovalSkipped?: string[];
     useExRadio: boolean;
     radioActiveTalkInterval: number;
     saveVoice?: boolean;
@@ -155,6 +161,7 @@ export const useConfigStore = defineStore('config', () => {
     
     const lmstudioEndpoint = ref('http://127.0.0.1:1234/v1/');
     const lmstudioModel = ref('');
+    const lmstudioToolsDisabledModels = ref<string[]>([]);
     const geminiModel = ref('gemini-2.0-flash-exp');
     const openaiModel = ref('gpt-4o');
     const anthropicModel = ref('claude-3-5-sonnet-latest');
@@ -172,6 +179,9 @@ export const useConfigStore = defineStore('config', () => {
     const irodoriEndpoint = ref('http://127.0.0.1:8088');
     const irodoriModel = ref('irodori-tts');
     const irodoriVoice = ref('default');
+    const irodoriLora = ref('');
+    const irodoriSpeed = ref(IRODORI_SPEED_DEFAULT);
+    const irodoriCaption = ref('');
     const temperature = ref(0.7);
     const frequencyPenalty = ref(0.0);
     const repetitionPenalty = ref(1.1);
@@ -250,6 +260,7 @@ export const useConfigStore = defineStore('config', () => {
     const toolsVolume = ref(true);
     const toolsAppLauncher = ref(true);
     const toolsWebSearch = ref(true);
+    const toolApprovalSkipped = ref<string[]>([]);
     const useExRadio = ref(false);
     // ラジオモードで沈黙時に能動的トーク（アクティブトーク）を発火するまでの待機秒数
     const radioActiveTalkInterval = ref(30);
@@ -336,6 +347,8 @@ export const useConfigStore = defineStore('config', () => {
             
             lmstudioEndpoint.value = configData.lmstudioEndpoint || 'http://127.0.0.1:1234/v1/';
             lmstudioModel.value = configData.lmstudioModel || '';
+            lmstudioToolsDisabledModels.value = Array.isArray(configData.lmstudioToolsDisabledModels)
+                ? configData.lmstudioToolsDisabledModels.filter((item: unknown): item is string => typeof item === 'string') : [];
             geminiModel.value = configData.geminiModel || 'gemini-2.0-flash-exp';
             openaiModel.value = configData.openaiModel || 'gpt-4o';
             anthropicModel.value = configData.anthropicModel || 'claude-3-5-sonnet-latest';
@@ -352,6 +365,9 @@ export const useConfigStore = defineStore('config', () => {
             irodoriEndpoint.value = configData.irodoriEndpoint || 'http://127.0.0.1:8088';
             irodoriModel.value = configData.irodoriModel || 'irodori-tts';
             irodoriVoice.value = configData.irodoriVoice || 'default';
+            irodoriLora.value = configData.irodoriLora || '';
+            irodoriSpeed.value = normalizeIrodoriSpeed(configData.irodoriSpeed);
+            irodoriCaption.value = configData.irodoriCaption || '';
             temperature.value = configData.temperature !== undefined ? Number(configData.temperature) : 0.7;
             frequencyPenalty.value = configData.frequencyPenalty !== undefined ? Number(configData.frequencyPenalty) : 0.0;
             repetitionPenalty.value = configData.repetitionPenalty !== undefined ? Number(configData.repetitionPenalty) : 1.1;
@@ -425,6 +441,7 @@ export const useConfigStore = defineStore('config', () => {
             toolsVolume.value = configData.toolsVolume !== undefined ? !!configData.toolsVolume : true;
             toolsAppLauncher.value = configData.toolsAppLauncher !== undefined ? !!configData.toolsAppLauncher : true;
             toolsWebSearch.value = configData.toolsWebSearch !== undefined ? !!configData.toolsWebSearch : true;
+            toolApprovalSkipped.value = Array.isArray(configData.toolApprovalSkipped) ? configData.toolApprovalSkipped.filter((value: unknown): value is string => typeof value === 'string') : [];
             useExRadio.value = configData.useExRadio !== undefined ? !!configData.useExRadio : false;
             radioActiveTalkInterval.value = configData.radioActiveTalkInterval !== undefined ? Number(configData.radioActiveTalkInterval) : 30;
             saveVoice.value = configData.saveVoice !== undefined ? !!configData.saveVoice : false;
@@ -467,6 +484,13 @@ export const useConfigStore = defineStore('config', () => {
             
             lmstudioEndpoint.value = localStorage.getItem('lmstudioEndpoint') || 'http://127.0.0.1:1234/v1/';
             lmstudioModel.value = localStorage.getItem('lmstudioModel') || '';
+            try {
+                const disabledModels = JSON.parse(localStorage.getItem('lmstudioToolsDisabledModels') || '[]');
+                lmstudioToolsDisabledModels.value = Array.isArray(disabledModels)
+                    ? disabledModels.filter((item: unknown): item is string => typeof item === 'string') : [];
+            } catch {
+                lmstudioToolsDisabledModels.value = [];
+            }
             geminiModel.value = localStorage.getItem('geminiModel') || 'gemini-2.0-flash-exp';
             openaiModel.value = localStorage.getItem('openaiModel') || 'gpt-4o';
             anthropicModel.value = localStorage.getItem('anthropicModel') || 'claude-3-5-sonnet-latest';
@@ -477,6 +501,9 @@ export const useConfigStore = defineStore('config', () => {
             irodoriEndpoint.value = localStorage.getItem('irodoriEndpoint') || 'http://127.0.0.1:8088';
             irodoriModel.value = localStorage.getItem('irodoriModel') || 'irodori-tts';
             irodoriVoice.value = localStorage.getItem('irodoriVoice') || 'default';
+            irodoriLora.value = localStorage.getItem('irodoriLora') || '';
+            irodoriSpeed.value = normalizeIrodoriSpeed(localStorage.getItem('irodoriSpeed'));
+            irodoriCaption.value = localStorage.getItem('irodoriCaption') || '';
             
             const temp = localStorage.getItem('temperature');
             temperature.value = temp ? parseFloat(temp) : 0.7;
@@ -572,6 +599,12 @@ export const useConfigStore = defineStore('config', () => {
             toolsVolume.value = localStorage.getItem('toolsVolume') !== 'false';
             toolsAppLauncher.value = localStorage.getItem('toolsAppLauncher') !== 'false';
             toolsWebSearch.value = localStorage.getItem('toolsWebSearch') !== 'false';
+            try {
+                const saved = JSON.parse(localStorage.getItem('toolApprovalSkipped') || '[]');
+                toolApprovalSkipped.value = Array.isArray(saved) ? saved.filter((value: unknown): value is string => typeof value === 'string') : [];
+            } catch {
+                toolApprovalSkipped.value = [];
+            }
             useExRadio.value = localStorage.getItem('useExRadio') === 'true';
             const radioIntervalVal = localStorage.getItem('radioActiveTalkInterval');
             radioActiveTalkInterval.value = radioIntervalVal ? Number(radioIntervalVal) : 30;
@@ -632,6 +665,7 @@ export const useConfigStore = defineStore('config', () => {
             selectedVideoEngine: selectedVideoEngine.value,
             lmstudioEndpoint: lmstudioEndpoint.value,
             lmstudioModel: lmstudioModel.value,
+            lmstudioToolsDisabledModels: [...lmstudioToolsDisabledModels.value],
             geminiModel: geminiModel.value,
             openaiModel: openaiModel.value,
             anthropicModel: anthropicModel.value,
@@ -646,6 +680,9 @@ export const useConfigStore = defineStore('config', () => {
             irodoriEndpoint: irodoriEndpoint.value,
             irodoriModel: irodoriModel.value,
             irodoriVoice: irodoriVoice.value,
+            irodoriLora: irodoriLora.value,
+            irodoriSpeed: normalizeIrodoriSpeed(irodoriSpeed.value),
+            irodoriCaption: irodoriCaption.value.trim(),
             temperature: Number(temperature.value),
             frequencyPenalty: Number(frequencyPenalty.value),
             repetitionPenalty: Number(repetitionPenalty.value),
@@ -702,6 +739,7 @@ export const useConfigStore = defineStore('config', () => {
             toolsVolume: toolsVolume.value,
             toolsAppLauncher: toolsAppLauncher.value,
             toolsWebSearch: toolsWebSearch.value,
+            toolApprovalSkipped: [...toolApprovalSkipped.value],
             useExRadio: useExRadio.value,
             radioActiveTalkInterval: Number(radioActiveTalkInterval.value),
             saveVoice: saveVoice.value,
@@ -798,6 +836,7 @@ export const useConfigStore = defineStore('config', () => {
         safeSetItem('selectedVideoEngine', selectedVideoEngine.value);
         safeSetItem('lmstudioEndpoint', lmstudioEndpoint.value);
         safeSetItem('lmstudioModel', lmstudioModel.value);
+        safeSetItem('lmstudioToolsDisabledModels', JSON.stringify(lmstudioToolsDisabledModels.value));
         safeSetItem('geminiModel', geminiModel.value);
         safeSetItem('openaiModel', openaiModel.value);
         safeSetItem('anthropicModel', anthropicModel.value);
@@ -806,6 +845,9 @@ export const useConfigStore = defineStore('config', () => {
         safeSetItem('irodoriEndpoint', irodoriEndpoint.value);
         safeSetItem('irodoriModel', irodoriModel.value);
         safeSetItem('irodoriVoice', irodoriVoice.value);
+        safeSetItem('irodoriLora', irodoriLora.value);
+        safeSetItem('irodoriSpeed', normalizeIrodoriSpeed(irodoriSpeed.value).toString());
+        safeSetItem('irodoriCaption', irodoriCaption.value);
         safeSetItem('temperature', temperature.value.toString());
         safeSetItem('frequencyPenalty', frequencyPenalty.value.toString());
         safeSetItem('repetitionPenalty', repetitionPenalty.value.toString());
@@ -863,6 +905,7 @@ export const useConfigStore = defineStore('config', () => {
         safeSetItem('toolsVolume', toolsVolume.value.toString());
         safeSetItem('toolsAppLauncher', toolsAppLauncher.value.toString());
         safeSetItem('toolsWebSearch', toolsWebSearch.value.toString());
+        safeSetItem('toolApprovalSkipped', JSON.stringify(toolApprovalSkipped.value));
         safeSetItem('useExRadio', useExRadio.value.toString());
         safeSetItem('radioActiveTalkInterval', radioActiveTalkInterval.value.toString());
         safeSetItem('saveVoice', saveVoice.value.toString());
@@ -929,6 +972,7 @@ export const useConfigStore = defineStore('config', () => {
         if (newConfig.selectedVideoEngine !== undefined) selectedVideoEngine.value = newConfig.selectedVideoEngine;
         if (newConfig.lmstudioEndpoint !== undefined) lmstudioEndpoint.value = newConfig.lmstudioEndpoint;
         if (newConfig.lmstudioModel !== undefined) lmstudioModel.value = newConfig.lmstudioModel;
+        if (newConfig.lmstudioToolsDisabledModels !== undefined) lmstudioToolsDisabledModels.value = [...newConfig.lmstudioToolsDisabledModels];
         if (newConfig.geminiModel !== undefined) geminiModel.value = newConfig.geminiModel;
         if (newConfig.openaiModel !== undefined) openaiModel.value = newConfig.openaiModel;
         if (newConfig.anthropicModel !== undefined) anthropicModel.value = newConfig.anthropicModel;
@@ -937,6 +981,9 @@ export const useConfigStore = defineStore('config', () => {
         if (newConfig.irodoriEndpoint !== undefined) irodoriEndpoint.value = newConfig.irodoriEndpoint;
         if (newConfig.irodoriModel !== undefined) irodoriModel.value = newConfig.irodoriModel;
         if (newConfig.irodoriVoice !== undefined) irodoriVoice.value = newConfig.irodoriVoice;
+        if (newConfig.irodoriLora !== undefined) irodoriLora.value = newConfig.irodoriLora;
+        if (newConfig.irodoriSpeed !== undefined) irodoriSpeed.value = normalizeIrodoriSpeed(newConfig.irodoriSpeed);
+        if (newConfig.irodoriCaption !== undefined) irodoriCaption.value = newConfig.irodoriCaption;
         if (newConfig.temperature !== undefined) temperature.value = Number(newConfig.temperature);
         if (newConfig.frequencyPenalty !== undefined) frequencyPenalty.value = Number(newConfig.frequencyPenalty);
         if (newConfig.repetitionPenalty !== undefined) repetitionPenalty.value = Number(newConfig.repetitionPenalty);
@@ -996,6 +1043,7 @@ export const useConfigStore = defineStore('config', () => {
         if (newConfig.toolsVolume !== undefined) toolsVolume.value = !!newConfig.toolsVolume;
         if (newConfig.toolsAppLauncher !== undefined) toolsAppLauncher.value = !!newConfig.toolsAppLauncher;
         if (newConfig.toolsWebSearch !== undefined) toolsWebSearch.value = !!newConfig.toolsWebSearch;
+        if (newConfig.toolApprovalSkipped !== undefined) toolApprovalSkipped.value = [...newConfig.toolApprovalSkipped];
         if (newConfig.useExRadio !== undefined) useExRadio.value = !!newConfig.useExRadio;
         if (newConfig.radioActiveTalkInterval !== undefined) radioActiveTalkInterval.value = Number(newConfig.radioActiveTalkInterval);
         if (newConfig.saveVoice !== undefined) saveVoice.value = !!newConfig.saveVoice;
@@ -1036,6 +1084,7 @@ export const useConfigStore = defineStore('config', () => {
         selectedVideoEngine,
         lmstudioEndpoint,
         lmstudioModel,
+        lmstudioToolsDisabledModels,
         geminiModel,
         openaiModel,
         anthropicModel,
@@ -1044,6 +1093,9 @@ export const useConfigStore = defineStore('config', () => {
         irodoriEndpoint,
         irodoriModel,
         irodoriVoice,
+        irodoriLora,
+        irodoriSpeed,
+        irodoriCaption,
         temperature,
         frequencyPenalty,
         repetitionPenalty,
@@ -1107,6 +1159,7 @@ export const useConfigStore = defineStore('config', () => {
         toolsVolume,
         toolsAppLauncher,
         toolsWebSearch,
+        toolApprovalSkipped,
         useExRadio,
         radioActiveTalkInterval,
         saveVoice,

@@ -33,6 +33,68 @@ vi.mock('../routes/ws', () => {
 });
 
 describe('ChatAiService.generateResponse のテスト', () => {
+    it('generateResponse_テンプレートエラー時はツールを外して自動再試行しないこと', async () => {
+        const error = Object.assign(new Error('Error rendering prompt with jinja template'), { statusCode: 400 });
+        vi.mocked(generateText).mockReset().mockRejectedValue(error);
+        await expect(ChatAiService.generateResponse({
+            message: 'こんにちは', apiKey: '', systemPrompt: '', model: 'local-model', engine: 'lmstudio'
+        })).rejects.toBe(error);
+        expect(generateText).toHaveBeenCalledTimes(1);
+    });
+
+    it('generateResponse_ツール無効時はタスクとメモを含めツール定義を送信しないこと', async () => {
+        vi.mocked(generateText).mockReset().mockResolvedValue({ text: '返答', steps: [], finishReason: 'stop' } as any);
+        await ChatAiService.generateResponse({
+            message: 'こんにちは', apiKey: '', systemPrompt: '', model: 'local-model', engine: 'lmstudio',
+            toolUseEnabled: false, tools: { toolsWeather: true, toolsWebSearch: true }
+        });
+        expect(vi.mocked(generateText).mock.calls[0][0].tools).toBeUndefined();
+    });
+
+    it('generateResponse_LMStudioの思考オフ時はユーザープロンプトへ指示を付けないこと', async () => {
+        vi.mocked(generateText).mockReset().mockResolvedValue({
+            text: '返答', steps: [], finishReason: 'stop'
+        } as any);
+        const history = [
+            { sender: 'user', text: '以前の質問\n/no_think' },
+            { sender: 'mascot', text: '以前の返答 /no_think' }
+        ];
+        const fileData = Buffer.from('添付内容').toString('base64');
+
+        await ChatAiService.generateResponse({
+            message: '今回の質問', apiKey: '', systemPrompt: '性格設定',
+            model: 'local-model', engine: 'lmstudio', enableThinking: false,
+            history,
+            attachments: [{ type: 'file', name: 'sample.txt', url: `data:text/plain;base64,${fileData}` }]
+        });
+
+        const request = vi.mocked(generateText).mock.calls[0][0];
+        expect(request.system).not.toContain('/no_think');
+        expect(request.messages?.[0]).toEqual({ role: 'user', content: '以前の質問' });
+        expect(request.messages?.[1]).toEqual({ role: 'assistant', content: '以前の返答' });
+        expect(request.messages?.[2]).toEqual({
+            role: 'user',
+            content: '今回の質問\n\n--- 添付ファイル: sample.txt ---\n添付内容\n---'
+        });
+        expect(history[0].text).toBe('以前の質問\n/no_think');
+    });
+
+    it('generateResponse_LMStudioの思考オン時は今回の発話に指示を付けないこと', async () => {
+        vi.mocked(generateText).mockReset().mockResolvedValue({
+            text: '返答', steps: [], finishReason: 'stop'
+        } as any);
+
+        await ChatAiService.generateResponse({
+            message: '今回の質問', apiKey: '', systemPrompt: '性格設定',
+            model: 'local-model', engine: 'lmstudio', enableThinking: true,
+            history: [{ sender: 'user', text: '以前の質問 /no_think' }]
+        });
+
+        const request = vi.mocked(generateText).mock.calls[0][0];
+        expect(request.messages?.[0]).toEqual({ role: 'user', content: '以前の質問' });
+        expect(request.messages?.[1]).toEqual({ role: 'user', content: '今回の質問' });
+    });
+
     it('generateResponse_Gemini API KEYが空の場合は外部APIを呼ばず設定エラーを返すこと', async () => {
         vi.mocked(generateText).mockReset();
 

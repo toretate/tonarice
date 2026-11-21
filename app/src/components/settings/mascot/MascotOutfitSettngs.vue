@@ -35,6 +35,9 @@ interface MascotData {
             style?: string;
             irodori_voice?: string;
             irodori_model?: string;
+            irodori_lora?: string;
+            irodori_speed?: number;
+            irodori_caption?: string;
         };
     };
     assets: {

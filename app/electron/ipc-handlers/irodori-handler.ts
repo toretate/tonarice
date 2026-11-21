@@ -1,9 +1,10 @@
 import { ipcMain } from 'electron';
 import { createMp3Payload } from '../../src/server/utils/voice-audio-transcoder';
+import { normalizeIrodoriSpeed } from '../../src/utils/irodori-tts-settings';
 
 export function registerIrodoriHandlers(config: any) {
     // irodori-tts v3 (OpenAI 互換) による音声合成のハンドラー
-    ipcMain.handle('synthesize-irodori', async (event, text: string, endpoint: string, model: string, voice: string, emotion?: string) => {
+    ipcMain.handle('synthesize-irodori', async (event, text: string, endpoint: string, model: string, voice: string, emotion?: string, loraAdapter?: string, speed?: number, caption?: string) => {
         const defaultEndpoint = 'http://127.0.0.1:8088';
         const baseUrl = endpoint || defaultEndpoint;
         let targetModel = model || 'irodori-tts';
@@ -24,24 +25,41 @@ export function registerIrodoriHandlers(config: any) {
         const timeoutId = setTimeout(() => controller.abort(), 60000); // 60秒タイムアウト
 
         try {
+            const normalizedLoraAdapter = loraAdapter?.trim();
+            const targetSpeed = normalizeIrodoriSpeed(speed);
+            const normalizedCaption = caption?.trim();
+            const irodoriOptions = {
+                ...(normalizedLoraAdapter ? { lora_adapter: normalizedLoraAdapter } : {}),
+                ...(normalizedCaption ? { caption: normalizedCaption } : {})
+            };
             if (showVoiceLog) {
-                console.log(`[IrodoriTTS] 音声合成開始: "${textWithEmotion}" (Model: ${targetModel}, Voice: ${targetVoice})`);
+                console.log(`[IrodoriTTS] TTS送信内容デバッグ: ${JSON.stringify({
+                    engine: 'irodori',
+                    content: textWithEmotion,
+                    lora: normalizedLoraAdapter || 'なし',
+                    voiceId: targetVoice,
+                    speed: targetSpeed,
+                    caption: normalizedCaption || 'なし'
+                })}`);
             }
             const url = baseUrl.endsWith('/')
                 ? `${baseUrl}v1/audio/speech`
                 : `${baseUrl}/v1/audio/speech`;
 
+            const requestBody = {
+                model: targetModel,
+                input: textWithEmotion,
+                voice: targetVoice,
+                response_format: 'mp3',
+                speed: targetSpeed,
+                ...(Object.keys(irodoriOptions).length > 0 ? { irodori: irodoriOptions } : {})
+            };
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    model: targetModel,
-                    input: textWithEmotion,
-                    voice: targetVoice,
-                    response_format: 'mp3'
-                }),
+                body: JSON.stringify(requestBody),
                 signal: controller.signal
             });
 
@@ -68,6 +86,45 @@ export function registerIrodoriHandlers(config: any) {
                 console.warn('[IrodoriTTS] irodori-ttsとの接続エラー:', error.message);
             }
             return null;
+        }
+    });
+
+    // Irodori-TTS の LoRA アダプター一覧を取得するハンドラー
+    ipcMain.handle('get-irodori-loras', async (event, endpoint: string) => {
+        const defaultEndpoint = 'http://127.0.0.1:8088';
+        const apiBase = endpoint || defaultEndpoint;
+        const url = apiBase.endsWith('/') ? `${apiBase}v1/audio/loras` : `${apiBase}/v1/audio/loras`;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒タイムアウト
+
+        try {
+            console.log(`[IrodoriTTS] LoRA一覧取得開始: ${url}`);
+            const response = await fetch(url, {
+                method: 'GET',
+                signal: controller.signal
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                throw new Error(`HTTP Error: ${response.status}`);
+            }
+
+            const rawLoras: any = await response.json();
+            if (rawLoras && Array.isArray(rawLoras.data)) {
+                console.log(`[IrodoriTTS] LoRA一覧取得成功。件数: ${rawLoras.data.length}`);
+                return { success: true, loras: rawLoras.data };
+            }
+            throw new Error('Invalid response format');
+        } catch (error: any) {
+            clearTimeout(timeoutId);
+            if (error.name === 'AbortError') {
+                console.warn('[IrodoriTTS] LoRA一覧取得エラー (タイムアウト)');
+                return { success: false, loras: [], error: '接続がタイムアウトしました。' };
+            }
+            console.warn('[IrodoriTTS] LoRA一覧取得エラー:', error.message);
+            return { success: false, loras: [], error: 'LoRA一覧の取得に失敗しました。' };
         }
     });
 

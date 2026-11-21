@@ -5,6 +5,7 @@ import { filterDialogue } from '../utils/dialogue-filter';
 import { splitSentences } from '../utils/sentence-splitter';
 import { sanitizeForIrodoriTTS } from '../utils/irodori-sanitizer';
 import type { Base64AudioPayload } from '../../types/audio';
+import { fetchIrodoriLoras } from '../utils/irodori-loras';
 
 export default defineEventHandler(async (event) => {
     const body = await readBody(event);
@@ -15,6 +16,9 @@ export default defineEventHandler(async (event) => {
         endpoint,
         model,
         voice,
+        loraAdapter,
+        speed,
+        caption,
         speakerId,
         emotion,
         ttsDictionary,
@@ -43,6 +47,10 @@ export default defineEventHandler(async (event) => {
                 success: true,
                 voices: data.data || []
             };
+        }
+
+        if (action === 'getIrodoriLoras') {
+            return fetchIrodoriLoras(endpoint);
         }
 
         if (action === 'getVoicevoxSpeakers') {
@@ -82,14 +90,29 @@ export default defineEventHandler(async (event) => {
 
             const audios = await Promise.all(sentences.map(sentence => {
                 if (engine === 'irodori') {
-                    return VoiceAiService.synthesizeIrodori(
-                        sentence,
-                        endpoint,
-                        model,
-                        voice,
-                        emotion,
-                        showVoiceLog !== false
-                    );
+                    return loraAdapter
+                        ? VoiceAiService.synthesizeIrodori(
+                            sentence,
+                            endpoint,
+                            model,
+                            voice,
+                            emotion,
+                            showVoiceLog !== false,
+                            loraAdapter,
+                            speed,
+                            caption
+                        )
+                        : VoiceAiService.synthesizeIrodori(
+                            sentence,
+                            endpoint,
+                            model,
+                            voice,
+                            emotion,
+                            showVoiceLog !== false,
+                            undefined,
+                            speed,
+                            caption
+                        );
                 }
                 return VoiceAiService.synthesize(
                     sentence,
@@ -110,14 +133,29 @@ export default defineEventHandler(async (event) => {
         let audio: Base64AudioPayload | null = null;
 
         if (engine === 'irodori') {
-            audio = await VoiceAiService.synthesizeIrodori(
-                sanitizeForIrodoriTTS(normalizedText),
-                endpoint,
-                model,
-                voice,
-                emotion,
-                true
-            );
+            audio = loraAdapter
+                ? await VoiceAiService.synthesizeIrodori(
+                    sanitizeForIrodoriTTS(normalizedText),
+                    endpoint,
+                    model,
+                    voice,
+                    emotion,
+                    true,
+                    loraAdapter,
+                    speed,
+                    caption
+                )
+                : await VoiceAiService.synthesizeIrodori(
+                    sanitizeForIrodoriTTS(normalizedText),
+                    endpoint,
+                    model,
+                    voice,
+                    emotion,
+                    true,
+                    undefined,
+                    speed,
+                    caption
+                );
         } else {
             // デフォルトは VOICEVOX
             const targetSpeakerId = speakerId !== undefined ? Number(speakerId) : 1;

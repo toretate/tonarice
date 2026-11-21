@@ -116,6 +116,62 @@ describe('IrodoriTtsConnector', () => {
         expect(body.input).toBe('恥ずかしいです 🫣');
     });
 
+    test('synthesize - irodori固有設定のLoRAアダプターが送信されること', async () => {
+        const dummyAudioData = new Uint8Array([0]);
+        const mockResponse = {
+            ok: true,
+            arrayBuffer: async () => dummyAudioData.buffer
+        };
+
+        const fetchMock = vi.fn().mockResolvedValue(mockResponse);
+        vi.stubGlobal('fetch', fetchMock);
+
+        const params: IrodoriTtsSpeechInputParam = {
+            input: 'LoRAテスト',
+            model: 'irodori-tts',
+            voice: 'default',
+            irodori: {
+                lora_adapter: 'models/adapters/speaker-a'
+            }
+        };
+
+        await IrodoriTtsConnector.synthesize(params, undefined, 'http://127.0.0.1:8088');
+
+        const callArgs = fetchMock.mock.calls[0];
+        const body = JSON.parse(callArgs[1].body);
+        expect(body.irodori).toEqual({
+            lora_adapter: 'models/adapters/speaker-a'
+        });
+    });
+
+    test('synthesize - 再生速度とcaptionがirodori固有設定とともに送信されること', async () => {
+        const dummyAudioData = new Uint8Array([0]);
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            arrayBuffer: async () => dummyAudioData.buffer
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        const params: IrodoriTtsSpeechInputParam = {
+            input: 'captionテスト',
+            model: 'irodori-tts',
+            voice: 'default',
+            speed: 1.5,
+            irodori: {
+                caption: '落ち着いた、やさしい声で話す'
+            }
+        };
+
+        await IrodoriTtsConnector.synthesize(params, undefined, 'http://127.0.0.1:8088');
+
+        const callArgs = fetchMock.mock.calls[0];
+        const body = JSON.parse(callArgs[1].body);
+        expect(body.speed).toBe(1.5);
+        expect(body.irodori).toEqual({
+            caption: '落ち着いた、やさしい声で話す'
+        });
+    });
+
     test('synthesize - モデル名が irodori-tts-500m-v3 の場合に irodori-tts に自動変換されること', async () => {
         const dummyAudioData = new Uint8Array([0]);
         const mockResponse = {
@@ -295,6 +351,41 @@ describe('IrodoriTtsConnector', () => {
         vi.stubGlobal('fetch', fetchMock);
 
         const result = await IrodoriTtsConnector.listVoices('http://127.0.0.1:8088');
+        expect(result).toBeNull();
+    });
+
+    test('listLoras - 正常に応答（status 200）した時に LoRA 一覧を返すこと', async () => {
+        const dummyLorasData = {
+            object: 'list',
+            data: [
+                {
+                    id: 'speaker-a',
+                    object: 'lora_adapter',
+                    path: 'models/adapters/speaker-a'
+                }
+            ]
+        };
+        const mockResponse = {
+            ok: true,
+            json: async () => dummyLorasData
+        };
+        const fetchMock = vi.fn().mockResolvedValue(mockResponse);
+        vi.stubGlobal('fetch', fetchMock);
+
+        const result = await IrodoriTtsConnector.listLoras('http://127.0.0.1:8088');
+
+        expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8088/v1/audio/loras', {
+            method: 'GET'
+        });
+        expect(result).toEqual(dummyLorasData);
+    });
+
+    test('listLoras - 異常応答した時に null を返すこと', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({ ok: false });
+        vi.stubGlobal('fetch', fetchMock);
+
+        const result = await IrodoriTtsConnector.listLoras('http://127.0.0.1:8088');
+
         expect(result).toBeNull();
     });
 

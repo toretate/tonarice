@@ -1,4 +1,5 @@
 import { BrowserWindow, ipcMain } from 'electron';
+import { attachRendererConsoleLogger } from './renderer-console-logger';
 import * as path from 'path';
 
 let settingsWindow: BrowserWindow | null = null;
@@ -67,9 +68,7 @@ export function createSettingsWindow(): BrowserWindow {
 
     settingsWindow = new BrowserWindow(settingsOptions);
 
-    settingsWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
-        console.log(`[Renderer Log - Settings] [Level: ${level}] ${message} (Source: ${sourceId}:${line})`);
-    });
+    attachRendererConsoleLogger(settingsWindow.webContents, 'Settings');
 
     if (isDevMode) {
         settingsWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL!}#settings`);

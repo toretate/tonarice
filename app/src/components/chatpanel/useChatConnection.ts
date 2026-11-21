@@ -11,10 +11,16 @@ import { sanitizeForIrodoriTTS } from '../../utils/irodori-sanitizer';
 import { useTaskStore } from '../../store/task';
 import { useMemoStore } from '../../store/memo';
 import { decodeAudioBinaryFrame } from '../../utils/audio-binary-frame';
+import { normalizeIrodoriSpeed } from '../../utils/irodori-tts-settings';
+import { isLmStudioToolUseEnabled } from '../../utils/lmstudio-tool-settings';
+import { toolApprovalLabels, type ToolApprovalRequest } from './tool-approval-display';
+import { createChatSessionTitle } from '../../utils/chat-session-title';
 
 export function useChatConnection(params: {
     messages: Ref<Message[]>;
     activeSessionId: Ref<string | null>;
+    usesMastraHistory?: Ref<boolean>;
+    isHistoryLoaded?: Ref<boolean>;
     sessions: Ref<ChatSession[]>;
     inputText: Ref<string>;
     saveHistory: () => Promise<void>;
@@ -60,6 +66,7 @@ export function useChatConnection(params: {
         toolsVolume,
         toolsAppLauncher,
         toolsWebSearch,
+        lmstudioToolsDisabledModels,
         saveVoice,
         showVoiceLog,
         temperature,
@@ -77,18 +84,44 @@ export function useChatConnection(params: {
 
     let socket: WebSocket | null = null;
     const isWsConnected = ref(false);
+    let socketReadyPromise: Promise<boolean> | null = null;
+    let settleSocketReady: ((connected: boolean) => void) | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectEnabled = true;
+    let waitingForConnection = false;
     let pendingUserMessageId: number | null = null;
     let pendingAssistantMessageId: number | null = null;
+    let pendingMessages: Message[] | null = null;
+    const pendingToolApproval = ref<ToolApprovalRequest | null>(null);
+    let approvalTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const respondToToolApproval = (choice: 'deny' | 'approve' | 'remember') => {
+        const request = pendingToolApproval.value;
+        if (!request) return;
+        pendingToolApproval.value = null;
+        if (approvalTimer) clearTimeout(approvalTimer);
+        approvalTimer = null;
+        const canRespond = socket?.readyState === WebSocket.OPEN;
+        if (canRespond) socket!.send(JSON.stringify({ event: 'tool-approval-response', data: { id: request.id, approved: choice !== 'deny' } }));
+        if (canRespond && choice === 'remember' && Object.hasOwn(toolApprovalLabels, request.name) && configStore.isLoaded) {
+            configStore.toolApprovalSkipped = [...new Set([...configStore.toolApprovalSkipped, request.name])];
+            void configStore.saveConfig().catch(() => {
+                configStore.toolApprovalSkipped = configStore.toolApprovalSkipped.filter(name => name !== request.name);
+            });
+        }
+    };
 
     // 現在の送信に対応するAI応答バブルを更新する
     const updatePendingMascotMessage = (text: string) => {
+        const targetMessages = pendingMessages || messages.value;
         if (pendingAssistantMessageId !== null) {
-            const pendingMessage = messages.value.find(message => message.id === pendingAssistantMessageId);
+            const pendingMessage = targetMessages.find(message => message.id === pendingAssistantMessageId);
             if (pendingMessage) {
                 pendingMessage.text = text;
                 pendingMessage.timestamp = Date.now();
                 return;
             }
+            if (params.usesMastraHistory?.value) return;
         }
         for (let i = messages.value.length - 1; i >= 0; i--) {
             if (messages.value[i].sender === 'mascot') {
@@ -101,7 +134,7 @@ export function useChatConnection(params: {
 
     const completePendingMessage = async () => {
         if (pendingUserMessageId !== null) {
-            const userMessage = messages.value.find(message => message.id === pendingUserMessageId);
+            const userMessage = (pendingMessages || messages.value).find(message => message.id === pendingUserMessageId);
             if (userMessage) {
                 userMessage.deliveryStatus = undefined;
                 userMessage.deliveryError = undefined;
@@ -109,12 +142,16 @@ export function useChatConnection(params: {
         }
         pendingUserMessageId = null;
         pendingAssistantMessageId = null;
+        pendingMessages = null;
         await saveHistory();
     };
 
     const failPendingMessage = async (errorMessage: string) => {
+        if (pendingUserMessageId === null && pendingAssistantMessageId === null) {
+            return;
+        }
         if (pendingUserMessageId !== null) {
-            const userMessage = messages.value.find(message => message.id === pendingUserMessageId);
+            const userMessage = (pendingMessages || messages.value).find(message => message.id === pendingUserMessageId);
             if (userMessage) {
                 userMessage.deliveryStatus = 'failed';
                 userMessage.deliveryError = errorMessage;
@@ -123,14 +160,34 @@ export function useChatConnection(params: {
         updatePendingMascotMessage(`接続エラー: ${errorMessage}`);
         pendingUserMessageId = null;
         pendingAssistantMessageId = null;
+        pendingMessages = null;
         mascotStore.setLoading(false);
         mascotStore.setSpeaking(false);
         await saveHistory();
     };
 
-    const connectWebSocket = () => {
-        if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
-            return;
+    const connectWebSocket = (): Promise<boolean> => {
+        reconnectEnabled = true;
+        if (reconnectTimer !== null) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+
+        const currentSocket = socket;
+        if (currentSocket?.readyState === WebSocket.OPEN) {
+            return Promise.resolve(true);
+        }
+        if (currentSocket?.readyState === WebSocket.CONNECTING) {
+            return socketReadyPromise ?? Promise.resolve(false);
+        }
+        if (currentSocket) {
+            settleSocketReady?.(false);
+            socket = null;
+            try {
+                currentSocket.close();
+            } catch {
+                // 既に終了処理中のWebSocketはそのまま破棄する
+            }
         }
 
         const isSecure = window.location.protocol === 'https:';
@@ -139,33 +196,113 @@ export function useChatConnection(params: {
         const wsUrl = `${wsProtocol}//${wsHost}/ws`;
 
         console.log(`[useChatConnection] Connecting to WebSocket (Nitro): ${wsUrl}`);
-        socket = new WebSocket(wsUrl);
-        socket.binaryType = 'arraybuffer';
 
-        socket.onopen = () => {
+        let currentSocketForHandlers: WebSocket;
+        try {
+            currentSocketForHandlers = new WebSocket(wsUrl);
+        } catch (error) {
+            console.error('[useChatConnection] WebSocketの作成に失敗しました:', error);
+            socket = null;
+            isWsConnected.value = false;
+            return Promise.resolve(false);
+        }
+
+        socket = currentSocketForHandlers;
+        currentSocketForHandlers.binaryType = 'arraybuffer';
+
+        let resolveReady: (connected: boolean) => void = () => {};
+        let readySettled = false;
+        const readyPromise = new Promise<boolean>((resolve) => {
+            resolveReady = resolve;
+        });
+        socketReadyPromise = readyPromise;
+
+        const settleReady = (connected: boolean) => {
+            if (readySettled) return;
+            readySettled = true;
+            if (settleSocketReady === settleReady) {
+                settleSocketReady = null;
+            }
+            if (socketReadyPromise === readyPromise) {
+                socketReadyPromise = null;
+            }
+            resolveReady(connected);
+        };
+        settleSocketReady = settleReady;
+
+        currentSocketForHandlers.onopen = () => {
+            if (socket !== currentSocketForHandlers) return;
             console.log('[useChatConnection] WebSocket connected');
             isWsConnected.value = true;
-            socket?.send(JSON.stringify({
-                event: 'client-capabilities',
-                data: { binaryAudioV1: true }
-            }));
+            settleReady(true);
+            try {
+                currentSocketForHandlers.send(JSON.stringify({
+                    event: 'client-capabilities',
+                    data: { binaryAudioV1: true }
+                }));
+            } catch (error) {
+                console.error('[useChatConnection] WebSocket capability通知の送信に失敗しました:', error);
+            }
         };
 
-        socket.onmessage = async (event) => {
+        currentSocketForHandlers.onmessage = async (event) => {
+            if (socket !== currentSocketForHandlers) return;
+
             try {
-                if (event.data instanceof ArrayBuffer) {
+                const eventData = event.data as unknown;
+                const isBinaryData = eventData instanceof ArrayBuffer
+                    || ArrayBuffer.isView(eventData)
+                    || (eventData !== null
+                        && typeof eventData === 'object'
+                        && typeof (eventData as { arrayBuffer?: unknown }).arrayBuffer === 'function');
+                if (isBinaryData) {
                     if (useTts.value) {
-                        playlist.push(decodeAudioBinaryFrame(event.data));
+                        let audioBuffer: ArrayBufferLike | null = null;
+                        if (eventData instanceof ArrayBuffer) {
+                            audioBuffer = eventData;
+                        } else if (ArrayBuffer.isView(eventData)) {
+                            const view = eventData as ArrayBufferView;
+                            audioBuffer = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+                        } else {
+                            audioBuffer = await (eventData as Blob).arrayBuffer();
+                        }
+                        if (audioBuffer !== null) {
+                            playlist.push(decodeAudioBinaryFrame(audioBuffer));
+                        }
                     }
                     return;
                 }
-                const parsed = JSON.parse(event.data);
+
+                const parsed = JSON.parse(eventData as string);
                 const { event: wsEvent, data } = parsed;
 
                 if (wsEvent === 'chat-status') {
                     if (data.status === 'thinking') {
                         mascotStore.setLoading(true);
                     }
+                } else if (wsEvent === 'tool-approval-request') {
+                    if (typeof data?.id !== 'string' || typeof data?.name !== 'string' || !Object.hasOwn(toolApprovalLabels, data.name) || !data.input || typeof data.input !== 'object' || Array.isArray(data.input)) return;
+                    if (configStore.toolApprovalSkipped.includes(data.name)) {
+                        socket?.send(JSON.stringify({ event: 'tool-approval-response', data: { id: data.id, approved: true } }));
+                    } else if (pendingToolApproval.value) {
+                        socket?.send(JSON.stringify({ event: 'tool-approval-response', data: { id: data.id, approved: false } }));
+                    } else {
+                        const targetId = typeof data.input.id === 'string' ? data.input.id : '';
+                        const targetLabel = data.name === 'manageMemos' ? memoStore.memos.find(item => item.id === targetId)?.content
+                            : data.name === 'manageTasks' ? taskStore.tasks.find(item => item.id === targetId)?.title : undefined;
+                        pendingToolApproval.value = { id: data.id, name: data.name, input: data.input, targetLabel };
+                        approvalTimer = setTimeout(() => respondToToolApproval('deny'), 40000);
+                    }
+                } else if (wsEvent === 'tool-approval-finished') {
+                    if (pendingToolApproval.value?.id === data?.id) {
+                        pendingToolApproval.value = null;
+                        if (approvalTimer) clearTimeout(approvalTimer);
+                        approvalTimer = null;
+                    }
+                } else if (wsEvent === 'tool-status') {
+                    const names: Record<string, string> = { searchWeb: 'Web検索', getWeather: '天気の取得', getGPSLocation: '位置情報の取得', adjustVolume: '音量調整', launchApp: 'アプリ起動', manageTasks: 'タスク操作', manageMemos: 'メモ操作' };
+                    const statuses: Record<string, string> = { started: 'を実行中…', succeeded: 'が完了しました。回答を準備中…', failed: 'に失敗しました。回答を準備中…' };
+                    if (names[data.name] && statuses[data.status]) updatePendingMascotMessage(names[data.name] + statuses[data.status]);
                 } else if (wsEvent === 'chat-response') {
                     const { text, emotion } = data;
 
@@ -254,29 +391,81 @@ export function useChatConnection(params: {
             }
         };
 
-        socket.onclose = () => {
-            console.log('[useChatConnection] WebSocket disconnected');
+        currentSocketForHandlers.onclose = (event) => {
+            if (socket !== currentSocketForHandlers) return;
+            const code = typeof event?.code === 'number' ? event.code : 'unknown';
+            const reason = event?.reason || '理由なし';
+            console.log(`[useChatConnection] WebSocket disconnected (code=${code}, reason=${reason})`);
+            settleReady(false);
             isWsConnected.value = false;
+            respondToToolApproval('deny');
             socket = null;
-            if (pendingUserMessageId !== null) {
+            if ((pendingUserMessageId !== null || pendingAssistantMessageId !== null) && !waitingForConnection) {
                 void failPendingMessage('WebSocket接続が切断されました。');
             }
-            // 常に再接続を試みる
-            setTimeout(connectWebSocket, 5000);
+            if (reconnectEnabled && reconnectTimer === null) {
+                reconnectTimer = setTimeout(() => {
+                    reconnectTimer = null;
+                    if (reconnectEnabled) {
+                        void connectWebSocket();
+                    }
+                }, 5000);
+            }
         };
 
-        socket.onerror = (err) => {
+        currentSocketForHandlers.onerror = (err) => {
+            if (socket !== currentSocketForHandlers) return;
             console.error('[useChatConnection] WebSocket connection error:', err);
-            if (pendingUserMessageId !== null) {
+            settleReady(false);
+            if ((pendingUserMessageId !== null || pendingAssistantMessageId !== null) && !waitingForConnection) {
                 void failPendingMessage('WebSocket通信でネットワークエラーが発生しました。');
             }
         };
+
+        return readyPromise;
+    };
+
+    const waitForSocketConnection = async (): Promise<boolean> => {
+        const readyPromise = connectWebSocket();
+        if (socket?.readyState === WebSocket.OPEN) {
+            return true;
+        }
+
+        return new Promise<boolean>((resolve) => {
+            let settled = false;
+            const timeoutId = setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                resolve(false);
+            }, 10000);
+            readyPromise.then((connected) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeoutId);
+                resolve(connected);
+            });
+        });
     };
 
     const disconnectWebSocket = () => {
-        if (socket) {
-            socket.close();
-            socket = null;
+        reconnectEnabled = false;
+        if (reconnectTimer !== null) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+        respondToToolApproval('deny');
+        const currentSocket = socket;
+        socket = null;
+        if (pendingUserMessageId !== null || pendingAssistantMessageId !== null) {
+            void failPendingMessage('WebSocket接続を終了しました。');
+        }
+        settleSocketReady?.(false);
+        if (currentSocket) {
+            try {
+                currentSocket.close();
+            } catch {
+                // 既に切断されたWebSocketはそのまま破棄する
+            }
         }
         isWsConnected.value = false;
     };
@@ -310,8 +499,16 @@ export function useChatConnection(params: {
     };
 
     const sendMessage = async (isActiveTalk: boolean = false, retryMessageId?: number) => {
+        if (params.isHistoryLoaded && !params.isHistoryLoaded.value) return;
+        const sentSessionId = activeSessionId.value;
+        const sentMascot = activeMascot.value;
+        const sentMascotId = sentMascot?.id || 'default';
+        const sentMessages = messages.value;
+        const sentSession = sessions.value.find(session => session.id === sentSessionId);
+        const shouldPersist = params.usesMastraHistory?.value && !mascotStore.isSecretMode && !isActiveTalk;
+        if (shouldPersist && !sentSessionId) return;
         const retryTarget = retryMessageId !== undefined
-            ? messages.value.find(message => message.id === retryMessageId && message.sender === 'user')
+            ? sentMessages.find(message => message.id === retryMessageId && message.sender === 'user')
             : undefined;
         if (retryMessageId !== undefined && (!retryTarget || retryTarget.deliveryStatus !== 'failed')) return;
         if (!isActiveTalk && !retryTarget && !inputText.value.trim() && pendingAttachments.value.length === 0) return;
@@ -362,20 +559,20 @@ export function useChatConnection(params: {
                 userMessage.deliveryError = undefined;
             } else {
                 userMessage = {
-                    id: Date.now(),
+                    id: Math.max(Date.now(), (sentMessages.at(-1)?.id ?? 0) + 1),
                     sender: 'user',
                     text: userQuery,
                     timestamp: Date.now(),
                     attachments: attachments.length > 0 ? attachments : undefined,
                     deliveryStatus: 'sending'
                 };
-                messages.value.push(userMessage);
+                sentMessages.push(userMessage);
             }
         }
 
         const historyBase = isActiveTalk
-            ? messages.value
-            : messages.value.filter(message => message.id !== userMessage?.id && message.id !== userMessage?.responseMessageId);
+            ? sentMessages
+            : sentMessages.filter(message => message.id !== userMessage?.id && message.id !== userMessage?.responseMessageId);
         const historyToSend = historyBase
             .filter(m => (m.sender === 'user' && !m.deliveryStatus) || (m.sender === 'mascot' && m.text !== '考え中...' && !m.text.startsWith('接続に失敗しました') && !m.text.startsWith('サーバーに接続されていません') && !m.text.startsWith('接続エラー')))
             .slice(-10)
@@ -386,7 +583,7 @@ export function useChatConnection(params: {
         await nextTick();
         scrollToBottom();
 
-        const mascot = activeMascot.value;
+        const mascot = sentMascot;
         const engine = configStore.selectedEngine || mascot?.aiConfig?.chat?.engine || 'gemini';
 
         let apiKey = '';
@@ -411,6 +608,7 @@ export function useChatConnection(params: {
         } else if (engine === 'anthropic') {
             model = configStore.anthropicModel || mascot?.aiConfig?.chat?.model || 'claude-3-5-sonnet-latest';
         }
+        const toolUseEnabled = engine !== 'lmstudio' || isLmStudioToolUseEnabled(lmstudioToolsDisabledModels.value, model);
 
         const voiceEngine = mascot?.aiConfig?.voice?.engine || configStore.selectedVoiceEngine || 'voicevox';
 
@@ -418,9 +616,14 @@ export function useChatConnection(params: {
             ? mascot.aiConfig.voice.speaker_id
             : (configStore.voicevoxSpeaker !== undefined ? configStore.voicevoxSpeaker : 2);
 
-        const irodoriEndpointUrl = configStore.irodoriEndpoint || 'http://localhost:7861';
+        const irodoriEndpointUrl = configStore.irodoriEndpoint || 'http://127.0.0.1:8088';
         const irodoriModel = mascot?.aiConfig?.voice?.irodori_model || configStore.irodoriModel || 'irodori-tts-500m-v3';
         const irodoriVoice = mascot?.aiConfig?.voice?.irodori_voice || configStore.irodoriVoice || 'default';
+        const irodoriLora = mascot?.aiConfig?.voice?.irodori_lora || configStore.irodoriLora || '';
+        const irodoriSpeed = normalizeIrodoriSpeed(
+            mascot?.aiConfig?.voice?.irodori_speed ?? configStore.irodoriSpeed
+        );
+        const irodoriCaption = mascot?.aiConfig?.voice?.irodori_caption || configStore.irodoriCaption || '';
 
         let systemPrompt = '';
 
@@ -475,24 +678,28 @@ export function useChatConnection(params: {
             systemPrompt += "\n# Timer Instructions\nユーザーから「〇分後に教えて」「後でお知らせして」「カップラーメンにお湯を入れた（できたら教えて）」など、その場限りで一度だけ知らせればよい一時的なリマインドを求められた場合は、会話の応答テキストの末尾（感情タグの直前）に、必ず次のフォーマットでタイマー起動タグを付与してください。\n[TIMER:秒数,お知らせ内容]\n※秒数は半角数字で指定してください。お知らせ内容には具体的なリマインド内容を記述してください。例:「了解、3分測るね。[TIMER:180,カップラーメンができました！] [happy]」\n【重要な区別】このタイマーは一度きりの通知専用で、ユーザーのタスク一覧（TODO/予定）には保存されません。したがって『N分後に通知』などの一時的リマインドは manageTasks ツールでは登録しないでください。逆に、ユーザーが後から一覧で管理・確認したいTODOや予定（例:『明日15時に会議』『レポートを書く』）は、このタイマータグではなく必ず manageTasks ツールで登録してください。\n【履歴の扱い】会話履歴に含まれる過去のタイマー依頼は既に対応済みです。最新（今回）のメッセージで新たに『N分後に…』と頼まれたときだけタイマータグを付けてください。過去の履歴に依頼が残っていることを理由に、タイマーを再設定しないでください。";
         }
 
-        const currentSession = sessions.value.find(s => s.id === activeSessionId.value);
-        if (currentSession && currentSession.summary) {
+        if (!toolUseEnabled) {
+            systemPrompt += '\n\n# ツール利用制限\n今回はすべてのツールが無効です。タスクやメモの操作、検索などを実行したと装わず、利用できないことを伝えてください。一時的なタイマータグは引き続き利用できます。';
+        }
+
+        const currentSession = sentSession;
+        if (!params.usesMastraHistory?.value && currentSession && currentSession.summary) {
             systemPrompt += `\n\n# Previous Conversation Summary\n以下はこれまでのマスターとの会話履歴の要約です。この文脈を考慮して返答してください。\n${currentSession.summary}\n`;
         }
 
         let aiMessage = retryTarget?.responseMessageId !== undefined
-            ? messages.value.find(message => message.id === retryTarget.responseMessageId && message.sender === 'mascot')
+            ? sentMessages.find(message => message.id === retryTarget.responseMessageId && message.sender === 'mascot')
             : undefined;
         if (aiMessage) {
             aiMessage.text = '考え中...';
         } else {
             aiMessage = {
-                id: Date.now() + 1,
+                id: Math.max(Date.now() + 1, (userMessage?.id ?? 0) + 1),
                 sender: 'mascot',
                 text: '考え中...',
                 timestamp: Date.now()
             };
-            messages.value.push(aiMessage);
+            sentMessages.push(aiMessage);
         }
         const aiMessageId = aiMessage.id;
         if (userMessage) {
@@ -500,12 +707,24 @@ export function useChatConnection(params: {
             pendingUserMessageId = userMessage.id;
         }
         pendingAssistantMessageId = aiMessageId;
+        // 切り替え後も送信元のリアクティブなメッセージを更新する。
+        pendingMessages = sentMessages;
+        if (sentSession) {
+            sentSession.messages = [...sentMessages];
+            sentSession.timestamp = Date.now();
+            if (!sentSession.isSecret && sentSession.title === '新しい話題') {
+                const firstUserMessage = sentMessages.find(item => item.sender === 'user');
+                if (firstUserMessage) sentSession.title = createChatSessionTitle(firstUserMessage.text);
+            }
+        }
 
         await nextTick();
         scrollToBottom();
 
-        if (!socket || socket.readyState !== WebSocket.OPEN) {
-            connectWebSocket();
+        waitingForConnection = true;
+        const connected = await waitForSocketConnection();
+        waitingForConnection = false;
+        if (!connected || !socket || socket.readyState !== WebSocket.OPEN) {
             await failPendingMessage('サーバーに接続されていません。再接続後に再送してください。');
             return;
         }
@@ -515,6 +734,12 @@ export function useChatConnection(params: {
                 event: 'chat-send',
                 data: {
                 message: userQuery,
+                turnId: userMessage ? `${sentSessionId || 'default'}:${userMessage.id}` : crypto.randomUUID(),
+                ...(shouldPersist && userMessage ? {
+                    memorySessionId: sentSessionId,
+                    memoryUserMessageId: userMessage.id,
+                    memoryAssistantMessageId: aiMessageId
+                } : {}),
                 apiKey: apiKey,
                 systemPrompt: systemPrompt,
                 model: model,
@@ -524,20 +749,24 @@ export function useChatConnection(params: {
                 irodoriEndpoint: irodoriEndpointUrl,
                 irodoriModel: irodoriModel,
                 irodoriVoice: irodoriVoice,
+                irodoriLora: irodoriLora,
+                irodoriSpeed: irodoriSpeed,
+                irodoriCaption: irodoriCaption,
                 engine: engine,
+                toolUseEnabled,
                 lmstudioEndpoint: lmsEndpoint,
                 temperature: temperature.value,
                 frequencyPenalty: frequencyPenalty.value,
                 repetitionPenalty: repetitionPenalty.value,
                 maxOutputTokens: maxOutputTokens.value,
                 enableThinking: enableThinking.value,
-                history: historyToSend,
+                history: shouldPersist ? undefined : historyToSend,
                 useTts: useTts.value,
                 ttsReadNarrative: ttsReadNarrative.value,
                 saveVoice: saveVoice.value,
                 showVoiceLog: showVoiceLog.value,
-                activeMascotId: activeMascot.value?.id || 'default',
-                ttsDictionary: activeMascot.value?.aiConfig?.ttsDictionary,
+                activeMascotId: sentMascotId,
+                ttsDictionary: sentMascot?.aiConfig?.ttsDictionary,
                 attachments: attachments.length > 0 ? attachments : undefined,
                 tools: {
                     toolsGpsLocation: toolsGpsLocation.value,
@@ -596,6 +825,8 @@ export function useChatConnection(params: {
         disconnectWebSocket,
         handleKeyDown,
         pendingAttachments,
+        pendingToolApproval,
+        respondToToolApproval,
         attachFiles,
         removeAttachment
     };
