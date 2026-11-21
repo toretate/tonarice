@@ -37,12 +37,11 @@ MastraをAIエージェントのオーケストレーション基盤として段
 
 ## 4. 機能フラグ
 
-- 環境変数`MASTRA_CHAT_ENABLED`でMastraチャット経路を制御する。
-- `true`または`1`の場合だけ有効とする。大文字・小文字と前後空白は無視する。
-- 未指定、空文字、その他の値は無効として扱う。
-- 正式切り替えまでは未指定時の既定値を無効とする。
+- 環境変数`MASTRA_CHAT_ENABLED`が未指定の場合は、Mastraチャット経路を既定で有効にする。
+- 明示設定は、前後空白と大文字・小文字を無視して`true`または`1`なら有効とする。空文字を含むその他の値は無効として扱う。切り戻しには`false`を指定する。
 - 機能フラグ無効時はMastraインスタンスを生成しない。
 - フラグ有効時はGemini/OpenAI/LM Studioの対話チャットをMastraへ送る。他のAI処理は既存経路を使う。
+- CoWorkの定期実行は今回の切り替え対象外とし、既存のElectron経路を維持する。
 - `toolsWeather`、`toolsWebSearch`、`toolsGpsLocation`、`toolsVolume`、`toolsAppLauncher`が明示的に`true`の発話だけ対応ツールを公開する。無効・未指定の場合は公開しない。
 - タスク・メモは認証済みWebSocket接続のユーザー別DB操作関数が利用できる場合だけ公開する。
 - LM Studioのモデル別ツール設定が無効なら、認証状態にかかわらずタスク・メモを含めすべてのツールを公開しない。Legacy経路にも同じ設定を適用する。
@@ -135,7 +134,7 @@ MastraをAIエージェントのオーケストレーション基盤として段
 
 ## 10. ロールバック
 
-- `MASTRA_CHAT_ENABLED`を未指定または`false`に戻すことでMastraチャット経路を無効化できること。
+- 起動環境で`MASTRA_CHAT_ENABLED=false`を指定して再起動すると、対話チャットと履歴表示はLegacy経路へ戻る。Mastra Memoryの履歴はその間表示されないが削除されず、再度Mastraを有効にすれば参照できる。
 - 初期段階ではDBスキーマと既存履歴を変更しないこと。
 - Legacyの`ChatAiService`とそのテストを削除・変更しないこと。
 - Mastra専用コードを削除し、`@mastra/core`依存を戻せば導入前状態へ復元できること。

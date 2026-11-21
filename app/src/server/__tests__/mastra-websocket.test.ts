@@ -92,6 +92,7 @@ describe('WebSocketのMastra対話経路', () => {
     });
 
     it('message_Memoryで履歴を読み書きし同じ再送でツール付き生成を繰り返さないこと', async () => {
+        delete process.env.MASTRA_CHAT_ENABLED;
         const storage = new LibSQLStore({ id: 'ws-memory-test', url: ':memory:' });
         const memory = new Memory({ storage });
         vi.spyOn(memoryStore, 'getMemoryStore').mockReturnValue({ memory, storage });
@@ -102,6 +103,7 @@ describe('WebSocketのMastra対話経路', () => {
         try {
             await sendChat(peer, first);
             expect(serviceMocks.mastraGenerate.mock.calls[0][0].history).toEqual([]);
+            expect(serviceMocks.legacyGenerate).not.toHaveBeenCalled();
             await sendChat(peer, first);
             expect(serviceMocks.mastraGenerate).toHaveBeenCalledTimes(1);
             await sendChat(peer, { ...base, memoryUserMessageId: 1002, memoryAssistantMessageId: 1003 });
