@@ -15,8 +15,7 @@ import { encodeAudioBinaryFrame } from '../../utils/audio-binary-frame';
 import { MastraChatService } from '../mastra/mastra-chat-service';
 import { resolveMastraChatModel } from '../mastra/model-resolver';
 import { getMastraChatErrorMessage } from '../mastra/chat-route';
-import { appendMemoryTurn, listMemoryMessages, lockMemoryThread, memoryMessageId, memoryMessageText, type HistoryScope } from '../mastra/memory-history';
-import { getMemoryStore } from '../mastra/memory-store';
+import { openChatMemoryTurn } from '../mastra/chat-memory-turn';
 import { requestToolApproval, respondToolApproval } from '../mastra/tool-approval';
 import { claimMutation } from '../mastra/mutation-claim';
 
@@ -273,34 +272,18 @@ export default defineWebSocketHandler({
                 let releaseMemory: (() => void) | undefined;
                 registerMastraRequest(peer, mastraController);
                 try {
-                    let historyForModel = history;
-                    let memoryScope: HistoryScope | undefined;
-                    const { memorySessionId, memoryUserMessageId, memoryAssistantMessageId, activeMascotId } = data;
-                    if (memorySessionId !== undefined) {
-                        if (userId === 'anonymous' || typeof memorySessionId !== 'string' || !memorySessionId || memorySessionId.length > 200
-                            || typeof activeMascotId !== 'string' || !activeMascotId || activeMascotId.length > 200
-                            || !Number.isSafeInteger(memoryUserMessageId) || !Number.isSafeInteger(memoryAssistantMessageId)
-                            || memoryUserMessageId <= 1 || memoryAssistantMessageId <= memoryUserMessageId || memoryAssistantMessageId > 8640000000000000) {
-                            peer.send(JSON.stringify({ event: 'chat-error', data: { message: '履歴を保存する会話を特定できません。' } }));
-                            return;
-                        }
-                        memoryScope = { userId, mascotId: activeMascotId, sessionId: memorySessionId, isSecret: false };
-                        releaseMemory = lockMemoryThread(memoryScope);
-                        if (!releaseMemory) {
-                            peer.send(JSON.stringify({ event: 'chat-error', data: { message: 'この会話は別の処理を実行中です。' } }));
-                            return;
-                        }
-                        const stored = await listMemoryMessages(getMemoryStore().memory, memoryScope);
-                        const savedReply = stored.find(item => item.role === 'assistant' && item.id === memoryMessageId(memoryScope!, memoryAssistantMessageId));
-                        if (savedReply) {
-                            const text = memoryMessageText(savedReply);
+                    const memoryTurn = await openChatMemoryTurn(userId, data);
+                    if (memoryTurn.kind === 'rejected') {
+                        peer.send(JSON.stringify({ event: 'chat-error', data: { message: memoryTurn.message } }));
+                        return;
+                    }
+                    if (memoryTurn.kind === 'persistent') {
+                        releaseMemory = memoryTurn.release;
+                        if (memoryTurn.savedReply !== undefined) {
+                            const text = memoryTurn.savedReply;
                             peer.send(JSON.stringify({ event: 'chat-response', data: { text, speechText: text, emotion: 'neutral' } }));
                             return;
                         }
-                        historyForModel = stored.filter(item => (item.role === 'assistant' || item.role === 'user')
-                            && item.id !== memoryMessageId(memoryScope!, memoryUserMessageId))
-                            .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).slice(-10)
-                            .map(item => ({ sender: item.role === 'user' ? 'user' : 'mascot', text: memoryMessageText(item) }));
                     }
                     const authorizeSideEffect = async (name: string, input: Record<string, unknown>): Promise<string | null> => {
                         if (typeof turnId !== 'string' || turnId.length < 1 || turnId.length > 200) {
@@ -336,7 +319,7 @@ export default defineWebSocketHandler({
                         temperature,
                         frequencyPenalty,
                         maxOutputTokens,
-                        history: historyForModel,
+                        history: memoryTurn.kind === 'persistent' ? memoryTurn.history : history,
                         attachments,
                         weatherEnabled: enableTools && tools?.toolsWeather === true,
                         webSearchEnabled: enableTools && tools?.toolsWebSearch === true,
@@ -359,17 +342,8 @@ export default defineWebSocketHandler({
                         },
                         abortSignal: mastraController.signal
                     });
-                    if (memoryScope && !mastraController.signal.aborted) {
-                        await appendMemoryTurn(getMemoryStore().memory, memoryScope, {
-                            userId: memoryUserMessageId,
-                            assistantId: memoryAssistantMessageId,
-                            message,
-                            reply: reply.replace(/\[TIMER:.*?\]/gi, '').replace(/\[\w+\]/g, '').trim(),
-                            attachments: Array.isArray(attachments) ? attachments.flatMap(item =>
-                                (item?.type === 'image' || item?.type === 'file') && typeof item.name === 'string'
-                                && typeof item.url === 'string' && item.url.startsWith('data:')
-                                    ? [{ type: item.type, name: item.name, url: item.url }] : []) : undefined
-                        });
+                    if (memoryTurn.kind === 'persistent' && !mastraController.signal.aborted) {
+                        await memoryTurn.save(message, reply.replace(/\[TIMER:.*?\]/gi, '').replace(/\[\w+\]/g, '').trim(), attachments);
                     }
                 } catch (aiError) {
                     if (mastraController.signal.aborted) return;
