@@ -1,5 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
+import { observeTool } from './tool-observation';
 
 /**
  * IPアドレス由来の概算位置だけを返す。取得失敗時に別の都市を現在地として返さない。
@@ -17,6 +18,7 @@ export const mastraLocationTool = createTool({
         }
         requestContext.set('locationUsed', true);
         console.info('[MastraTool] getGPSLocationの実行を開始');
+        return observeTool(requestContext, 'getGPSLocation', async () => {
         try {
             const response = await fetch('http://ip-api.com/json/?lang=ja', { signal: abortSignal });
             if (!response.ok) {
@@ -41,5 +43,6 @@ export const mastraLocationTool = createTool({
             console.warn('[MastraTool] getGPSLocationとの接続エラー');
             return { error: '位置情報の取得に失敗しました。' };
         }
+        }, result => 'error' in result, {});
     }
 });

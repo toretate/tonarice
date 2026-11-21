@@ -17,6 +17,8 @@ import { encodeAudioBinaryFrame } from '../../utils/audio-binary-frame';
 import { MastraChatService } from '../mastra/mastra-chat-service';
 import { resolveMastraChatModel } from '../mastra/model-resolver';
 import { getMastraChatErrorMessage, shouldUseMastraChat } from '../mastra/chat-route';
+import { requestToolApproval, respondToolApproval } from '../mastra/tool-approval';
+import { claimMutation } from '../mastra/mutation-claim';
 
 
 // ユーザーごとの接続管理（crosswsのPeerオブジェクトをSetに保存）
@@ -199,6 +201,11 @@ export default defineWebSocketHandler({
             const parsed = JSON.parse(rawMessage);
             const { event, data } = parsed;
 
+            if (event === 'tool-approval-response') {
+                respondToolApproval(peer, data?.id, data?.approved);
+                return;
+            }
+
             if (event === 'client-capabilities') {
                 peer.context.binaryAudioV1 = data?.binaryAudioV1 === true;
                 return;
@@ -228,6 +235,7 @@ export default defineWebSocketHandler({
                     showVoiceLog,
                     attachments,
                     tools,
+                    turnId,
                     toolUseEnabled,
                     temperature,
                     frequencyPenalty,
@@ -268,6 +276,23 @@ export default defineWebSocketHandler({
                     if (useMastra) {
                         mastraController = new AbortController();
                         registerMastraRequest(peer, mastraController);
+                        const authorizeSideEffect = async (name: string, input: Record<string, unknown>): Promise<string | null> => {
+                            if (typeof turnId !== 'string' || turnId.length < 1 || turnId.length > 200) {
+                                return '操作識別子がないため変更できません。画面を更新してください。';
+                            }
+                            if (!await requestToolApproval(peer, name, input, mastraController!.signal)) {
+                                return 'ユーザーが承認しなかったため操作しませんでした。';
+                            }
+                            if (mastraController!.signal.aborted) return '接続が終了したため操作しませんでした。';
+                            try {
+                                if (!claimMutation(path.join(USERS_DIR, '.tool-mutation-claims'), getPeerUserId(peer), turnId, name, input)) {
+                                    return '同じ発話の操作は既に試行されています。再実行せず結果を確認してください。';
+                                }
+                            } catch {
+                                return '操作記録を保存できないため実行しませんでした。';
+                            }
+                            return null;
+                        };
                         const resolved = resolveMastraChatModel({
                             engine: engine || 'gemini',
                             model,
@@ -293,10 +318,19 @@ export default defineWebSocketHandler({
                             volumeEnabled: enableTools && tools?.toolsVolume === true,
                             appLauncherEnabled: enableTools && tools?.toolsAppLauncher === true,
                             enableThinking,
+                            authorizeSideEffect,
                             executeDataTool: !enableTools || getPeerUserId(peer) === 'anonymous'
                                 ? undefined
-                                : (name, input) => executeDataToolForPeer(peer, name, input),
+                                : async (name, input) => {
+                                    if (input.action === 'search') return executeDataToolForPeer(peer, name, input);
+                                    const refusal = await authorizeSideEffect(name, input);
+                                    if (refusal) return JSON.stringify({ success: false, error: refusal });
+                                    return executeDataToolForPeer(peer, name, input);
+                                },
                             onDataToolResult: (name, input, output) => notifyDataToolResult(peer, name, input, output),
+                            onToolStatus: (name, status) => {
+                                if (!mastraController?.signal.aborted) peer.send(JSON.stringify({ event: 'tool-status', data: { name, status } }));
+                            },
                             abortSignal: mastraController.signal
                         });
                     } else {

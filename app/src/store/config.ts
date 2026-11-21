@@ -117,6 +117,7 @@ export interface AppConfig {
     toolsVolume: boolean;
     toolsAppLauncher: boolean;
     toolsWebSearch: boolean;
+    toolApprovalSkipped?: string[];
     useExRadio: boolean;
     radioActiveTalkInterval: number;
     saveVoice?: boolean;
@@ -259,6 +260,7 @@ export const useConfigStore = defineStore('config', () => {
     const toolsVolume = ref(true);
     const toolsAppLauncher = ref(true);
     const toolsWebSearch = ref(true);
+    const toolApprovalSkipped = ref<string[]>([]);
     const useExRadio = ref(false);
     // ラジオモードで沈黙時に能動的トーク（アクティブトーク）を発火するまでの待機秒数
     const radioActiveTalkInterval = ref(30);
@@ -439,6 +441,7 @@ export const useConfigStore = defineStore('config', () => {
             toolsVolume.value = configData.toolsVolume !== undefined ? !!configData.toolsVolume : true;
             toolsAppLauncher.value = configData.toolsAppLauncher !== undefined ? !!configData.toolsAppLauncher : true;
             toolsWebSearch.value = configData.toolsWebSearch !== undefined ? !!configData.toolsWebSearch : true;
+            toolApprovalSkipped.value = Array.isArray(configData.toolApprovalSkipped) ? configData.toolApprovalSkipped.filter((value: unknown): value is string => typeof value === 'string') : [];
             useExRadio.value = configData.useExRadio !== undefined ? !!configData.useExRadio : false;
             radioActiveTalkInterval.value = configData.radioActiveTalkInterval !== undefined ? Number(configData.radioActiveTalkInterval) : 30;
             saveVoice.value = configData.saveVoice !== undefined ? !!configData.saveVoice : false;
@@ -596,6 +599,12 @@ export const useConfigStore = defineStore('config', () => {
             toolsVolume.value = localStorage.getItem('toolsVolume') !== 'false';
             toolsAppLauncher.value = localStorage.getItem('toolsAppLauncher') !== 'false';
             toolsWebSearch.value = localStorage.getItem('toolsWebSearch') !== 'false';
+            try {
+                const saved = JSON.parse(localStorage.getItem('toolApprovalSkipped') || '[]');
+                toolApprovalSkipped.value = Array.isArray(saved) ? saved.filter((value: unknown): value is string => typeof value === 'string') : [];
+            } catch {
+                toolApprovalSkipped.value = [];
+            }
             useExRadio.value = localStorage.getItem('useExRadio') === 'true';
             const radioIntervalVal = localStorage.getItem('radioActiveTalkInterval');
             radioActiveTalkInterval.value = radioIntervalVal ? Number(radioIntervalVal) : 30;
@@ -730,6 +739,7 @@ export const useConfigStore = defineStore('config', () => {
             toolsVolume: toolsVolume.value,
             toolsAppLauncher: toolsAppLauncher.value,
             toolsWebSearch: toolsWebSearch.value,
+            toolApprovalSkipped: [...toolApprovalSkipped.value],
             useExRadio: useExRadio.value,
             radioActiveTalkInterval: Number(radioActiveTalkInterval.value),
             saveVoice: saveVoice.value,
@@ -895,6 +905,7 @@ export const useConfigStore = defineStore('config', () => {
         safeSetItem('toolsVolume', toolsVolume.value.toString());
         safeSetItem('toolsAppLauncher', toolsAppLauncher.value.toString());
         safeSetItem('toolsWebSearch', toolsWebSearch.value.toString());
+        safeSetItem('toolApprovalSkipped', JSON.stringify(toolApprovalSkipped.value));
         safeSetItem('useExRadio', useExRadio.value.toString());
         safeSetItem('radioActiveTalkInterval', radioActiveTalkInterval.value.toString());
         safeSetItem('saveVoice', saveVoice.value.toString());
@@ -1032,6 +1043,7 @@ export const useConfigStore = defineStore('config', () => {
         if (newConfig.toolsVolume !== undefined) toolsVolume.value = !!newConfig.toolsVolume;
         if (newConfig.toolsAppLauncher !== undefined) toolsAppLauncher.value = !!newConfig.toolsAppLauncher;
         if (newConfig.toolsWebSearch !== undefined) toolsWebSearch.value = !!newConfig.toolsWebSearch;
+        if (newConfig.toolApprovalSkipped !== undefined) toolApprovalSkipped.value = [...newConfig.toolApprovalSkipped];
         if (newConfig.useExRadio !== undefined) useExRadio.value = !!newConfig.useExRadio;
         if (newConfig.radioActiveTalkInterval !== undefined) radioActiveTalkInterval.value = Number(newConfig.radioActiveTalkInterval);
         if (newConfig.saveVoice !== undefined) saveVoice.value = !!newConfig.saveVoice;
@@ -1147,6 +1159,7 @@ export const useConfigStore = defineStore('config', () => {
         toolsVolume,
         toolsAppLauncher,
         toolsWebSearch,
+        toolApprovalSkipped,
         useExRadio,
         radioActiveTalkInterval,
         saveVoice,

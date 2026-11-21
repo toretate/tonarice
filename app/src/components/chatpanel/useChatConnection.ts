@@ -13,6 +13,7 @@ import { useMemoStore } from '../../store/memo';
 import { decodeAudioBinaryFrame } from '../../utils/audio-binary-frame';
 import { normalizeIrodoriSpeed } from '../../utils/irodori-tts-settings';
 import { isLmStudioToolUseEnabled } from '../../utils/lmstudio-tool-settings';
+import { toolApprovalLabels, type ToolApprovalRequest } from './tool-approval-display';
 
 export function useChatConnection(params: {
     messages: Ref<Message[]>;
@@ -87,6 +88,24 @@ export function useChatConnection(params: {
     let waitingForConnection = false;
     let pendingUserMessageId: number | null = null;
     let pendingAssistantMessageId: number | null = null;
+    const pendingToolApproval = ref<ToolApprovalRequest | null>(null);
+    let approvalTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const respondToToolApproval = (choice: 'deny' | 'approve' | 'remember') => {
+        const request = pendingToolApproval.value;
+        if (!request) return;
+        pendingToolApproval.value = null;
+        if (approvalTimer) clearTimeout(approvalTimer);
+        approvalTimer = null;
+        const canRespond = socket?.readyState === WebSocket.OPEN;
+        if (canRespond) socket!.send(JSON.stringify({ event: 'tool-approval-response', data: { id: request.id, approved: choice !== 'deny' } }));
+        if (canRespond && choice === 'remember' && Object.hasOwn(toolApprovalLabels, request.name) && configStore.isLoaded) {
+            configStore.toolApprovalSkipped = [...new Set([...configStore.toolApprovalSkipped, request.name])];
+            void configStore.saveConfig().catch(() => {
+                configStore.toolApprovalSkipped = configStore.toolApprovalSkipped.filter(name => name !== request.name);
+            });
+        }
+    };
 
     // 現在の送信に対応するAI応答バブルを更新する
     const updatePendingMascotMessage = (text: string) => {
@@ -253,6 +272,23 @@ export function useChatConnection(params: {
                     if (data.status === 'thinking') {
                         mascotStore.setLoading(true);
                     }
+                } else if (wsEvent === 'tool-approval-request') {
+                    if (typeof data?.id !== 'string' || typeof data?.name !== 'string' || !Object.hasOwn(toolApprovalLabels, data.name) || !data.input || typeof data.input !== 'object' || Array.isArray(data.input)) return;
+                    if (configStore.toolApprovalSkipped.includes(data.name)) {
+                        socket?.send(JSON.stringify({ event: 'tool-approval-response', data: { id: data.id, approved: true } }));
+                    } else if (pendingToolApproval.value) {
+                        socket?.send(JSON.stringify({ event: 'tool-approval-response', data: { id: data.id, approved: false } }));
+                    } else {
+                        const targetId = typeof data.input.id === 'string' ? data.input.id : '';
+                        const targetLabel = data.name === 'manageMemos' ? memoStore.memos.find(item => item.id === targetId)?.content
+                            : data.name === 'manageTasks' ? taskStore.tasks.find(item => item.id === targetId)?.title : undefined;
+                        pendingToolApproval.value = { id: data.id, name: data.name, input: data.input, targetLabel };
+                        approvalTimer = setTimeout(() => respondToToolApproval('deny'), 40000);
+                    }
+                } else if (wsEvent === 'tool-status') {
+                    const names: Record<string, string> = { searchWeb: 'Web検索', getWeather: '天気の取得', getGPSLocation: '位置情報の取得', adjustVolume: '音量調整', launchApp: 'アプリ起動', manageTasks: 'タスク操作', manageMemos: 'メモ操作' };
+                    const statuses: Record<string, string> = { started: 'を実行中…', succeeded: 'が完了しました。回答を準備中…', failed: 'に失敗しました。回答を準備中…' };
+                    if (names[data.name] && statuses[data.status]) updatePendingMascotMessage(names[data.name] + statuses[data.status]);
                 } else if (wsEvent === 'chat-response') {
                     const { text, emotion } = data;
 
@@ -348,6 +384,7 @@ export function useChatConnection(params: {
             console.log(`[useChatConnection] WebSocket disconnected (code=${code}, reason=${reason})`);
             settleReady(false);
             isWsConnected.value = false;
+            respondToToolApproval('deny');
             socket = null;
             if ((pendingUserMessageId !== null || pendingAssistantMessageId !== null) && !waitingForConnection) {
                 void failPendingMessage('WebSocket接続が切断されました。');
@@ -661,6 +698,7 @@ export function useChatConnection(params: {
                 event: 'chat-send',
                 data: {
                 message: userQuery,
+                turnId: userMessage ? `${activeSessionId.value || 'default'}:${userMessage.id}` : crypto.randomUUID(),
                 apiKey: apiKey,
                 systemPrompt: systemPrompt,
                 model: model,
@@ -746,6 +784,8 @@ export function useChatConnection(params: {
         disconnectWebSocket,
         handleKeyDown,
         pendingAttachments,
+        pendingToolApproval,
+        respondToToolApproval,
         attachFiles,
         removeAttachment
     };

@@ -70,6 +70,79 @@ describe('Mastraツール移植のテスト', () => {
         expect(fetchMock).toHaveBeenCalledOnce();
     });
 
+    it('execute_Web検索の開始と成功を入力内容を含めず通知すること', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => html }));
+        const onToolStatus = vi.fn();
+        if (!mastraWebSearchTool.execute) throw new Error('検索ツールがありません。');
+        await mastraWebSearchTool.execute({ query: '秘密の検索語' }, {
+            requestContext: createContext({ webSearchEnabled: true, onToolStatus })
+        } as never);
+        expect(onToolStatus.mock.calls).toEqual([['searchWeb', 'started'], ['searchWeb', 'succeeded']]);
+        expect(JSON.stringify(onToolStatus.mock.calls)).not.toContain('秘密の検索語');
+    });
+
+    it('execute_データ操作の失敗を成功と誤認せず通知すること', async () => {
+        const onToolStatus = vi.fn();
+        const onDataToolResult = vi.fn();
+        if (!mastraTasksTool.execute) throw new Error('タスクツールがありません。');
+        await mastraTasksTool.execute({ action: 'delete', id: 'task-1' }, {
+            requestContext: createContext({ executeDataTool: async () => JSON.stringify({ success: false }), onToolStatus, onDataToolResult })
+        } as never);
+        expect(onToolStatus.mock.calls).toEqual([['manageTasks', 'started'], ['manageTasks', 'failed']]);
+        expect(onDataToolResult).not.toHaveBeenCalled();
+    });
+
+    it('execute_メモ検索の通常ログに操作と件数だけを出すこと', async () => {
+        const original = process.env.MASTRA_TOOL_DEBUG_CONTENT;
+        delete process.env.MASTRA_TOOL_DEBUG_CONTENT;
+        const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+        try {
+            if (!mastraMemosTool.execute) throw new Error('メモツールがありません。');
+            await mastraMemosTool.execute({ action: 'search', query: '秘密の検索語' }, {
+                requestContext: createContext({ executeDataTool: async () => JSON.stringify({ success: true, count: 2, message: '秘密の結果' }) })
+            } as never);
+            const logs = JSON.stringify(info.mock.calls);
+            expect(logs).toContain('操作: search');
+            expect(logs).toContain('検索結果: 2件');
+            expect(logs).not.toContain('秘密の検索語');
+            expect(logs).not.toContain('秘密の結果');
+        } finally {
+            if (original === undefined) delete process.env.MASTRA_TOOL_DEBUG_CONTENT;
+            else process.env.MASTRA_TOOL_DEBUG_CONTENT = original;
+        }
+    });
+
+    it('execute_詳細ログ有効時のみ検索語と結果を出すこと', async () => {
+        const original = process.env.MASTRA_TOOL_DEBUG_CONTENT;
+        process.env.MASTRA_TOOL_DEBUG_CONTENT = 'true';
+        const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+        try {
+            if (!mastraMemosTool.execute) throw new Error('メモツールがありません。');
+            await mastraMemosTool.execute({ action: 'search', query: '検索文字列' }, {
+                requestContext: createContext({ executeDataTool: async () => JSON.stringify({ success: true, count: 1, message: '検索結果', apiKey: 'secret-value' }) })
+            } as never);
+            const logs = JSON.stringify(info.mock.calls);
+            expect(logs).toContain('検索文字列');
+            expect(logs).toContain('検索結果');
+            expect(logs).not.toContain('secret-value');
+        } finally {
+            if (original === undefined) delete process.env.MASTRA_TOOL_DEBUG_CONTENT;
+            else process.env.MASTRA_TOOL_DEBUG_CONTENT = original;
+        }
+    });
+
+    it('execute_失敗結果は成功と記録しないこと', async () => {
+        const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        if (!mastraMemosTool.execute) throw new Error('メモツールがありません。');
+        await mastraMemosTool.execute({ action: 'add', content: '秘密' }, {
+            requestContext: createContext({ executeDataTool: async () => JSON.stringify({ success: false, error: '秘密' }) })
+        } as never);
+        expect(JSON.stringify(warn.mock.calls)).toContain('実行に失敗');
+        expect(JSON.stringify(info.mock.calls)).not.toContain('実行に成功');
+        expect(JSON.stringify(warn.mock.calls)).not.toContain('秘密');
+    });
+
     it('generateResponse_モデルのWeb検索要求を実行して検索結果を次の生成へ渡すこと', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => html }));
         const model = createMockModel({ mockText: '未使用', version: 'v2' });
@@ -175,7 +248,7 @@ describe('Mastraツール移植のテスト', () => {
 
         expect(reply).toBe('メモを登録しました。');
         expect(execute).toHaveBeenCalledOnce();
-        expect(JSON.stringify(generate.mock.calls[1]?.[0])).toContain('同じ変更を実行済み');
+        expect(JSON.stringify(generate.mock.calls[1]?.[0])).toContain('同じ変更を既に試行');
     });
 
     it('execute_データ実行関数がない場合はDBを操作しないこと', async () => {
@@ -195,9 +268,17 @@ describe('Mastraツール移植のテスト', () => {
         expect(result).toEqual({ error: '音量調整は無効です。' });
     });
 
+    it('execute_音量調整で承認が拒否された場合は操作しないこと', async () => {
+        if (!mastraVolumeTool.execute) throw new Error('音量ツールがありません。');
+        const result = await mastraVolumeTool.execute({ volume: 50 }, {
+            requestContext: createContext({ volumeEnabled: true, authorizeSideEffect: async () => '承認されませんでした。' })
+        } as never);
+        expect(result).toEqual({ error: '承認されませんでした。' });
+    });
+
     it('execute_有効な音量調整を一発話一回に制限すること', async () => {
         if (!mastraVolumeTool.execute) throw new Error('音量ツールがありません。');
-        const context = createContext({ volumeEnabled: true });
+        const context = createContext({ volumeEnabled: true, authorizeSideEffect: async () => null });
 
         const first = await mastraVolumeTool.execute({ volume: 50 }, { requestContext: context } as never);
         const second = await mastraVolumeTool.execute({ volume: 60 }, { requestContext: context } as never);

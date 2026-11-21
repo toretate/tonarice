@@ -4,6 +4,15 @@ import { createMascotRequestContext } from './request-context';
 import { getMastraRuntime } from './runtime';
 import { buildMastraChatInstructions, buildMastraChatMessages } from './chat-input';
 import type { MastraChatAttachment, MastraChatHistoryItem } from './chat-input';
+import type { ToolStatusCallback } from './tool-observation';
+
+function stableValue(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(stableValue);
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, stableValue(item)]));
+    }
+    return value;
+}
 
 export interface MastraChatRequest {
     message: string;
@@ -24,6 +33,8 @@ export interface MastraChatRequest {
     enableThinking?: boolean;
     executeDataTool?: (name: 'manageTasks' | 'manageMemos', input: Record<string, unknown>) => Promise<string>;
     onDataToolResult?: (name: 'manageTasks' | 'manageMemos', input: Record<string, unknown>, output: string) => void;
+    onToolStatus?: ToolStatusCallback;
+    authorizeSideEffect?: (name: string, input: Record<string, unknown>) => Promise<string | null>;
     abortSignal?: AbortSignal;
 }
 
@@ -41,9 +52,9 @@ export class MastraChatService {
             name: 'manageTasks' | 'manageMemos', input: Record<string, unknown>
         ): Promise<string> => {
             if (input.action !== 'search') {
-                const key = JSON.stringify([name, input]);
+                const key = JSON.stringify([name, stableValue(input)]);
                 if (executedMutations.has(key)) {
-                    return JSON.stringify({ success: false, error: 'この発話では同じ変更を実行済みです。' });
+                    return JSON.stringify({ success: false, error: 'この発話では同じ変更を既に試行したため再実行できません。操作結果を確認してください。' });
                 }
                 executedMutations.add(key);
             }
@@ -59,7 +70,9 @@ export class MastraChatService {
             volumeEnabled: params.volumeEnabled,
             appLauncherEnabled: params.appLauncherEnabled,
             executeDataTool,
-            onDataToolResult: params.onDataToolResult
+            onDataToolResult: params.onDataToolResult,
+            onToolStatus: params.onToolStatus,
+            authorizeSideEffect: params.authorizeSideEffect
         });
         const agent = getMastraRuntime().getAgentById(MASCOT_AGENT_ID);
         const modelSettings = {

@@ -14,6 +14,7 @@ import ImageGenerationFooter from './chatpanel/ImageGenerationFooter.vue';
 import ChatHeader from './chatpanel/ChatHeader.vue';
 import MessageList from './chatpanel/MessageList.vue';
 import ChatInputForm from './chatpanel/ChatInputForm.vue';
+import ToolApprovalDialog from './chatpanel/ToolApprovalDialog.vue';
 import { extractImagePrompt } from '../utils/png-metadata';
 import TaskManagement from './TaskManagement.vue';
 import { useTaskStore } from '../store/task';
@@ -244,6 +245,8 @@ const {
     disconnectWebSocket,
     handleKeyDown,
     pendingAttachments,
+    pendingToolApproval,
+    respondToToolApproval,
     attachFiles,
     removeAttachment
 } = useChatConnection({
@@ -781,6 +784,7 @@ onMounted(() => {
         </template>
 
         <!-- 画像拡大モーダル -->
+        <ToolApprovalDialog :request="pendingToolApproval" :can-remember="configStore.isLoaded" @decide="respondToToolApproval" />
         <AttachmentImageModal :url="activeImageUrl" @close="activeImageUrl = null" @use-i2i="useAsI2iSource" />
 
         <div v-if="ttsDictionaryNotice" class="tts-dictionary-notice" :class="ttsDictionaryNotice.type">

@@ -24,8 +24,12 @@ vi.mock('../utils/tool-executor', () => ({
 }));
 vi.mock('../utils/tasks-service', () => ({ updateTaskInDb: vi.fn() }));
 vi.mock('../middleware/auth', () => ({ authenticateUserToken: vi.fn() }));
+vi.mock('../mastra/tool-approval', () => ({ requestToolApproval: vi.fn().mockResolvedValue(true), respondToolApproval: vi.fn() }));
+vi.mock('../mastra/mutation-claim', () => ({ claimMutation: vi.fn().mockReturnValue(true) }));
 
 import handler from '../routes/ws';
+import { requestToolApproval } from '../mastra/tool-approval';
+import { claimMutation } from '../mastra/mutation-claim';
 
 interface TestPeer {
     context: Record<string, unknown>;
@@ -44,6 +48,7 @@ async function sendChat(peer: TestPeer, overrides: Record<string, unknown> = {})
         event: 'chat-send',
         data: {
             message: 'こんにちは',
+            turnId: 'session-1:message-1',
             apiKey: 'sk-test-sensitive',
             systemPrompt: '親しみやすく返答',
             model: 'gpt-4o',
@@ -69,6 +74,8 @@ describe('WebSocketのMastra対話経路', () => {
         serviceMocks.synthesize.mockReset();
         serviceMocks.executeMemos.mockReset();
         serviceMocks.executeTasks.mockReset();
+        vi.mocked(requestToolApproval).mockReset().mockResolvedValue(true);
+        vi.mocked(claimMutation).mockReset().mockReturnValue(true);
         vi.spyOn(console, 'log').mockImplementation(() => {});
         vi.spyOn(console, 'warn').mockImplementation(() => {});
         process.env.MASTRA_CHAT_ENABLED = 'true';
@@ -123,6 +130,41 @@ describe('WebSocketのMastra対話経路', () => {
             event: 'memo-action',
             data: { action: 'add', memoId: 'memo-1', memo: { id: 'memo-1', content: '買い物' } }
         });
+    });
+
+    it('message_承認を拒否されたデータ変更は記録も実行もしないこと', async () => {
+        vi.mocked(requestToolApproval).mockResolvedValue(false);
+        serviceMocks.mastraGenerate.mockImplementation(async params => {
+            const result = await params.executeDataTool('manageMemos', { action: 'add', content: '試験' });
+            expect(JSON.parse(result)).toMatchObject({ success: false });
+            return '変更しませんでした。';
+        });
+        await sendChat(createPeer());
+        expect(claimMutation).not.toHaveBeenCalled();
+        expect(serviceMocks.executeMemos).not.toHaveBeenCalled();
+    });
+
+    it('message_試行済みの変更は承認後でも再実行しないこと', async () => {
+        vi.mocked(claimMutation).mockReturnValue(false);
+        serviceMocks.mastraGenerate.mockImplementation(async params => {
+            const result = await params.executeDataTool('manageTasks', { action: 'delete', id: 'task-1' });
+            expect(JSON.parse(result)).toMatchObject({ success: false });
+            return '結果を確認してください。';
+        });
+        await sendChat(createPeer());
+        expect(serviceMocks.executeTasks).not.toHaveBeenCalled();
+    });
+
+    it('message_ツール状態を入力や結果を含めずチャットへ通知すること', async () => {
+        serviceMocks.mastraGenerate.mockImplementation(async params => {
+            params.onToolStatus('searchWeb', 'started');
+            params.onToolStatus('searchWeb', 'failed');
+            return '検索できませんでした。';
+        });
+        const peer = createPeer();
+        await sendChat(peer);
+        expect(sentEvents(peer)).toContainEqual({ event: 'tool-status', data: { name: 'searchWeb', status: 'started' } });
+        expect(sentEvents(peer)).toContainEqual({ event: 'tool-status', data: { name: 'searchWeb', status: 'failed' } });
     });
 
     it('message_フラグ無効時と未対応エンジンでは既存経路を使うこと', async () => {

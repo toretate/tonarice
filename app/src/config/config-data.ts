@@ -104,6 +104,7 @@ export interface ConfigData {
     toolsVolume: boolean;
     toolsAppLauncher: boolean;
     toolsWebSearch: boolean;
+    toolApprovalSkipped?: string[];
 
     // 音声保存設定
     saveVoice: boolean;
@@ -216,6 +217,7 @@ export const defaultData: ConfigData = {
     toolsVolume: true,
     toolsAppLauncher: true,
     toolsWebSearch: true,
+    toolApprovalSkipped: [],
     saveVoice: false,
     showVoiceLog: true,
     forgeEndpoint: 'http://127.0.0.1:5555',

@@ -2,6 +2,7 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { manageTasksToolShared } from '../../utils/task-tools-shared';
 import { manageMemos } from '../../utils/memo-tools-shared';
+import { observeTool } from './tool-observation';
 
 const taskInputSchema = z.object({
     action: z.enum(['add', 'search', 'update', 'delete']).describe('操作種別'),
@@ -31,29 +32,37 @@ async function executeDataTool(
     name: 'manageTasks' | 'manageMemos',
     input: Record<string, unknown>,
     requestContext: {
-        get: (key: 'dataToolsEnabled' | 'executeDataTool' | 'onDataToolResult') => unknown;
+        get: (key: 'dataToolsEnabled' | 'executeDataTool' | 'onDataToolResult' | 'onToolStatus') => unknown;
     }
 ): Promise<unknown> {
     const execute = requestContext.get('executeDataTool');
     if (requestContext.get('dataToolsEnabled') !== true || typeof execute !== 'function') {
         return { success: false, error: 'データ管理ツールは利用できません。' };
     }
-    console.info(`[MastraTool] ${name}の実行を開始`);
+    const action = ['add', 'search', 'update', 'delete'].includes(String(input.action)) ? String(input.action) : 'unknown';
+    console.info(`[MastraTool] ${name}の実行を開始 (操作: ${action})`);
     try {
-        const output = await execute(name, input);
-        const parsed = JSON.parse(output);
+        const parsed = await observeTool(requestContext, name, async () => {
+            const output = await execute(name, input);
+            return JSON.parse(output) as Record<string, unknown>;
+        }, result => result.success !== true, input);
         const notify = requestContext.get('onDataToolResult');
         if (parsed?.success === true && typeof notify === 'function') {
             try {
-                notify(name, input, output);
+                notify(name, input, JSON.stringify(parsed));
             } catch {
                 console.warn(`[MastraTool] ${name}の画面同期に失敗`);
             }
         }
-        console.info(`[MastraTool] ${name}の実行が完了`);
+        if (parsed.success === true) {
+            const count = action === 'search' && Number.isSafeInteger(parsed.count) && Number(parsed.count) >= 0 ? `, 検索結果: ${parsed.count}件` : '';
+            console.info(`[MastraTool] ${name}の実行に成功 (操作: ${action}${count})`);
+        } else {
+            console.warn(`[MastraTool] ${name}の実行に失敗 (操作: ${action})`);
+        }
         return parsed;
     } catch {
-        console.warn(`[MastraTool] ${name}の実行に失敗`);
+        console.warn(`[MastraTool] ${name}の実行に失敗 (操作: ${action})`);
         return { success: false, error: 'データ操作に失敗しました。' };
     }
 }

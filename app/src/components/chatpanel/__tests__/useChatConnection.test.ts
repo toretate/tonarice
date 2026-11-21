@@ -51,6 +51,47 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
         global.WebSocket = originalWebSocket;
     });
 
+    it('toolApproval_今回のみ承認し設定を変更しないこと', async () => {
+        const store = useConfigStore();
+        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: vi.fn(), runCompaction: vi.fn(), scrollToBottom: vi.fn() });
+        connection.connectWebSocket();
+        mockWebSocket.readyState = 1;
+        await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '1', name: 'manageMemos', input: { action: 'add', content: 'テスト' } } }) });
+        expect(connection.pendingToolApproval.value?.name).toBe('manageMemos');
+        connection.respondToToolApproval('approve');
+        expect(JSON.parse(mockWebSocket.send.mock.calls.at(-1)[0])).toEqual({ event: 'tool-approval-response', data: { id: '1', approved: true } });
+        expect(store.toolApprovalSkipped).toEqual([]);
+    });
+
+    it('toolApproval_確認省略設定は対象ツールのみ承認すること', async () => {
+        const store = useConfigStore();
+        store.toolApprovalSkipped = ['manageMemos'];
+        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: vi.fn(), runCompaction: vi.fn(), scrollToBottom: vi.fn() });
+        connection.connectWebSocket();
+        mockWebSocket.readyState = 1;
+        await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '1', name: 'manageMemos', input: { action: 'add' } } }) });
+        expect(connection.pendingToolApproval.value).toBeNull();
+        expect(JSON.parse(mockWebSocket.send.mock.calls.at(-1)[0]).data.approved).toBe(true);
+        await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '2', name: 'manageTasks', input: { action: 'delete' } } }) });
+        expect(connection.pendingToolApproval.value?.name).toBe('manageTasks');
+        connection.respondToToolApproval('deny');
+        expect(JSON.parse(mockWebSocket.send.mock.calls.at(-1)[0]).data.approved).toBe(false);
+    });
+
+    it('toolApproval_今後確認しない選択を対象ツールに保存すること', async () => {
+        const store = useConfigStore();
+        store.isLoaded = true;
+        const saveConfig = vi.spyOn(store, 'saveConfig').mockResolvedValue(undefined);
+        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: vi.fn(), runCompaction: vi.fn(), scrollToBottom: vi.fn() });
+        connection.connectWebSocket();
+        mockWebSocket.readyState = 1;
+        await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '1', name: 'manageMemos', input: { action: 'add' } } }) });
+        connection.respondToToolApproval('remember');
+        expect(store.toolApprovalSkipped).toEqual(['manageMemos']);
+        expect(saveConfig).toHaveBeenCalledOnce();
+        expect(JSON.parse(mockWebSocket.send.mock.calls.at(-1)[0]).data.approved).toBe(true);
+    });
+
     it('WebSocketから task-action (addSchedule, categoryId: private) を受信した際、重複せず既存の private カテゴリにタスクが追加されること', async () => {
         const taskStore = useTaskStore();
         

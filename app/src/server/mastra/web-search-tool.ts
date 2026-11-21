@@ -1,5 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import { searchWeb, webSearchDescription, webSearchInputSchema } from '../../skills/tool-use/web-search-core';
+import { observeTool } from './tool-observation';
 
 /**
  * 既存の検索処理をMastra Agentへ公開する。
@@ -17,12 +18,12 @@ export const mastraWebSearchTool = createTool({
         }
         requestContext.set('webSearchUsed', true);
         console.info('[MastraTool] searchWebの実行を開始');
-        const result = await searchWeb(query, abortSignal);
+        const result = await observeTool(requestContext, 'searchWeb', () => searchWeb(query, abortSignal), result => typeof result === 'string', { query });
         if (typeof result === 'string') {
             console.warn('[MastraTool] searchWebの実行に失敗');
             return { error: result };
         }
-        console.info('[MastraTool] searchWebの実行が完了');
+        console.info(`[MastraTool] searchWebの実行に成功 (検索結果: ${result.length}件)`);
         return { results: result };
     }
 });

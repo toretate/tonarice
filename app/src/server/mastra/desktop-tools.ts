@@ -2,6 +2,7 @@ import { createTool } from '@mastra/core/tools';
 import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import { volumeTool } from '../../skills/tool-use/volume-tool';
+import { observeTool } from './tool-observation';
 
 export const mastraVolumeTool = createTool({
     id: 'adjustVolume',
@@ -12,6 +13,11 @@ export const mastraVolumeTool = createTool({
         if (requestContext.get('volumeUsed') === true) return { error: 'この発話では音量を調整済みです。' };
         requestContext.set('volumeUsed', true);
         console.info('[MastraTool] adjustVolumeの実行を開始');
+        return observeTool(requestContext, 'adjustVolume', async () => {
+        const authorize = requestContext.get('authorizeSideEffect');
+        if (typeof authorize !== 'function') return { error: '操作確認を利用できないため音量を変更しませんでした。' };
+        const refusal = await authorize('adjustVolume', { volume });
+        if (refusal) return { error: refusal };
         const result = await volumeTool.implementation({ volume }, {} as never);
         if (result.includes('失敗')) {
             console.warn('[MastraTool] adjustVolumeの実行に失敗');
@@ -19,6 +25,7 @@ export const mastraVolumeTool = createTool({
         }
         console.info('[MastraTool] adjustVolumeの実行が完了');
         return { message: result };
+        }, result => 'error' in result, { volume });
     }
 });
 
@@ -42,6 +49,11 @@ export const mastraAppLauncherTool = createTool({
         if (process.platform !== 'win32') return { error: 'この環境ではアプリを起動できません。' };
         requestContext.set('appLauncherUsed', true);
         console.info('[MastraTool] launchAppの実行を開始');
+        return observeTool(requestContext, 'launchApp', async () => {
+        const authorize = requestContext.get('authorizeSideEffect');
+        if (typeof authorize !== 'function') return { error: '操作確認を利用できないためアプリを起動しませんでした。' };
+        const refusal = await authorize('launchApp', { appName });
+        if (refusal) return { error: refusal };
         try {
             await new Promise<void>((resolve, reject) => {
                 const child = spawn(allowedApps[appName], [], {
@@ -61,5 +73,6 @@ export const mastraAppLauncherTool = createTool({
             console.warn('[MastraTool] launchAppの実行に失敗');
             return { error: `アプリケーション「${appName}」の起動に失敗しました。` };
         }
+        }, result => 'error' in result, { appName });
     }
 });

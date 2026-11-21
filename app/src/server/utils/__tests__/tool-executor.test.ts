@@ -28,6 +28,7 @@ describe('tool-executor.ts のテスト', () => {
         ]);
 
         const resultStr = await executeTasksTool('user_1', { action: 'search', query: 'テスト' });
+        expect(JSON.parse(resultStr).count).toBe(1);
         const result = JSON.parse(resultStr);
 
         expect(result.success).toBe(true);
@@ -51,6 +52,7 @@ describe('tool-executor.ts のテスト', () => {
         ]);
 
         const resultStr = await executeMemosTool('user_1', { action: 'search', query: 'テスト' });
+        expect(JSON.parse(resultStr).count).toBe(1);
         const result = JSON.parse(resultStr);
 
         expect(result.success).toBe(true);

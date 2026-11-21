@@ -1,4 +1,5 @@
 import { RequestContext } from '@mastra/core/request-context';
+import type { ToolStatusCallback } from './tool-observation';
 
 export interface MascotAgentRequestContextValues {
     resolvedModel: unknown;
@@ -15,6 +16,8 @@ export interface MascotAgentRequestContextValues {
     appLauncherEnabled: boolean;
     appLauncherUsed: boolean;
     dataToolsEnabled: boolean;
+    onToolStatus?: ToolStatusCallback;
+    authorizeSideEffect?: (name: string, input: Record<string, unknown>) => Promise<string | null>;
     executeDataTool?: (name: 'manageTasks' | 'manageMemos', input: Record<string, unknown>) => Promise<string>;
     onDataToolResult?: (name: 'manageTasks' | 'manageMemos', input: Record<string, unknown>, output: string) => void;
 }
@@ -30,6 +33,8 @@ export interface CreateMascotRequestContextParams {
     appLauncherEnabled?: boolean;
     executeDataTool?: MascotAgentRequestContextValues['executeDataTool'];
     onDataToolResult?: MascotAgentRequestContextValues['onDataToolResult'];
+    onToolStatus?: ToolStatusCallback;
+    authorizeSideEffect?: MascotAgentRequestContextValues['authorizeSideEffect'];
 }
 
 /**
@@ -54,6 +59,8 @@ export function createMascotRequestContext(
         ['appLauncherEnabled', params.appLauncherEnabled === true],
         ['appLauncherUsed', false],
         ['dataToolsEnabled', typeof params.executeDataTool === 'function'],
+        ['onToolStatus', params.onToolStatus],
+        ['authorizeSideEffect', params.authorizeSideEffect],
         ['executeDataTool', params.executeDataTool],
         ['onDataToolResult', params.onDataToolResult]
     ]);
