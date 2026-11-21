@@ -5,6 +5,7 @@ import { filterDialogue } from '../utils/dialogue-filter';
 import { splitSentences } from '../utils/sentence-splitter';
 import { sanitizeForIrodoriTTS } from '../utils/irodori-sanitizer';
 import type { Base64AudioPayload } from '../../types/audio';
+import { fetchIrodoriLoras } from '../utils/irodori-loras';
 
 export default defineEventHandler(async (event) => {
     const body = await readBody(event);
@@ -49,25 +50,7 @@ export default defineEventHandler(async (event) => {
         }
 
         if (action === 'getIrodoriLoras') {
-            const defaultEndpoint = 'http://127.0.0.1:8088';
-            const apiBase = endpoint || defaultEndpoint;
-            const url = apiBase.endsWith('/') ? `${apiBase}v1/audio/loras` : `${apiBase}/v1/audio/loras`;
-
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-            const response = await fetch(url, {
-                method: 'GET',
-                signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const data = await response.json();
-            return {
-                success: true,
-                loras: data.data || []
-            };
+            return fetchIrodoriLoras(endpoint);
         }
 
         if (action === 'getVoicevoxSpeakers') {

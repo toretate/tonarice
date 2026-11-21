@@ -6,6 +6,35 @@ import { claimMutation } from '../mutation-claim';
 import { requestToolApproval, respondToolApproval } from '../tool-approval';
 
 describe('ツール操作の安全性', () => {
+    it('requestToolApproval_別の操作を直列表示し待機中は承認期限を消費しないこと', async () => {
+        vi.useFakeTimers();
+        try {
+            const peer = { send: vi.fn() };
+            const signal = new AbortController().signal;
+            const first = requestToolApproval(peer, 'manageMemos', { action: 'add', content: 'A' }, signal);
+            const second = requestToolApproval(peer, 'manageMemos', { action: 'add', content: 'B' }, signal);
+            const requests = () => peer.send.mock.calls.map(([value]) => JSON.parse(value)).filter(event => event.event === 'tool-approval-request');
+            expect(requests()).toHaveLength(1);
+            await vi.advanceTimersByTimeAsync(40000);
+            respondToolApproval(peer, requests()[0].data.id, true);
+            expect(await first).toBe(true);
+            expect(requests()).toHaveLength(2);
+            await vi.advanceTimersByTimeAsync(40000);
+            respondToolApproval(peer, requests()[1].data.id, true);
+            expect(await second).toBe(true);
+            expect(vi.getTimerCount()).toBe(0);
+        } finally { vi.useRealTimers(); }
+    });
+
+    it('requestToolApproval_切断時は表示中と待機中を両方拒否すること', async () => {
+        const peer = { send: vi.fn() };
+        const controller = new AbortController();
+        const first = requestToolApproval(peer, 'manageTasks', { action: 'add', title: 'A' }, controller.signal);
+        const second = requestToolApproval(peer, 'manageTasks', { action: 'add', title: 'B' }, controller.signal);
+        controller.abort();
+        expect(await Promise.all([first, second])).toEqual([false, false]);
+        expect(peer.send.mock.calls.filter(([value]) => JSON.parse(value).event === 'tool-approval-request')).toHaveLength(1);
+    });
     it('requestToolApproval_同じ接続の承認のみ受け付けること', async () => {
         const peer = { send: vi.fn() };
         const other = { send: vi.fn() };

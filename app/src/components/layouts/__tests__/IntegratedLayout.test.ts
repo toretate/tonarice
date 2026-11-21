@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { mount } from '@vue/test-utils';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import IntegratedLayout from '../IntegratedLayout.vue';
 import MascotViewer from '../../MascotViewer.vue';
@@ -35,6 +35,7 @@ vi.mock('pixi.js', () => {
 describe('IntegratedLayout.vue - 統合ウィンドウのテスト', () => {
     beforeEach(() => {
         setActivePinia(createPinia());
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ enabled: true, sessions: [] }) }));
         
         // window.electronAPI のモック
         window.electronAPI = {
@@ -55,6 +56,26 @@ describe('IntegratedLayout.vue - 統合ウィンドウのテスト', () => {
             onScheduledPromptChanged: vi.fn().mockReturnValue(() => {}),
             getChatHistory: vi.fn().mockResolvedValue(null),
         } as any;
+    });
+
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('loadHistory_履歴取得失敗時の再試行ボタンから復帰すること', async () => {
+        const configStore = useConfigStore();
+        configStore.isLoaded = true;
+        configStore.windowMode = 'integrated';
+        let historyAvailable = false;
+        vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url) => ({
+            ok: !String(url).startsWith('/api/mastra-history') || historyAvailable,
+            json: async () => ({ enabled: true, sessions: [] })
+        })));
+        const wrapper = mount(IntegratedLayout);
+        await vi.waitFor(() => expect(wrapper.find('.history-error').exists()).toBe(true));
+        expect(wrapper.get('.history-error').attributes('role')).toBe('alert');
+        historyAvailable = true;
+        await wrapper.get('.history-error button').trigger('click');
+        await vi.waitFor(() => expect(wrapper.find('.history-error').exists()).toBe(false));
+        wrapper.unmount();
     });
 
     it('統合ウィンドウモードでマスコットをドラッグすると、ウィンドウは移動せずマスコットの比率位置が更新・保存されること', async () => {

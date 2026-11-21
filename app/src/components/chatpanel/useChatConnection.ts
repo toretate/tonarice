@@ -14,6 +14,7 @@ import { decodeAudioBinaryFrame } from '../../utils/audio-binary-frame';
 import { normalizeIrodoriSpeed } from '../../utils/irodori-tts-settings';
 import { isLmStudioToolUseEnabled } from '../../utils/lmstudio-tool-settings';
 import { toolApprovalLabels, type ToolApprovalRequest } from './tool-approval-display';
+import { createChatSessionTitle } from '../../utils/chat-session-title';
 
 export function useChatConnection(params: {
     messages: Ref<Message[]>;
@@ -90,6 +91,7 @@ export function useChatConnection(params: {
     let waitingForConnection = false;
     let pendingUserMessageId: number | null = null;
     let pendingAssistantMessageId: number | null = null;
+    let pendingMessages: Message[] | null = null;
     const pendingToolApproval = ref<ToolApprovalRequest | null>(null);
     let approvalTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -111,8 +113,9 @@ export function useChatConnection(params: {
 
     // 現在の送信に対応するAI応答バブルを更新する
     const updatePendingMascotMessage = (text: string) => {
+        const targetMessages = pendingMessages || messages.value;
         if (pendingAssistantMessageId !== null) {
-            const pendingMessage = messages.value.find(message => message.id === pendingAssistantMessageId);
+            const pendingMessage = targetMessages.find(message => message.id === pendingAssistantMessageId);
             if (pendingMessage) {
                 pendingMessage.text = text;
                 pendingMessage.timestamp = Date.now();
@@ -131,7 +134,7 @@ export function useChatConnection(params: {
 
     const completePendingMessage = async () => {
         if (pendingUserMessageId !== null) {
-            const userMessage = messages.value.find(message => message.id === pendingUserMessageId);
+            const userMessage = (pendingMessages || messages.value).find(message => message.id === pendingUserMessageId);
             if (userMessage) {
                 userMessage.deliveryStatus = undefined;
                 userMessage.deliveryError = undefined;
@@ -139,6 +142,7 @@ export function useChatConnection(params: {
         }
         pendingUserMessageId = null;
         pendingAssistantMessageId = null;
+        pendingMessages = null;
         await saveHistory();
     };
 
@@ -147,7 +151,7 @@ export function useChatConnection(params: {
             return;
         }
         if (pendingUserMessageId !== null) {
-            const userMessage = messages.value.find(message => message.id === pendingUserMessageId);
+            const userMessage = (pendingMessages || messages.value).find(message => message.id === pendingUserMessageId);
             if (userMessage) {
                 userMessage.deliveryStatus = 'failed';
                 userMessage.deliveryError = errorMessage;
@@ -156,6 +160,7 @@ export function useChatConnection(params: {
         updatePendingMascotMessage(`接続エラー: ${errorMessage}`);
         pendingUserMessageId = null;
         pendingAssistantMessageId = null;
+        pendingMessages = null;
         mascotStore.setLoading(false);
         mascotStore.setSpeaking(false);
         await saveHistory();
@@ -287,6 +292,12 @@ export function useChatConnection(params: {
                             : data.name === 'manageTasks' ? taskStore.tasks.find(item => item.id === targetId)?.title : undefined;
                         pendingToolApproval.value = { id: data.id, name: data.name, input: data.input, targetLabel };
                         approvalTimer = setTimeout(() => respondToToolApproval('deny'), 40000);
+                    }
+                } else if (wsEvent === 'tool-approval-finished') {
+                    if (pendingToolApproval.value?.id === data?.id) {
+                        pendingToolApproval.value = null;
+                        if (approvalTimer) clearTimeout(approvalTimer);
+                        approvalTimer = null;
                     }
                 } else if (wsEvent === 'tool-status') {
                     const names: Record<string, string> = { searchWeb: 'Web検索', getWeather: '天気の取得', getGPSLocation: '位置情報の取得', adjustVolume: '音量調整', launchApp: 'アプリ起動', manageTasks: 'タスク操作', manageMemos: 'メモ操作' };
@@ -442,8 +453,12 @@ export function useChatConnection(params: {
             clearTimeout(reconnectTimer);
             reconnectTimer = null;
         }
+        respondToToolApproval('deny');
         const currentSocket = socket;
         socket = null;
+        if (pendingUserMessageId !== null || pendingAssistantMessageId !== null) {
+            void failPendingMessage('WebSocket接続を終了しました。');
+        }
         settleSocketReady?.(false);
         if (currentSocket) {
             try {
@@ -486,11 +501,14 @@ export function useChatConnection(params: {
     const sendMessage = async (isActiveTalk: boolean = false, retryMessageId?: number) => {
         if (params.isHistoryLoaded && !params.isHistoryLoaded.value) return;
         const sentSessionId = activeSessionId.value;
-        const sentMascotId = activeMascot.value?.id || 'default';
+        const sentMascot = activeMascot.value;
+        const sentMascotId = sentMascot?.id || 'default';
+        const sentMessages = messages.value;
+        const sentSession = sessions.value.find(session => session.id === sentSessionId);
         const shouldPersist = params.usesMastraHistory?.value && !mascotStore.isSecretMode && !isActiveTalk;
         if (shouldPersist && !sentSessionId) return;
         const retryTarget = retryMessageId !== undefined
-            ? messages.value.find(message => message.id === retryMessageId && message.sender === 'user')
+            ? sentMessages.find(message => message.id === retryMessageId && message.sender === 'user')
             : undefined;
         if (retryMessageId !== undefined && (!retryTarget || retryTarget.deliveryStatus !== 'failed')) return;
         if (!isActiveTalk && !retryTarget && !inputText.value.trim() && pendingAttachments.value.length === 0) return;
@@ -541,20 +559,20 @@ export function useChatConnection(params: {
                 userMessage.deliveryError = undefined;
             } else {
                 userMessage = {
-                    id: Date.now(),
+                    id: Math.max(Date.now(), (sentMessages.at(-1)?.id ?? 0) + 1),
                     sender: 'user',
                     text: userQuery,
                     timestamp: Date.now(),
                     attachments: attachments.length > 0 ? attachments : undefined,
                     deliveryStatus: 'sending'
                 };
-                messages.value.push(userMessage);
+                sentMessages.push(userMessage);
             }
         }
 
         const historyBase = isActiveTalk
-            ? messages.value
-            : messages.value.filter(message => message.id !== userMessage?.id && message.id !== userMessage?.responseMessageId);
+            ? sentMessages
+            : sentMessages.filter(message => message.id !== userMessage?.id && message.id !== userMessage?.responseMessageId);
         const historyToSend = historyBase
             .filter(m => (m.sender === 'user' && !m.deliveryStatus) || (m.sender === 'mascot' && m.text !== '考え中...' && !m.text.startsWith('接続に失敗しました') && !m.text.startsWith('サーバーに接続されていません') && !m.text.startsWith('接続エラー')))
             .slice(-10)
@@ -565,7 +583,7 @@ export function useChatConnection(params: {
         await nextTick();
         scrollToBottom();
 
-        const mascot = activeMascot.value;
+        const mascot = sentMascot;
         const engine = configStore.selectedEngine || mascot?.aiConfig?.chat?.engine || 'gemini';
 
         let apiKey = '';
@@ -664,24 +682,24 @@ export function useChatConnection(params: {
             systemPrompt += '\n\n# ツール利用制限\n今回はすべてのツールが無効です。タスクやメモの操作、検索などを実行したと装わず、利用できないことを伝えてください。一時的なタイマータグは引き続き利用できます。';
         }
 
-        const currentSession = sessions.value.find(s => s.id === activeSessionId.value);
+        const currentSession = sentSession;
         if (!params.usesMastraHistory?.value && currentSession && currentSession.summary) {
             systemPrompt += `\n\n# Previous Conversation Summary\n以下はこれまでのマスターとの会話履歴の要約です。この文脈を考慮して返答してください。\n${currentSession.summary}\n`;
         }
 
         let aiMessage = retryTarget?.responseMessageId !== undefined
-            ? messages.value.find(message => message.id === retryTarget.responseMessageId && message.sender === 'mascot')
+            ? sentMessages.find(message => message.id === retryTarget.responseMessageId && message.sender === 'mascot')
             : undefined;
         if (aiMessage) {
             aiMessage.text = '考え中...';
         } else {
             aiMessage = {
-                id: Date.now() + 1,
+                id: Math.max(Date.now() + 1, (userMessage?.id ?? 0) + 1),
                 sender: 'mascot',
                 text: '考え中...',
                 timestamp: Date.now()
             };
-            messages.value.push(aiMessage);
+            sentMessages.push(aiMessage);
         }
         const aiMessageId = aiMessage.id;
         if (userMessage) {
@@ -689,6 +707,16 @@ export function useChatConnection(params: {
             pendingUserMessageId = userMessage.id;
         }
         pendingAssistantMessageId = aiMessageId;
+        // 切り替え後も送信元のリアクティブなメッセージを更新する。
+        pendingMessages = sentMessages;
+        if (sentSession) {
+            sentSession.messages = [...sentMessages];
+            sentSession.timestamp = Date.now();
+            if (!sentSession.isSecret && sentSession.title === '新しい話題') {
+                const firstUserMessage = sentMessages.find(item => item.sender === 'user');
+                if (firstUserMessage) sentSession.title = createChatSessionTitle(firstUserMessage.text);
+            }
+        }
 
         await nextTick();
         scrollToBottom();
@@ -738,7 +766,7 @@ export function useChatConnection(params: {
                 saveVoice: saveVoice.value,
                 showVoiceLog: showVoiceLog.value,
                 activeMascotId: sentMascotId,
-                ttsDictionary: activeMascot.value?.aiConfig?.ttsDictionary,
+                ttsDictionary: sentMascot?.aiConfig?.ttsDictionary,
                 attachments: attachments.length > 0 ? attachments : undefined,
                 tools: {
                     toolsGpsLocation: toolsGpsLocation.value,

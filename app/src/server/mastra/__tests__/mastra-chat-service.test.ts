@@ -2,8 +2,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockModel } from '@mastra/core/test-utils/llm-mock';
 import { MastraChatService } from '../mastra-chat-service';
 import { resetMastraRuntimeForTest } from '../runtime';
+import { GenerationBudget } from '../generation-budget';
 
 describe('MastraChatService.generateResponseのテスト', () => {
+    it('generateResponse_中断後にAgentが空で終了しても代替文を正常応答として返さないこと', async () => {
+        const controller = new AbortController();
+        const budget = new GenerationBudget(controller.signal);
+        const model = createMockModel({ mockText: '未使用', version: 'v2' });
+        let finish!: () => void;
+        vi.spyOn(model as any, 'doGenerate').mockImplementation(async () => {
+            await new Promise<void>(resolve => { finish = resolve; });
+            return { content: [], finishReason: 'stop', usage: { inputTokens: 1, outputTokens: 0 }, warnings: [] };
+        });
+        const pending = MastraChatService.generateResponse({
+            message: '試験', systemPrompt: '', engine: 'lmstudio', modelId: 'test', resolvedModel: model, generationBudget: budget
+        });
+        const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+        await vi.waitFor(() => expect(finish).toBeDefined());
+        controller.abort();
+        finish();
+        await rejected;
+        budget.dispose();
+    });
     beforeEach(() => {
         resetMastraRuntimeForTest();
     });

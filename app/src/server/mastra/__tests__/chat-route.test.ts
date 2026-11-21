@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { getMastraChatErrorMessage } from '../chat-route';
 
 describe('getMastraChatErrorMessageのテスト', () => {
+    it('getMastraChatErrorMessage_入れ子のコンテキスト超過を認証情報を含まない案内に変換すること', () => {
+        const error: any = { cause: { responseBody: 'context_length_exceeded secret-api-key' } };
+        error.cause.lastError = error;
+        const message = getMastraChatErrorMessage(error, 'lmstudio');
+        expect(message).toContain('再ロード');
+        expect(message).not.toContain('secret-api-key');
+        expect(getMastraChatErrorMessage(error, 'openai')).toContain('新しい話題');
+    });
     it('getMastraChatErrorMessage_API応答本文と認証情報を表示しないこと', () => {
         const error = new Error('request failed sk-test-sensitive');
         const message = getMastraChatErrorMessage(error, 'openai');

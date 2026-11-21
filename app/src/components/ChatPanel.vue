@@ -227,6 +227,8 @@ const {
     showHistoryList,
     isHistoryLoaded,
     usesMastraHistory,
+    historyError,
+    isHistoryLoading,
     loadHistory,
     saveHistory,
     clearHistory,
@@ -745,6 +747,10 @@ onMounted(() => {
             <MemoWidget />
         </div>
         <template v-else-if="conversationKind === 'chat'">
+            <div v-if="historyError" class="history-error" role="alert">
+                <span>{{ historyError }}</span>
+                <button type="button" :disabled="isHistoryLoading || isAiResponding" @click="loadHistory">再試行</button>
+            </div>
             <!-- メッセージスクロール領域 -->
             <MessageList
                 v-if="!showHistoryList"
@@ -801,6 +807,14 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.history-error {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    color: var(--p-red-700, #b91c1c);
+}
+
 .chat-wrapper {
     position: relative;
     z-index: 1;

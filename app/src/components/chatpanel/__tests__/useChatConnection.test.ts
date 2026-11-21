@@ -63,6 +63,65 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
         expect(store.toolApprovalSkipped).toEqual([]);
     });
 
+    it('sendMessage_別の会話の表示中も送信元の応答と送信状態を更新すること', async () => {
+        const sourceMessages = ref<any[]>([]);
+        const sessions = ref<any[]>([{ id: 'source', title: '新しい話題', messages: [] }]);
+        const sourceSession = sessions.value[0];
+        const activeSessionId = ref('source');
+        const connection = useChatConnection({ messages: sourceMessages, activeSessionId, sessions,
+            inputText: ref('試験'), usesMastraHistory: ref(true), saveHistory: async () => {},
+            runCompaction: async () => {}, scrollToBottom: () => {} });
+        const pending = connection.sendMessage();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        mockWebSocket.readyState = 1;
+        mockWebSocket.onopen?.();
+        await pending;
+        const targetMessages = sourceMessages.value;
+        sourceMessages.value = [{ id: 1, sender: 'mascot', text: '別の会話' }];
+        activeSessionId.value = 'other';
+        await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'chat-response', data: { text: '元の会話への回答', emotion: 'neutral' } }) });
+        expect(targetMessages.find(item => item.sender === 'user').deliveryStatus).toBeUndefined();
+        expect(sourceSession.messages.at(-1).text).toBe('元の会話への回答');
+        expect(sourceMessages.value[0].text).toBe('別の会話');
+        connection.disconnectWebSocket();
+    });
+
+    it('toolApproval_サーバーが承認を終了したら確認画面を閉じること', async () => {
+        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: async () => {}, runCompaction: async () => {}, scrollToBottom: () => {} });
+        connection.connectWebSocket();
+        mockWebSocket.readyState = 1;
+        await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '1', name: 'manageMemos', input: { action: 'add' } } }) });
+        await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-finished', data: { id: '1' } }) });
+        expect(connection.pendingToolApproval.value).toBeNull();
+        connection.disconnectWebSocket();
+    });
+
+    it('disconnectWebSocket_手動切断でも承認画面を閉じ拒否を返すこと', async () => {
+        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: async () => {}, runCompaction: async () => {}, scrollToBottom: () => {} });
+        connection.connectWebSocket();
+        mockWebSocket.readyState = 1;
+        await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '1', name: 'manageMemos', input: { action: 'add' } } }) });
+        connection.disconnectWebSocket();
+        expect(connection.pendingToolApproval.value).toBeNull();
+        expect(JSON.parse(mockWebSocket.send.mock.calls.at(-1)[0])).toEqual({ event: 'tool-approval-response', data: { id: '1', approved: false } });
+    });
+
+    it('sendMessage_時計が巻き戻っても発話と応答のIDを逆転させないこと', async () => {
+        const connection = useChatConnection({ messages: ref([{ id: 5000, sender: 'mascot' as const, text: '前の応答' }]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref('試験'), usesMastraHistory: ref(true), saveHistory: async () => {}, runCompaction: async () => {}, scrollToBottom: () => {} });
+        connection.connectWebSocket();
+        mockWebSocket.readyState = 1;
+        const clock = vi.spyOn(Date, 'now').mockReturnValue(1000);
+        try {
+            await connection.sendMessage();
+            const sent = JSON.parse(mockWebSocket.send.mock.calls.at(-1)[0]).data;
+            expect(sent.memoryUserMessageId).toBeGreaterThan(5000);
+            expect(sent.memoryAssistantMessageId).toBeGreaterThan(sent.memoryUserMessageId);
+        } finally {
+            clock.mockRestore();
+            connection.disconnectWebSocket();
+        }
+    });
+
     it('toolApproval_確認省略設定は対象ツールのみ承認すること', async () => {
         const store = useConfigStore();
         store.toolApprovalSkipped = ['manageMemos'];

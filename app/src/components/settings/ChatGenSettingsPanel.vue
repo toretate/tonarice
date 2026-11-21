@@ -135,8 +135,8 @@ const reloadError = ref('');
 let modelStatusRequest = 0;
 
 async function readLmStudioError(response: Response): Promise<string> {
-    const body = await response.json().catch(() => null) as { statusMessage?: string } | null;
-    return body?.statusMessage || `LM Studioへの要求に失敗しました (${response.status})。`;
+    const body = await response.json().catch(() => null) as { message?: string; statusMessage?: string } | null;
+    return body?.message || body?.statusMessage || `LM Studioへの要求に失敗しました (${response.status})。`;
 }
 
 async function fetchLmStudioModelStatus() {

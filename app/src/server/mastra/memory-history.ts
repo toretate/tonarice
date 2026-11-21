@@ -1,5 +1,6 @@
 import type { Memory } from '@mastra/memory';
 import { createMemoryIdentity } from './memory-store';
+import { createChatSessionTitle } from '../../utils/chat-session-title';
 
 export interface HistoryScope {
     userId: string;
@@ -34,7 +35,7 @@ export async function appendMemoryTurn(memory: Memory, scope: HistoryScope, turn
         const now = new Date();
         await memory.saveThread({ thread: {
             id: thread, resourceId: resource, createdAt: now, updatedAt: now,
-            title: turn.message.slice(0, 30) || '新しい話題', metadata: { sessionId: scope.sessionId }
+            title: createChatSessionTitle(turn.message), metadata: { sessionId: scope.sessionId }
         } });
     }
     const makeMessage = (id: number, role: 'user' | 'assistant', value: string) => ({

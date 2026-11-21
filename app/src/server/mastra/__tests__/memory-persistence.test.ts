@@ -22,6 +22,11 @@ describe('Mastra Memory の永続化検証', () => {
             const sessions = await listMemorySessions(memory, 'owner', 'mascot');
             expect(sessions).toMatchObject([{ id: 'session', messages: [{ id: 1000, sender: 'user', text: '合言葉', attachments: turn.attachments }, { id: 1001, sender: 'mascot', text: '了解' }] }]);
             expect(sessions[0].messages).toHaveLength(2);
+            await appendMemoryTurn(memory, { ...scope, sessionId: 'long-title' }, {
+                userId: 2000, assistantId: 2001, message: '12345678901234567890', reply: '了解'
+            });
+            expect((await listMemorySessions(memory, 'owner', 'mascot')).find(item => item.id === 'long-title')?.title).toBe('123456789012345...');
+            await deleteMemoryThread(memory, { ...scope, sessionId: 'long-title' });
             expect(await listMemorySessions(memory, 'other-user', 'mascot')).toEqual([]);
             expect(await listMemorySessions(memory, 'owner', 'other-mascot')).toEqual([]);
             expect(await deleteMemoryMessage(memory, scope, memoryMessageId(scope, 1000))).toBe(true);

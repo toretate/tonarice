@@ -18,6 +18,7 @@ import { getMastraChatErrorMessage } from '../mastra/chat-route';
 import { openChatMemoryTurn } from '../mastra/chat-memory-turn';
 import { requestToolApproval, respondToolApproval } from '../mastra/tool-approval';
 import { claimMutation } from '../mastra/mutation-claim';
+import { GenerationBudget } from '../mastra/generation-budget';
 
 
 // ユーザーごとの接続管理（crosswsのPeerオブジェクトをSetに保存）
@@ -269,6 +270,7 @@ export default defineWebSocketHandler({
 
                 let reply = '';
                 const mastraController = new AbortController();
+                const generationBudget = new GenerationBudget(mastraController.signal);
                 let releaseMemory: (() => void) | undefined;
                 registerMastraRequest(peer, mastraController);
                 try {
@@ -289,10 +291,10 @@ export default defineWebSocketHandler({
                         if (typeof turnId !== 'string' || turnId.length < 1 || turnId.length > 200) {
                             return '操作識別子がないため変更できません。画面を更新してください。';
                         }
-                        if (!await requestToolApproval(peer, name, input, mastraController.signal)) {
+                        if (!await generationBudget.waitForApproval(() => requestToolApproval(peer, name, input, generationBudget.signal))) {
                             return 'ユーザーが承認しなかったため操作しませんでした。';
                         }
-                        if (mastraController.signal.aborted) return '接続が終了したため操作しませんでした。';
+                        generationBudget.signal.throwIfAborted();
                         try {
                             if (!claimMutation(path.join(USERS_DIR, '.tool-mutation-claims'), getPeerUserId(peer), turnId, name, input)) {
                                 return '同じ発話の操作は既に試行されています。再実行せず結果を確認してください。';
@@ -336,13 +338,17 @@ export default defineWebSocketHandler({
                                 if (refusal) return JSON.stringify({ success: false, error: refusal });
                                 return executeDataToolForPeer(peer, name, input);
                             },
-                        onDataToolResult: (name, input, output) => notifyDataToolResult(peer, name, input, output),
-                        onToolStatus: (name, status) => {
-                            if (!mastraController.signal.aborted) peer.send(JSON.stringify({ event: 'tool-status', data: { name, status } }));
+                        onDataToolResult: (name, input, output) => {
+                            if (!generationBudget.signal.aborted) notifyDataToolResult(peer, name, input, output);
                         },
-                        abortSignal: mastraController.signal
+                        onToolStatus: (name, status) => {
+                            if (!generationBudget.signal.aborted) peer.send(JSON.stringify({ event: 'tool-status', data: { name, status } }));
+                        },
+                        abortSignal: generationBudget.signal,
+                        generationBudget
                     });
-                    if (memoryTurn.kind === 'persistent' && !mastraController.signal.aborted) {
+                    generationBudget.signal.throwIfAborted();
+                    if (memoryTurn.kind === 'persistent') {
                         await memoryTurn.save(message, reply.replace(/\[TIMER:.*?\]/gi, '').replace(/\[\w+\]/g, '').trim(), attachments);
                     }
                 } catch (aiError) {
@@ -354,6 +360,7 @@ export default defineWebSocketHandler({
                     }));
                     return;
                 } finally {
+                    generationBudget.dispose();
                     releaseMemory?.();
                     unregisterMastraRequest(peer, mastraController);
                 }
