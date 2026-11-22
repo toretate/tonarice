@@ -23,6 +23,25 @@ const isSaving = ref(false);
 const loadPrompts = async () => {
     if (!props.mascotId) return;
     try {
+        // サーバー側のユーザー別プロンプトを優先取得する。
+        const res = await fetch(`/api/mascots/cli-prompts?${new URLSearchParams({ mascotId: props.mascotId })}`, {
+            credentials: 'include'
+        });
+        if (res.ok) {
+            const json = await res.json();
+            if (json?.success && json.prompts) {
+                identity.value = json.prompts.identity || '';
+                soul.value = json.prompts.soul || '';
+                userPrompt.value = json.prompts.user || '';
+                agents.value = json.prompts.agents || '';
+                memory.value = json.prompts.memory || '';
+                return;
+            }
+        }
+    } catch (err) {
+        console.warn('サーバーからのプロンプト取得に失敗したためローカル IPC へフォールバックします:', err);
+    }
+    try {
         if (window.electronAPI) {
             const data = await window.electronAPI.getMascotPrompts(props.mascotId);
             identity.value = data.identity || '';
@@ -58,15 +77,35 @@ watch(
 const handleSave = async () => {
     if (!props.mascotId) return;
     isSaving.value = true;
+    const payload = {
+        identity: identity.value,
+        soul: soul.value,
+        user: userPrompt.value,
+        agents: agents.value,
+        memory: memory.value
+    };
     try {
-        if (window.electronAPI) {
-            const res = await window.electronAPI.saveMascotPrompts(props.mascotId, {
-                identity: identity.value,
-                soul: soul.value,
-                user: userPrompt.value,
-                agents: agents.value,
-                memory: memory.value
+        try {
+            const res = await fetch('/api/mascots/cli-prompts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ mascotId: props.mascotId, prompts: payload })
             });
+            if (res.ok) {
+                emit('save-done');
+                emit('close');
+                return;
+            }
+            if (res.status === 400 || res.status === 401 || res.status === 403 || res.status === 404) {
+                alert('保存に失敗しました: サーバーでプロンプトを保存できませんでした。');
+                return;
+            }
+        } catch (err) {
+            console.warn('サーバーへのプロンプト保存に失敗したためローカル IPC へフォールバックします:', err);
+        }
+        if (window.electronAPI) {
+            const res = await window.electronAPI.saveMascotPrompts(props.mascotId, payload);
             if (res.success) {
                 emit('save-done');
                 emit('close');

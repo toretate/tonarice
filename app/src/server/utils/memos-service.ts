@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { USERS_DIR } from './paths';
 import { safeWriteFileSync } from './fs-helpers';
+import { DataRevisionConflictError, normalizeRevision } from './revision-conflict';
 
 function getUserMemosPath(userId: string): string {
     return path.join(USERS_DIR, userId, 'memos.json');
@@ -13,18 +14,34 @@ export interface MemoData {
     pinned?: boolean;
 }
 
-export function loadMemosFromDb(userId: string) {
+export interface MemosDbState {
+    memos: any[];
+    revision: number;
+}
+
+export function loadMemosStateFromDb(userId: string): MemosDbState {
     const memosPath = getUserMemosPath(userId);
     if (!fs.existsSync(memosPath)) {
-        return [];
+        return { memos: [], revision: 0 };
     }
 
     const raw = fs.readFileSync(memosPath, 'utf8');
     const data = JSON.parse(raw);
-    return Array.isArray(data.memos) ? data.memos : [];
+    return {
+        memos: Array.isArray(data.memos) ? data.memos : [],
+        revision: normalizeRevision(data.revision)
+    };
 }
 
-export function saveMemosToDb(userId: string, memos: unknown[]) {
+export function loadMemosFromDb(userId: string) {
+    return loadMemosStateFromDb(userId).memos;
+}
+
+export function saveMemosToDb(
+    userId: string,
+    memos: unknown[],
+    options?: { baseRevision?: number }
+): { revision: number } {
     const memosPath = getUserMemosPath(userId);
     const userDir = path.dirname(memosPath);
 
@@ -32,7 +49,29 @@ export function saveMemosToDb(userId: string, memos: unknown[]) {
         fs.mkdirSync(userDir, { recursive: true });
     }
 
-    safeWriteFileSync(memosPath, JSON.stringify({ memos }, null, 4));
+    let currentState: MemosDbState = { memos: [], revision: 0 };
+    if (fs.existsSync(memosPath)) {
+        try {
+            currentState = loadMemosStateFromDb(userId);
+        } catch (e) {
+            console.error('[MemosDB] Failed to read memos.json:', e);
+        }
+    }
+
+    if (
+        options?.baseRevision !== undefined
+        && options.baseRevision !== currentState.revision
+    ) {
+        throw new DataRevisionConflictError(
+            'メモが他の操作で更新されています。最新状態を再読み込みしてください。',
+            currentState.revision,
+            { memos: currentState.memos, revision: currentState.revision }
+        );
+    }
+
+    const nextRevision = currentState.revision + 1;
+    safeWriteFileSync(memosPath, JSON.stringify({ memos, revision: nextRevision }, null, 4));
+    return { revision: nextRevision };
 }
 
 export function addMemoToDb(userId: string, payload: MemoData) {
@@ -43,14 +82,21 @@ export function addMemoToDb(userId: string, payload: MemoData) {
         fs.mkdirSync(userDir, { recursive: true });
     }
 
-    let data = {
-        memos: [] as any[]
+    let data: { memos: any[]; revision: number } = {
+        memos: [],
+        revision: 0
     };
 
     if (fs.existsSync(memosPath)) {
         try {
             const raw = fs.readFileSync(memosPath, 'utf8');
-            data = { ...data, ...JSON.parse(raw) };
+            const parsed = JSON.parse(raw);
+            data = {
+                ...data,
+                ...parsed,
+                memos: Array.isArray(parsed.memos) ? parsed.memos : [],
+                revision: normalizeRevision(parsed.revision)
+            };
         } catch (e) {
             console.error('[MemosDB] Failed to read memos.json:', e);
         }
@@ -68,7 +114,8 @@ export function addMemoToDb(userId: string, payload: MemoData) {
         console.log(`[MemosDB] Duplicate add ignored (idempotent): "${normalizedContent}"`);
         return {
             memo: duplicate,
-            duplicate: true
+            duplicate: true,
+            revision: data.revision
         };
     }
 
@@ -83,10 +130,12 @@ export function addMemoToDb(userId: string, payload: MemoData) {
     };
 
     data.memos.push(newMemo);
+    data.revision += 1;
     safeWriteFileSync(memosPath, JSON.stringify(data, null, 4));
 
     return {
-        memo: newMemo
+        memo: newMemo,
+        revision: data.revision
     };
 }
 
@@ -148,11 +197,13 @@ export function updateMemoInDb(
     if (updates.order !== undefined) memo.order = updates.order;
 
     memo.updatedAt = new Date().toISOString();
+    data.revision = normalizeRevision(data.revision) + 1;
 
     safeWriteFileSync(memosPath, JSON.stringify(data, null, 4));
 
     return {
-        memo
+        memo,
+        revision: data.revision
     };
 }
 
@@ -171,5 +222,7 @@ export function deleteMemoFromDb(userId: string, id: string) {
         throw new Error(`Memo with ID ${id} not found.`);
     }
 
+    data.revision = normalizeRevision(data.revision) + 1;
     safeWriteFileSync(memosPath, JSON.stringify(data, null, 4));
+    return { revision: data.revision };
 }

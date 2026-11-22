@@ -113,7 +113,7 @@ npm run build
 
 ターミナルで続けて会話する場合は `npm run cli` を実行します。起動時に `app/.env.local` を読み込みます（Node.js 20.6 以降）。GUI のアクティブマスコットと設定を使用し、保存済みの最新会話を引き継ぎます。`/history` で会話を選択、`/clear` で新しい会話を開始、`/exit` で終了します。
 
-CLI の接続先となる開発サーバーが起動していない場合は、別のターミナルで `npm run dev:cli` を実行します。このコマンドも `.env.local` を読み込みます。別ワークスペースとポートを分けたい場合は `.env.local` などで `TONARICE_PORT`（または `PORT`）を指定すると、サーバー起動ポートと CLI の既定接続先が揃います。動作テスト時に実データへ影響を出さず一時的な隔離ストレージで起動したい場合は、`npm run dev:cli:isolated`（または `npm run dev:cli -- --isolated-storage`）を使用してください。
+CLI の接続先となる開発サーバーが起動していない場合は、別のターミナルで `npm run dev:cli` を実行します。このコマンドも `.env.local` を読み込みます。別ワークスペースとポートを分けたい場合は `.env.local` などで `TONARICE_PORT`（または `PORT`）を指定すると、サーバー起動ポートと CLI の既定接続先が揃います。動作テスト時に実データへ影響を出さず一時的な隔離ストレージで起動したい場合は、`TONARICE_PORT` または `--port` で空きポートを明示したうえで `npm run dev:cli:isolated`（または `npm run dev:cli -- --isolated-storage --port ポート番号`）を使用してください（指定ポートが使用中の場合は誤接続を防ぐため起動を中止します）。
 
 対話中の `/mascot` からマスコットの選択・作成・性格設定、`/model` から選択中マスコットのエンジン・モデル設定ができます。
 

@@ -81,9 +81,12 @@ Codex などの AI エージェントおよび開発者が、ターミナルか�
 
 動作テスト時に本番・開発用の共有データを変更しないため、`dev-nuxt.js` は隔離ストレージオプションを提供する。
 
+- **ポート明示の必須化と誤接続防止**:
+  - `--isolated-storage` 指定時は、ポート番号の明示指定（`--port <ポート>` / `-p <ポート>` または環境変数 `TONARICE_PORT` / `PORT`）を必須とする。未指定の場合は起動を拒否する。
+  - 起動前に指定ポートの空き状態を検証し、既に使用中の場合は別ポートへ自動移動せずエラー終了する（既存実サーバーへの CLI 誤接続を防止するため）。
 - `npm run dev:cli:isolated` または `npm run dev:cli -- --isolated-storage`
   - OS の一時ディレクトリ配下に一意のディレクトリ（`tonarice-isolated-storage-*`）を自動作成し、子プロセスの `MASCOT_STORAGE_DIR` を上書きして起動する。
-  - サーバー終了時（正常終了 / `SIGINT` / `SIGTERM`）に一時ディレクトリを自動削除する。
+  - `SIGINT` / `SIGTERM` 受信時は子サーバーのプロセスツリーを終了し、子プロセスの `close` 完了後に一時ディレクトリを自動削除する。
 - `npm run dev:cli -- --isolated-storage <dir>` または `--isolated-storage=<dir>`
   - 指定ディレクトリ（相対パスは `app/` 基準で解決）を作成し、`MASCOT_STORAGE_DIR` を上書きして起動する。検証後にデータを確認できるよう自動削除は行わない。
 - 隔離ストレージ指定時は、通常開発サーバー用の PID 追跡ファイル（`app/node_modules/.cache/tonarice/dev-nuxt.json`）を上書きしない。
@@ -207,11 +210,11 @@ npm run cli [-- --engine <engine> --model <id> --lmstudio-endpoint <url> --syste
 
 - 最初の送信前に GUI のアクティブマスコット ID を参照し、見つからなければ一覧の先頭を選択する（マスコット選択自体は CLI 内にのみ適用）。
 - 通常の対話では GUI と同様にグローバルのエンジン・モデルをマスコット固有設定より優先し、API キー、LM Studio 接続先、生成パラメーターを取得する。優先順位は「CLI 起動オプション / 環境変数 API キー ＞ CLI 内 `/model` 変更（選択中のみ） ＞ GUI グローバル設定 ＞ マスコット固有設定」。
-- マスコットのプロフィールおよびワークスペース内のプロンプトファイル（`/api/mascots/cli-prompts`）をシステムプロンプトへ組み込む。プロフィール・チャット設定は各マスコットの `config.yaml` に保存し、従来の `mascot_config.json` と互換読み込みを維持する。
+- マスコットのプロフィールおよび認証済みユーザーが所有するマスコットのプロンプトファイル（`/api/mascots/cli-prompts`）をシステムプロンプトへ組み込む。プロンプトはユーザー別保存先（`USERS_DIR/<userId>/mascots/<mascotId>/*.md`）を優先し、所有権（`mascot_config.json` の存在）がないマスコット ID は `404` で拒否する。複数ユーザー環境では共有の `APP_ROOT/mascots/` へフォールバックせず、単一ローカル開発バイパス（`ALLOW_AUTH_BYPASS=true` かつ `usr_local_dev_bypass`）かつ所有権確認済みの場合に限り未移行の `APP_ROOT/mascots/<mascotId>/*.md` を互換読み込みする。プロフィール・チャット設定は各マスコットの `config.yaml` に保存し、従来の `mascot_config.json` と互換読み込みを維持する。
 - GUI と同じ Mastra Memory を利用し、初期状態では最新の通常会話を選ぶ。生成成功時の発話はサーバーへ保存され、GUI 側で履歴を再読み込みすれば参照できる。
 - **非共有範囲**: GUI のブラウザー内ローカルストレージにのみ存在する「現在選択中の会話 ID」「ローカル専用プロンプト」「シークレット会話」は共有しない。
 - 対話モードでは TTS と AI ツールを無効とする。
-- `/memo`・`/todo` の変更はプライベート会話中でも通常データへ永続化され、同一ユーザーの接続中 GUI へ既存の同期イベントを配信する。
+- `/memo`・`/todo` の変更はプライベート会話中でも通常データへ永続化され、リビジョン番号を付与して同一ユーザーの接続中 GUI へ既存の同期イベントを配信する。GUI 側はサーバー起点の同期適用時に全件 POST を発生させず、リビジョン欠落または古い全件保存（`409 Conflict`）を検知した場合はサーバーの最新状態を再読込する。
 
 ## 6. サーバー連携経路
 
@@ -221,10 +224,11 @@ npm run cli [-- --engine <engine> --model <id> --lmstudio-endpoint <url> --syste
 | `GET /api/ping` | 疎通確認・Mastra 初期化状態取得 |
 | `GET /api/config` | アクティブマスコット ID・グローバル AI 設定・生成パラメーター取得 |
 | `GET /api/mascots` / `POST /api/mascots/cli` | マスコット一覧取得、作成、性格・モデル更新 |
-| `GET /api/mascots/cli-prompts` | ワークスペース内のマスコット用プロンプトファイル取得 |
+| `GET /api/mascots/cli-prompts` / `POST /api/mascots/cli-prompts` | 所有権検証付きのマスコット用プロンプトファイル取得・ユーザー別保存先への保存 |
 | `GET /api/mastra-history` | マスコット別の Mastra Memory 通常会話一覧取得 |
-| `GET /api/memos` / `GET /api/tasks` | メモ・タスク一覧取得 |
-| `POST /api/cli-data` | メモ・タスクの個別追加・更新・削除および同一ユーザー GUI への同期通知 (`user-connections.ts`) |
+| `GET /api/memos` / `GET /api/tasks` | メモ・タスク一覧および現在リビジョン取得 |
+| `POST /api/memos` / `POST /api/tasks` | メモ・タスク全体保存（`baseRevision` 必須。未指定は `400`、不一致は `409 Conflict`） |
+| `POST /api/cli-data` | メモ・タスクの個別追加・更新・削除およびリビジョン付き同一ユーザー GUI 同期通知 (`user-connections.ts`) |
 
 ## 7. 動作テスト時の利用ガイド（エージェント・開発者向け）
 

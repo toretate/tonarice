@@ -311,6 +311,22 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
         },
         getMascotPrompts: async (mascotId: string) => {
             try {
+                const res = await fetch(`/api/mascots/cli-prompts?${new URLSearchParams({ mascotId })}`, {
+                    credentials: 'include'
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data?.success && data.prompts) {
+                        const hasAnyServerPrompt = Object.values(data.prompts).some(v => typeof v === 'string' && v.length > 0);
+                        if (hasAnyServerPrompt) {
+                            return data.prompts;
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('[Polyfill] サーバーからのプロンプト取得に失敗したためローカルを参照します:', e);
+            }
+            try {
                 const promptStr = localStorage.getItem(`desktop_ai_mascot_prompts_${mascotId}`);
                 if (promptStr) {
                     return JSON.parse(promptStr);
@@ -321,6 +337,24 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
             return { soul: '', identity: '', user: '', agents: '', memory: '' };
         },
         saveMascotPrompts: async (mascotId: string, prompts: any) => {
+            try {
+                const res = await fetch('/api/mascots/cli-prompts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ mascotId, prompts })
+                });
+                if (res.ok) {
+                    try {
+                        localStorage.setItem(`desktop_ai_mascot_prompts_${mascotId}`, JSON.stringify(prompts));
+                    } catch {
+                        // キャッシュ保存失敗は無視する。
+                    }
+                    return { success: true };
+                }
+            } catch (e) {
+                console.warn('[Polyfill] サーバーへのプロンプト保存に失敗したためローカルへ退避します:', e);
+            }
             try {
                 localStorage.setItem(`desktop_ai_mascot_prompts_${mascotId}`, JSON.stringify(prompts));
                 return { success: true };

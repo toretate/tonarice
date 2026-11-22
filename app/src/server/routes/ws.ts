@@ -9,7 +9,7 @@ import { authenticateUserToken } from '../middleware/auth';
 import { normalizeTextForTts, stripResidualAsterisks } from '../utils/tts-normalizer';
 import { PROJECT_ROOT, USERS_DIR } from '../utils/paths';
 import { executeMemosTool, executeTasksTool } from '../utils/tool-executor';
-import { updateTaskInDb } from '../utils/tasks-service';
+import { loadTasksStateFromDb } from '../utils/tasks-service';
 import { isAuthBypassAllowed } from '../utils/auth-bypass';
 import { encodeAudioBinaryFrame } from '../../utils/audio-binary-frame';
 import { MastraChatService } from '../mastra/mastra-chat-service';
@@ -86,23 +86,43 @@ function notifyDataToolResult(
         if (name === 'manageMemos') {
             peer.send(JSON.stringify({
                 event: 'memo-action',
-                data: { action: input.action, memoId: result.id || input.id, memo: result.memo }
+                data: {
+                    action: input.action,
+                    memoId: result.id || input.id,
+                    memo: result.memo,
+                    ...(result.revision !== undefined ? { revision: result.revision } : {})
+                }
             }));
             return;
         }
         if (input.action === 'add' || input.action === 'update') {
-            // カテゴリの最新スナップショットを取得するため、無害な空更新でDBから再取得する。
-            const saved = updateTaskInDb(getPeerUserId(peer), result.id, {});
+            const state = Array.isArray(result.categories) && result.task
+                ? { categories: result.categories, task: result.task }
+                : (() => {
+                    const loaded = loadTasksStateFromDb(getPeerUserId(peer));
+                    return {
+                        categories: loaded.categories,
+                        task: result.task || loaded.tasks.find((t: any) => t.id === (result.id || input.id))
+                    };
+                })();
             peer.send(JSON.stringify({
                 event: 'task-action',
                 data: {
                     action: input.action === 'add' ? (input.scheduledAt ? 'addSchedule' : 'addTask') : 'updateTask',
-                    categories: saved.categories,
-                    task: saved.task
+                    categories: state.categories,
+                    task: state.task,
+                    ...(result.revision !== undefined ? { revision: result.revision } : {})
                 }
             }));
         } else if (input.action === 'delete') {
-            peer.send(JSON.stringify({ event: 'task-action', data: { action: 'deleteTask', taskId: input.id } }));
+            peer.send(JSON.stringify({
+                event: 'task-action',
+                data: {
+                    action: 'deleteTask',
+                    taskId: input.id,
+                    ...(result.revision !== undefined ? { revision: result.revision } : {})
+                }
+            }));
         }
     } catch {
         console.warn(`[WS] ${name}の画面同期に失敗`);

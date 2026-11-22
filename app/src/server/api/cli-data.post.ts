@@ -1,6 +1,6 @@
 import { createError, defineEventHandler, readBody } from 'h3';
 import { executeMemosTool, executeTasksTool } from '../utils/tool-executor';
-import { updateTaskInDb } from '../utils/tasks-service';
+import { loadTasksStateFromDb } from '../utils/tasks-service';
 import { broadcastToUser } from '../utils/user-connections';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -33,12 +33,28 @@ export default defineEventHandler(async event => {
         if (!parsed.success) throw new Error('operation failed');
         try {
             if (body.kind === 'memo') {
-                broadcastToUser(userId, 'memo-action', { action: body.action, memoId: parsed.id, memo: parsed.memo });
+                broadcastToUser(userId, 'memo-action', {
+                    action: body.action,
+                    memoId: parsed.id,
+                    memo: parsed.memo,
+                    revision: parsed.revision
+                });
             } else if (body.action === 'delete') {
-                broadcastToUser(userId, 'task-action', { action: 'deleteTask', taskId: parsed.id });
+                broadcastToUser(userId, 'task-action', {
+                    action: 'deleteTask',
+                    taskId: parsed.id,
+                    revision: parsed.revision
+                });
             } else {
-                const saved = updateTaskInDb(userId, parsed.id, {});
-                broadcastToUser(userId, 'task-action', { action: body.action === 'add' ? 'addTask' : 'updateTask', task: saved.task, categories: saved.categories });
+                const categories = Array.isArray(parsed.categories)
+                    ? parsed.categories
+                    : loadTasksStateFromDb(userId).categories;
+                broadcastToUser(userId, 'task-action', {
+                    action: body.action === 'add' ? 'addTask' : 'updateTask',
+                    task: parsed.task,
+                    categories,
+                    revision: parsed.revision
+                });
             }
         } catch { console.warn('[CLI] 画面同期に失敗しました。'); }
         return parsed;
