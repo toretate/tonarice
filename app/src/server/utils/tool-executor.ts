@@ -19,6 +19,7 @@ export interface MemosToolArgs {
     content?: string;
     id?: string;
     query?: string;
+    literalQuery?: boolean;
     color?: string;
     pinned?: boolean;
 }
@@ -40,12 +41,18 @@ export async function executeMemosTool(userId: string, args: MemosToolArgs): Pro
             return JSON.stringify({ success: true, action: 'add', id: saved.memo.id, memo: saved.memo });
         }
         case 'search': {
-            const memos = searchMemosFromDb(userId, args.query);
-            return JSON.stringify({
-                success: true,
-                count: memos.length,
-                message: formatMemoSearchResults(memos)
-            });
+            const query = args.literalQuery ? args.query : args.query?.trim();
+            try {
+                const memos = searchMemosFromDb(userId, query, args.literalQuery);
+                return JSON.stringify({
+                    success: true,
+                    count: memos.length,
+                    message: formatMemoSearchResults(memos)
+                });
+            } catch (error) {
+                console.error('[MemosDB] メモの読み取りに失敗しました。', error instanceof Error ? error.name : 'UnknownError');
+                return JSON.stringify({ success: false, error: 'メモの読み取りに失敗しました。' });
+            }
         }
         case 'update': {
             if (!args.id) {

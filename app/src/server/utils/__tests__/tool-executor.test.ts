@@ -57,7 +57,7 @@ describe('tool-executor.ts のテスト', () => {
 
         expect(result.success).toBe(true);
         expect(result.message).toContain('[ID: memo_xyz]');
-        expect(memosService.searchMemosFromDb).toHaveBeenCalledWith('user_1', 'テスト');
+        expect(memosService.searchMemosFromDb).toHaveBeenCalledWith('user_1', 'テスト', undefined);
     });
 
     it('executeMemosTool - delete アクションで渡された ID が deleteMemoFromDb にそのまま渡ること', async () => {
