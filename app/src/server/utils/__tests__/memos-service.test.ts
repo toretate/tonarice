@@ -30,8 +30,7 @@ describe('memos-service', () => {
         });
     });
 
-    it('保存済みのメモ配列を返すこと', () => {
-        fsMocks.existsSync.mockReturnValue(true);
+    it('loadMemosFromDb 保存済みのメモ配列を返すこと', () => {
         fsMocks.readFileSync.mockReturnValue(JSON.stringify({
             memos: [{ id: 'memo-1', content: 'テスト' }]
         }));
@@ -58,6 +57,7 @@ describe('memos-service', () => {
         { args: { query: ' * ' }, count: 2 },
         { args: { query: '   ' }, count: 2 },
         { args: { query: 'meeting' }, count: 1 },
+        { args: { query: 'MEETING*' }, count: 1 },
         { args: { query: '*', literalQuery: true }, count: 1 },
         { args: { query: '該当なし' }, count: 0 }
     ])('executeMemosTool 検索条件 $args で $count 件を返すこと', async ({ args, count }) => {
@@ -89,10 +89,16 @@ describe('memos-service', () => {
     });
 
     it('executeMemosTool 読み取り権限がない場合は失敗を返すこと', async () => {
-        fsMocks.readFileSync.mockImplementationOnce(() => {
-            throw Object.assign(new Error('アクセス拒否'), { code: 'EACCES' });
-        });
-        expect(JSON.parse(await executeMemosTool('user-1', { action: 'search' })).success).toBe(false);
+        const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+            fsMocks.readFileSync.mockImplementationOnce(() => {
+                throw Object.assign(new Error('アクセス拒否: 非公開のパス'), { code: 'EACCES' });
+            });
+            expect(JSON.parse(await executeMemosTool('user-1', { action: 'search' })).success).toBe(false);
+            expect(errorLog).toHaveBeenCalledWith('[MemosDB] メモの読み取りに失敗しました。', 'Error (EACCES)');
+        } finally {
+            errorLog.mockRestore();
+        }
     });
 
     it.each([

@@ -50,7 +50,10 @@ export async function executeMemosTool(userId: string, args: MemosToolArgs): Pro
                     message: formatMemoSearchResults(memos)
                 });
             } catch (error) {
-                console.error('[MemosDB] メモの読み取りに失敗しました。', error instanceof Error ? error.name : 'UnknownError');
+                const code = (error as NodeJS.ErrnoException | null)?.code;
+                const name = error instanceof Error ? error.name : 'UnknownError';
+                const diagnostic = typeof code === 'string' && /^E[A-Z0-9]+$/.test(code) ? `${name} (${code})` : name;
+                console.error('[MemosDB] メモの読み取りに失敗しました。', diagnostic);
                 return JSON.stringify({ success: false, error: 'メモの読み取りに失敗しました。' });
             }
         }

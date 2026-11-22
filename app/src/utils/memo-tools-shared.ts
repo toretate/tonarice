@@ -1,7 +1,7 @@
 import { tool } from '@lmstudio/sdk';
 import { lmStudioZod as z } from './lmstudio-tool-schema';
 
-export const memoQueryDescription = 'search 時の本文の検索キーワード。* は改行を含む任意の0文字以上に一致する。例: 買い物* は前方一致、*買い物 は後方一致。全件取得では query を省略する。* を文字として探す場合は literalQuery を true にする。';
+export const memoQueryDescription = 'search 時の本文の検索キーワード。通常は部分一致。ワイルドカードの * を含む場合は本文全体と照合し、* は改行を含む任意の0文字以上に一致する。例: 買い物* は前方一致、*買い物*リスト* は本文中に買い物とリストをこの順で含む。全件取得では query を省略する。* を文字として探す場合は literalQuery を true にする。';
 export const memoLiteralQueryDescription = 'true の場合は query をそのまま本文の部分一致に使う。ユーザーが文字としての * を探す場合に指定する。';
 
 export const manageMemos = tool({

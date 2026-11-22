@@ -26,6 +26,16 @@ const memoInputSchema = z.object({
     pinned: z.boolean().optional().describe('ピン留め')
 });
 
+function describeMemoSearch(input: Record<string, unknown>): string {
+    const rawQuery = typeof input.query === 'string' ? input.query : '';
+    const literal = input.literalQuery === true;
+    const query = literal ? rawQuery : rawQuery.trim();
+    if (!query) return '省略または空欄';
+    if (literal) return 'リテラル';
+    if (query === '*') return '単独の *';
+    return query.includes('*') ? 'ワイルドカード' : 'キーワード';
+}
+
 /**
  * ユーザー別DBの実行関数はWebSocketの認証済み接続から注入する。
  */
@@ -41,9 +51,8 @@ async function executeDataTool(
         return { success: false, error: 'データ管理ツールは利用できません。' };
     }
     const action = ['add', 'search', 'update', 'delete'].includes(String(input.action)) ? String(input.action) : 'unknown';
-    const memoQuery = typeof input.query === 'string' ? input.query.trim() : '';
     const searchMode = name === 'manageMemos' && action === 'search'
-        ? `, 検索条件: ${input.literalQuery === true ? 'リテラル' : !memoQuery ? '省略または空欄' : memoQuery === '*' ? '単独の *' : memoQuery.includes('*') ? 'ワイルドカード' : 'キーワード'}`
+        ? `, 検索条件: ${describeMemoSearch(input)}`
         : '';
     console.info(`[MastraTool] ${name}の実行を開始 (操作: ${action}${searchMode})`);
     try {
