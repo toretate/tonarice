@@ -202,3 +202,7 @@ npm run build
 ## ライセンス
 
 このプロジェクトはMITライセンスの下で公開されています。主要な外部依存ライブラリのライセンスに関しては [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。
+
+## Mastra Studio
+
+`app/` で `npm run dev:mastra` を実行し、[Mastra Studio](http://127.0.0.1:4111) の **Tonarice Mascot Agent** を開きます。Gemini または LM Studio で対話を試せます。モデルの設定方法は [Mastra 統合仕様](docs/specs/MastraIntegration.spec.md#開発用-mastra-studio) を参照してください。

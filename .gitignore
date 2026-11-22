@@ -49,3 +49,6 @@ scratch/
 
 # Base Prompt
 prompts/radio/ex_*.md
+
+# Mastra Studio CLI
+.mastra/

@@ -1,4 +1,5 @@
 import { Agent } from '@mastra/core/agent';
+import { MASCOT_AGENT_ID, MASCOT_AGENT_PROFILE } from './mascot-agent-profile';
 import type { MascotAgentRequestContextValues } from './request-context';
 import { mastraWeatherTool } from './weather-tool';
 import { mastraWebSearchTool } from './web-search-tool';
@@ -10,7 +11,7 @@ type MascotTool = typeof mastraWeatherTool | typeof mastraWebSearchTool
     | typeof mastraLocationTool | typeof mastraTasksTool | typeof mastraMemosTool
     | typeof mastraVolumeTool | typeof mastraAppLauncherTool;
 
-export const MASCOT_AGENT_ID = 'mascot-agent';
+export { MASCOT_AGENT_ID } from './mascot-agent-profile';
 
 /**
  * マスコット用Agentを生成する。
@@ -23,9 +24,7 @@ export function createMascotAgent(): Agent<
     MascotAgentRequestContextValues
 > {
     return new Agent({
-        id: MASCOT_AGENT_ID,
-        name: 'Tonarice Mascot Agent',
-        instructions: 'あなたはデスクトップマスコットとしてユーザーと対話します。',
+        ...MASCOT_AGENT_PROFILE,
         model: ({ requestContext }) => {
             const resolvedModel = requestContext.get('resolvedModel');
             if (!resolvedModel) {

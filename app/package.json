@@ -6,6 +6,7 @@
     "scripts": {
         "dev": "node scripts/dev-nuxt.js",
         "dev:remote": "node scripts/dev-nuxt.js --host 0.0.0.0",
+        "dev:mastra": "mastra dev --dir src/server/mastra/studio",
         "dev:electron": "node scripts/dev-electron.js",
         "build": "tsup && nuxt build",
         "lint": "biome lint . --diagnostic-level=error",
@@ -62,6 +63,7 @@
         "electron-builder": "^26.18.0",
         "happy-dom": "^21.0.4",
         "jsdom": "^29.1.1",
+        "mastra": "1.39.0",
         "nuxt": "4.6.4",
         "patch-package": "^8.0.1",
         "playwright": "1.65.1",

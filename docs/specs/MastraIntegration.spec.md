@@ -30,7 +30,7 @@ MastraをAIエージェントのオーケストレーション基盤として段
 
 - MastraランタイムはNitroサーバープロセスだけに配置する。
 - ElectronメインプロセスにはMastraを生成しない。
-- 独立したMastraサーバーや追加の待受ポートを作成しない。
+- 通常起動・配布時は、独立したMastraサーバーや追加の待受ポートを作成しない。
 - Mastra関連コードは`app/src/server/mastra/`以下へ配置する。
 - MastraインスタンスとAgentは、最初に必要になった時点で一度だけ生成する。
 - Nitroの`/api/ping`はMastra機能の有効状態と初期化状態を返す。
@@ -136,3 +136,10 @@ MastraをAIエージェントのオーケストレーション基盤として段
 
 - 環境変数での切り戻しは廃止する。切り戻しが必要な場合は前のリリースを使用する。Mastra MemoryのDBは削除しない。
 - CoWorkの定期実行、要約、読み辞書などが利用する`ChatAiService`は残す。
+
+## 開発用 Mastra Studio
+
+- `app/` で `npm run dev:mastra` を実行し、ブラウザで http://127.0.0.1:4111 を開く。
+- 公式 CLI は Studio 専用のエントリーポイントを使い、マスコットエージェントの基本指示を試せる。既定モデルは Gemini の `gemini-3.5-flash-lite` で、送信には `GOOGLE_GENERATIVE_AI_API_KEY` が必要。
+- LM Studio を使う場合は、`MASTRA_STUDIO_LMSTUDIO_MODEL` にサーバーに読み込んだモデルの API 識別子を指定する。`MASTRA_STUDIO_LMSTUDIO_ENDPOINT` の既定値は `http://localhost:1234/v1`。
+- Studio はループバックにバインドし、通常チャットの認証情報、永続履歴、マスコットごとの指示、アプリのツールに接続しない。
