@@ -38,4 +38,10 @@ describe('CLIログイン', () => {
         await client.list();
         assert.equal(authorization, 'Bearer private-token');
     });
+
+    it('createMascotClient_読込の接続エラーと保存時の結果不明を区別する', async () => {
+        const client = createMascotClient({ url: 'http://localhost:3000', timeout: 100 }, { env: {}, fetch: async () => { throw new Error('offline'); } });
+        await assert.rejects(client.list(), error => error.message.includes('npm run dev:cli') && !error.message.includes('結果が不明'));
+        await assert.rejects(client.update({ action: 'create' }), error => error.message.includes('結果が不明'));
+    });
 });

@@ -6,10 +6,28 @@ export class CliError extends Error {
     }
 }
 
-export function parseArgs(args) {
+/**
+ * 環境変数から既定の接続先オリジンを解決する。
+ */
+export function resolveDefaultUrl(env = process.env) {
+    const explicitUrl = env?.TONARICE_CLI_URL?.trim();
+    if (explicitUrl) return parseOrigin(explicitUrl).origin;
+    const rawPort = (env?.TONARICE_PORT ?? env?.PORT ?? '').trim();
+    if (!rawPort) return 'http://localhost:3000';
+    if (!/^[0-9]+$/.test(rawPort)) {
+        throw new CliError('invalid_input', 'ポート番号の環境変数は 1〜65535 の整数で指定してください。', 2);
+    }
+    const port = Number(rawPort);
+    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+        throw new CliError('invalid_input', 'ポート番号の環境変数が範囲外です。', 2);
+    }
+    return `http://localhost:${port}`;
+}
+
+export function parseArgs(args, env = process.env) {
     const command = args[0] === 'ping' ? 'ping' : args[0] === 'chat' && args[1] === 'send' ? 'chat' : args[0] === 'chat' && args[1] === 'interactive' ? 'interactive' : '';
     if (!command) throw new CliError('invalid_input', '使い方: node cli/index.js ping | chat send | chat interactive', 2);
-    let url = 'http://127.0.0.1:3000';
+    let url = '';
     let timeout = command === 'ping' ? 5000 : 90000;
     const chatConfig = { engine: 'lmstudio' };
     const seen = new Set();
@@ -34,7 +52,8 @@ export function parseArgs(args) {
             if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 2147483647) throw new CliError('invalid_input', 'タイムアウトが範囲外です。', 2);
         }
     }
-    return { command, url, timeout, ...(command === 'interactive' ? { chatConfig } : {}) };
+    if (!url) url = resolveDefaultUrl(env);
+    return { command, url, timeout, ...(command === 'interactive' ? { chatConfig, explicit: [...seen] } : {}) };
 }
 
 export function parseOrigin(baseUrl) {

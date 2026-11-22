@@ -3,6 +3,11 @@ import { CliError, parseOrigin } from './main.js';
 
 const allowedFields = new Set(['message', 'engine', 'model', 'systemPrompt', 'lmstudioEndpoint', 'history', 'activeMascotId', 'memorySessionId', 'memoryUserMessageId', 'memoryAssistantMessageId', 'turnId', 'temperature', 'frequencyPenalty', 'repetitionPenalty', 'maxOutputTokens', 'enableThinking', 'enableTools', 'tools', 'approval']);
 
+export function resolveApiKey(engine, env, fallback = '') {
+    const providerKey = engine === 'openai' ? env.OPENAI_API_KEY : engine === 'gemini' ? env.GEMINI_API_KEY : '';
+    return env.TONARICE_AI_API_KEY || providerKey || fallback || '';
+}
+
 function canonical(value) {
     if (Array.isArray(value)) return value.map(canonical);
     if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]));
@@ -41,7 +46,7 @@ export function parseChatInput(text, env = process.env) {
         throw new CliError('invalid_input', 'メッセージ ID には会話 ID が必要です。', 2);
     }
     const { enableTools, approval, ...data } = input;
-    return { ...data, apiKey: env.TONARICE_AI_API_KEY || '', turnId: input.turnId || randomUUID(), toolUseEnabled: enableTools === true, tools: enableTools === true ? input.tools : {}, useTts: false };
+    return { ...data, apiKey: resolveApiKey(input.engine, env), turnId: input.turnId || randomUUID(), toolUseEnabled: enableTools === true, tools: enableTools === true ? input.tools : {}, useTts: false };
 }
 
 export async function chatSend(options, text, dependencies = {}) {

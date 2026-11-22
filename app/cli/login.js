@@ -19,7 +19,10 @@ export async function login(options, output, dependencies = {}) {
         let response;
         try {
             response = await fetcher(new URL(path, origin), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(options.timeout)]) : AbortSignal.timeout(options.timeout) });
-        } catch { throw new CliError('connection_error', 'ログインサーバーとの接続に失敗しました。', 4); }
+        } catch {
+            if (signal?.aborted) throw new CliError('cancelled', 'ログインを中断しました。', 130);
+            throw new CliError('connection_error', 'ログインサーバーとの接続に失敗しました。', 4);
+        }
         if (!response.ok) throw new CliError('auth_error', 'ログイン要求が拒否されたか期限切れです。', 3);
         try { return await response.json(); } catch { throw new CliError('invalid_response', 'ログイン応答の形式が不正です。', 6); }
     };

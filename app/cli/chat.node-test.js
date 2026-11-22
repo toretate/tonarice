@@ -56,6 +56,16 @@ describe('chat send', () => {
         assert.ok(payload.turnId);
     });
 
+    it('parseChatInput_エンジン別の環境変数を使い専用設定を優先する', () => {
+        const env = { OPENAI_API_KEY: 'openai-test', GEMINI_API_KEY: 'gemini-test', TONARICE_AI_API_KEY: 'override-test' };
+        const request = engine => JSON.stringify({ message: 'x', engine });
+        assert.equal(parseChatInput(request('openai'), env).apiKey, 'override-test');
+        delete env.TONARICE_AI_API_KEY;
+        assert.equal(parseChatInput(request('openai'), env).apiKey, 'openai-test');
+        assert.equal(parseChatInput(request('gemini'), env).apiKey, 'gemini-test');
+        assert.equal(parseChatInput(request('lmstudio'), env).apiKey, '');
+    });
+
     it('parseChatInput_不正な履歴識別子と余分な項目を拒否する', () => {
         assert.throws(() => parseChatInput(JSON.stringify({ message: 'x', engine: 'openai', memorySessionId: 'x' }), {}));
         assert.throws(() => parseChatInput(JSON.stringify({ message: 'x', engine: 'openai', apiKey: 'secret' }), {}));

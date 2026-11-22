@@ -18,11 +18,11 @@ import { getMastraChatErrorMessage } from '../mastra/chat-route';
 import { openChatMemoryTurn } from '../mastra/chat-memory-turn';
 import { requestToolApproval, respondToolApproval } from '../mastra/tool-approval';
 import { claimMutation } from '../mastra/mutation-claim';
+import { addUserConnection, removeUserConnection, broadcastToUser } from '../utils/user-connections';
 import { GenerationBudget } from '../mastra/generation-budget';
 
 
 // ユーザーごとの接続管理（crosswsのPeerオブジェクトをSetに保存）
-const userConnections = new Map<string, Set<any>>();
 const activeMastraRequests = new WeakMap<object, Set<AbortController>>();
 
 function registerMastraRequest(peer: object, controller: AbortController): void {
@@ -42,33 +42,6 @@ function abortMastraRequests(peer: object): void {
         controller.abort();
     }
     activeMastraRequests.delete(peer);
-}
-
-function addConnection(userId: string, peer: any) {
-    if (!userConnections.has(userId)) {
-        userConnections.set(userId, new Set());
-    }
-    userConnections.get(userId)!.add(peer);
-}
-
-function removeConnection(userId: string, peer: any) {
-    const conns = userConnections.get(userId);
-    if (conns) {
-        conns.delete(peer);
-        if (conns.size === 0) {
-            userConnections.delete(userId);
-        }
-    }
-}
-
-function broadcastToUser(userId: string, event: string, data: any) {
-    const conns = userConnections.get(userId);
-    if (conns) {
-        const payload = JSON.stringify({ event, data });
-        conns.forEach((peer) => {
-            peer.send(payload);
-        });
-    }
 }
 
 function getPeerUserId(peer: { context: Record<string, unknown> }): string {
@@ -190,7 +163,7 @@ export default defineWebSocketHandler({
 
         // コネクションの登録
         peer.context.userId = userId;
-        addConnection(userId, peer);
+        addUserConnection(userId, peer);
         console.log(`[WS] Client connected successfully (User: ${userId})`);
     },
 
@@ -489,6 +462,6 @@ export default defineWebSocketHandler({
         const userId = getPeerUserId(peer);
         abortMastraRequests(peer);
         console.log(`[WS] Client disconnected (User: ${userId}, Details: ${JSON.stringify(details)})`);
-        removeConnection(userId, peer);
+        removeUserConnection(userId, peer);
     }
 });
