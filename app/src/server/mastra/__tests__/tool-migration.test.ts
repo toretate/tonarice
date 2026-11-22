@@ -252,9 +252,13 @@ describe('Mastraツール移植のテスト', () => {
         expect(result).toEqual({ success: false, error: 'データ管理ツールは利用できません。' });
     });
 
-    it('execute_アプリ起動では任意コマンドを入力として受け付けないこと', () => {
-        expect(mastraAppLauncherTool.inputSchema.safeParse({ appName: 'calc && whoami' }).success).toBe(false);
-        expect(mastraAppLauncherTool.inputSchema.safeParse({ appName: '電卓' }).success).toBe(true);
+    it('execute_アプリ起動では任意コマンドを入力として受け付けないこと', async () => {
+        const schema = mastraAppLauncherTool.inputSchema;
+        if (!schema) throw new Error('アプリ起動ツールの入力スキーマがありません。');
+        const invalid = await schema['~standard'].validate({ appName: 'calc && whoami' });
+        const valid = await schema['~standard'].validate({ appName: '電卓' });
+        expect(invalid.issues).toBeDefined();
+        expect(valid.issues).toBeUndefined();
     });
 
     it('execute_音量調整が無効ならPCを操作しないこと', async () => {

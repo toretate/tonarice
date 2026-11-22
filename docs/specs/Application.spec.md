@@ -7,7 +7,8 @@
 
 ## 技術
 
-* Electron + Vite + Vue3 + TypeScript
+* デスクトップ実行環境は Electron 45 系。Web クライアントと API は Nuxt 4、Vue 3、Vite 8、TypeScript 6 を使用する。
+* 開発と Nuxt サーバーの実行には Node.js 24.22.3 以降の 24 LTS 系を使用する。
 * マスコット描画は WebGL を利用してアニメーション処理などができるようにする
 * Electron が利用できる環境では、マスコット画面の背景透過のため Electron ベースのアプリケーションとする
 * マスコットとチャットウィンドウは背景透過処理や、半透明処理を実装する

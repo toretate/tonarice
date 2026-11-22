@@ -28,6 +28,8 @@ export default defineNuxtConfig({
         appManifest: false,
     },
     ssr: false, // Electron クライアントで動かすために SSR はオフにする
+    dir: { public: 'src/public' },
+    serverDir: 'src/server',
     srcDir: 'src/', // 既存の src/ ディレクトリを Nuxt のルートにする
     devServer: {
         port: 3000,
@@ -46,6 +48,14 @@ export default defineNuxtConfig({
     tailwindcss: {
         exposeConfig: true,
         viewer: true
+    },
+
+    postcss: {
+        plugins: {
+            // Nuxt 4 の ESM 解決では Tailwind 3 のディレクトリ指定にファイル名が必要。
+            'tailwindcss/nesting': false,
+            'tailwindcss/nesting/index.js': {},
+        },
     },
 
     // ビルド設定とエイリアス
@@ -68,7 +78,7 @@ export default defineNuxtConfig({
 
     vite: {
         server: {
-            hmr: {
+            ws: {
                 protocol: 'ws',
             },
             fs: {

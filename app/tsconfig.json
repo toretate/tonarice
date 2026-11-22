@@ -3,7 +3,7 @@
         "target": "ESNext",
         "useDefineForClassFields": true,
         "module": "ESNext",
-        "moduleResolution": "Node",
+        "moduleResolution": "Bundler",
         "strict": true,
         "jsx": "preserve",
         "resolveJsonModule": true,
@@ -17,13 +17,13 @@
         "noEmit": true,
         "incremental": true,
         "tsBuildInfoFile": "./node_modules/.cache/typescript/vue.tsbuildinfo",
-        "baseUrl": ".",
+        "types": ["node"],
         "paths": {
             "@/*": [
-                "src/*"
+                "./src/*"
             ],
             "@prompt/*": [
-                "src/skills/tool-use/prompts/*"
+                "./src/skills/tool-use/prompts/*"
             ],
             "@tonarice/expression-alignment": [
                 "../packages/expression-alignment/src/index.ts"

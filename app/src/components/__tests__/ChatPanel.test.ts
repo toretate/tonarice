@@ -1,12 +1,21 @@
 // @vitest-environment happy-dom
-import { mount } from '@vue/test-utils';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { flushPromises, mount } from '@vue/test-utils';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import ChatPanel from '../ChatPanel.vue';
 
 describe('ChatPanel.vue - カスタムリサイズテスト', () => {
     beforeEach(() => {
         setActivePinia(createPinia());
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ enabled: false })
+        }));
+        vi.stubGlobal('WebSocket', class {
+            static readonly CONNECTING = 0;
+            readonly readyState = 0;
+            close = vi.fn();
+        });
         
         // window.electronAPI のモック
         window.electronAPI = {
@@ -15,11 +24,18 @@ describe('ChatPanel.vue - カスタムリサイズテスト', () => {
             onConfigUpdated: vi.fn().mockReturnValue(() => {}),
             onChatToggled: vi.fn().mockReturnValue(() => {}),
             onEmotionChanged: vi.fn().mockReturnValue(() => {}),
+            onScheduledPromptChanged: vi.fn().mockReturnValue(() => {}),
         } as any;
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
     });
 
     it('右端のハンドルをドラッグした際、メインプロセスへ正しい新規サイズが送信されること', async () => {
         const wrapper = mount(ChatPanel);
+        await flushPromises();
         
         // リサイズハンドルを取得
         const rightHandle = wrapper.find('.resize-handle.right');
@@ -54,5 +70,6 @@ describe('ChatPanel.vue - カスタムリサイズテスト', () => {
         // 3. ドラッグ終了 (mouseup)
         const upEvent = new MouseEvent('mouseup');
         document.dispatchEvent(upEvent);
+        wrapper.unmount();
     });
 });
