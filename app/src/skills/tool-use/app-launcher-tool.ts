@@ -1,5 +1,5 @@
 import { tool } from '@lmstudio/sdk';
-import { z } from 'zod';
+import { lmStudioZod as z } from '../../utils/lmstudio-tool-schema';
 import { exec } from 'child_process';
 
 export const appLauncherTool = tool({

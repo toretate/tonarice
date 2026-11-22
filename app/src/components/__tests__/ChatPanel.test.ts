@@ -1,26 +1,46 @@
 // @vitest-environment happy-dom
-import { mount } from '@vue/test-utils';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import ChatPanel from '../ChatPanel.vue';
 
 describe('ChatPanel.vue - カスタムリサイズテスト', () => {
+    let wrapper: VueWrapper | undefined;
+
     beforeEach(() => {
         setActivePinia(createPinia());
-        
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ enabled: false })
+        }));
+        vi.stubGlobal('WebSocket', class {
+            static readonly CONNECTING = 0;
+            readonly readyState = 0;
+            close = vi.fn();
+        });
+
         // window.electronAPI のモック
-        window.electronAPI = {
+        vi.stubGlobal('electronAPI', {
             resizeChatWindow: vi.fn(),
             getAppConfig: vi.fn().mockResolvedValue({ chatWidth: 350, chatHeight: 400 }),
             onConfigUpdated: vi.fn().mockReturnValue(() => {}),
             onChatToggled: vi.fn().mockReturnValue(() => {}),
             onEmotionChanged: vi.fn().mockReturnValue(() => {}),
-        } as any;
+            onScheduledPromptChanged: vi.fn().mockReturnValue(() => {}),
+        } satisfies Partial<NonNullable<Window['electronAPI']>>);
+    });
+
+    afterEach(() => {
+        wrapper?.unmount();
+        wrapper = undefined;
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
     });
 
     it('右端のハンドルをドラッグした際、メインプロセスへ正しい新規サイズが送信されること', async () => {
-        const wrapper = mount(ChatPanel);
-        
+        wrapper = mount(ChatPanel);
+        await flushPromises();
+
         // リサイズハンドルを取得
         const rightHandle = wrapper.find('.resize-handle.right');
         expect(rightHandle.exists()).toBe(true);

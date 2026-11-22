@@ -1,7 +1,7 @@
 import { describe, test, expect, vi } from 'vitest';
 import { convertLmStudioToolToVercel } from '../tool-adapter';
 import { tool } from '@lmstudio/sdk';
-import { z } from 'zod';
+import { lmStudioZod as z } from '../../../utils/lmstudio-tool-schema';
 import type { Tool } from '@lmstudio/sdk';
 
 describe('tool-adapter のテスト', () => {

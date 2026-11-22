@@ -1,5 +1,5 @@
 import { tool } from '@lmstudio/sdk';
-import { z } from 'zod';
+import { lmStudioZod as z } from './lmstudio-tool-schema';
 
 export const manageTasksToolShared = tool({
     name: 'manageTasks',

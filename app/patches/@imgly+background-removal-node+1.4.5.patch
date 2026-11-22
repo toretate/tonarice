@@ -1,0 +1,46 @@
+diff --git a/node_modules/@imgly/background-removal-node/dist/index.cjs b/node_modules/@imgly/background-removal-node/dist/index.cjs
+--- a/node_modules/@imgly/background-removal-node/dist/index.cjs
++++ b/node_modules/@imgly/background-removal-node/dist/index.cjs
+@@ -439,7 +439,7 @@
+   debug: import_zod.z.boolean().default(false).describe("Whether to enable debug logging."),
+   proxyToWorker: import_zod.z.boolean().default(true).describe("Whether to proxy inference to a web worker."),
+   fetchArgs: import_zod.z.any({}).default({}).describe("Arguments to pass to fetch when loading the model."),
+-  progress: import_zod.z.function().args(import_zod.z.string(), import_zod.z.number(), import_zod.z.number()).returns(import_zod.z.void()).describe("Progress callback.").optional(),
++  progress: import_zod.z.custom((value) => typeof value === "function").describe("Progress callback.").optional(),
+   model: import_zod.z.enum(["small", "medium", "large"]).default("medium"),
+   output: import_zod.z.object({
+     format: import_zod.z.enum([
+@@ -450,8 +450,8 @@
+       "image/x-alpha8"
+     ]).default("image/png"),
+     quality: import_zod.z.number().default(0.8)
+-  }).default({})
+-}).default({});
++  }).prefault({})
++}).prefault({});
+ function validateConfig(configuration) {
+   const config = ConfigSchema.parse(configuration ?? {});
+   if (config.debug)
+diff --git a/node_modules/@imgly/background-removal-node/dist/index.mjs b/node_modules/@imgly/background-removal-node/dist/index.mjs
+--- a/node_modules/@imgly/background-removal-node/dist/index.mjs
++++ b/node_modules/@imgly/background-removal-node/dist/index.mjs
+@@ -402,7 +402,7 @@
+   debug: z.boolean().default(false).describe("Whether to enable debug logging."),
+   proxyToWorker: z.boolean().default(true).describe("Whether to proxy inference to a web worker."),
+   fetchArgs: z.any({}).default({}).describe("Arguments to pass to fetch when loading the model."),
+-  progress: z.function().args(z.string(), z.number(), z.number()).returns(z.void()).describe("Progress callback.").optional(),
++  progress: z.custom((value) => typeof value === "function").describe("Progress callback.").optional(),
+   model: z.enum(["small", "medium", "large"]).default("medium"),
+   output: z.object({
+     format: z.enum([
+@@ -413,8 +413,8 @@
+       "image/x-alpha8"
+     ]).default("image/png"),
+     quality: z.number().default(0.8)
+-  }).default({})
+-}).default({});
++  }).prefault({})
++}).prefault({});
+ function validateConfig(configuration) {
+   const config = ConfigSchema.parse(configuration ?? {});
+   if (config.debug)

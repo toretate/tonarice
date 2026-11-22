@@ -54,7 +54,7 @@ tonarice/
 ## 動作要件
 
 - **OS**: Windows 11 (Electronまたはブラウザが動作する環境)
-- **Node.js**: 22.13.0 以降（Mastraの実行要件）
+- **Node.js**: 26.13.1 以降の 26 LTS 系（バージョンは `.node-version` を参照）
 - **Android版の開発**: Android Studio、JDK 17、Android SDK Platform 35（詳細は `android/README.md`）
 - **外部AIサービス**（任意）:
     - **対話 (LLM)**: [LM Studio](https://lmstudio.ai/) などのローカルLLMサーバー
@@ -70,7 +70,7 @@ tonarice/
 ```bash
 # アプリ本体 (クライアント + Nitro サーバー)
 cd app
-npm install
+npm ci
 
 # 表情アライメントライブラリ
 cd ../packages/expression-alignment
@@ -191,7 +191,7 @@ npm run build
 
 ## 技術仕様
 
-- **アプリケーションフレームワーク**: Nuxt 3 (Vite と Nitro サーバーを内包)
+- **アプリケーションフレームワーク**: Nuxt 4 (Vite と Nitro サーバーを内包)
 - **クライアントシェル**: Electron (Desktop版のみ)
 - **フロントエンド**: Vue 3, Tailwind CSS, Pixi.js (WebGL 描画), Pinia, TypeScript
 - **バックエンド**: Nitro サーバー (Nuxt 内蔵), WebSocket (`ws`)

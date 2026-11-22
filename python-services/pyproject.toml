@@ -7,7 +7,7 @@ dependencies = [
     "mediapipe>=0.10.35",
     "onnxruntime>=1.27.0",
     "opencv-python-headless>=4.13.0.92",
-    "pillow>=12.2.0",
+    "pillow>=13.0.0",
     "pytest>=9.0.3",
-    "rembg[cpu]>=2.0.76",
+    "rembg[cpu]>=2.0.82",
 ]
