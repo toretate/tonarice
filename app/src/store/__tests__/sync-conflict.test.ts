@@ -91,36 +91,40 @@ describe('メモ・タスクストアのサーバー起点同期と競合防止'
         expect(postCalls).toHaveLength(0);
     });
 
-    it('saveToLocalStorage_メモ保存が409競合を返した場合はサーバーの最新状態を再読込する', async () => {
+    it('saveToLocalStorage_保存途中の連続編集を次のリビジョンで保存する', async () => {
         const memoStore = useMemoStore();
-        fetchMock.mockResolvedValueOnce({
-            ok: true,
-            headers: new Headers({ 'content-type': 'application/json' }),
-            json: async () => ({ success: true, memos: [], revision: 1 })
-        });
+        fetchMock.mockResolvedValueOnce(Response.json({ success: true, memos: [], revision: 1 }));
         await memoStore.loadFromLocalStorage();
-        fetchMock.mockClear();
+        const first = Promise.withResolvers<Response>();
+        fetchMock.mockImplementationOnce(() => first.promise).mockResolvedValueOnce(Response.json({ revision: 3 }));
 
+        memoStore.addMemo('最初の編集');
+        await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+        memoStore.addMemo('次の編集');
+        await Promise.resolve();
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+
+        first.resolve(Response.json({ revision: 2 }));
+        await vi.waitFor(() => expect(memoStore.serverRevision).toBe(3));
+        const secondPost = JSON.parse(fetchMock.mock.calls[2][1].body);
+        expect(secondPost.baseRevision).toBe(2);
+        expect(secondPost.memos.map((memo: { content: string }) => memo.content)).toEqual(['最初の編集', '次の編集']);
+    });
+
+    it('saveToLocalStorage_409の後に最新メモと未保存の編集を両方保存する', async () => {
+        const memoStore = useMemoStore();
+        fetchMock.mockResolvedValueOnce(Response.json({ success: true, memos: [], revision: 1 }));
+        await memoStore.loadFromLocalStorage();
+        const newMemo = { id: 'cli_m', content: 'CLI最新メモ', order: 0, createdAt: '2026-11-22T00:00:00Z', updatedAt: '2026-11-22T00:00:00Z' };
         fetchMock
-            .mockResolvedValueOnce({ status: 409, ok: false })
-            .mockResolvedValueOnce({
-                ok: true,
-                headers: new Headers({ 'content-type': 'application/json' }),
-                json: async () => ({
-                    success: true,
-                    memos: [{ id: 'cli_m', content: 'CLI最新メモ', order: 0, createdAt: '2026-11-22T00:00:00Z', updatedAt: '2026-11-22T00:00:00Z' }],
-                    revision: 2
-                })
-            });
+            .mockResolvedValueOnce(Response.json({ data: { currentRevision: 2, memos: [newMemo] } }, { status: 409 }))
+            .mockResolvedValueOnce(Response.json({ revision: 3 }));
 
         memoStore.addMemo('ローカル編集中メモ');
-        await new Promise(resolve => setTimeout(resolve, 10));
-
-        const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
-        expect(postCall).toBeDefined();
-        expect(JSON.parse(postCall![1].body).baseRevision).toBe(1);
-        expect(memoStore.memos.map(m => m.id)).toEqual(['cli_m']);
-        expect(memoStore.serverRevision).toBe(2);
+        await vi.waitFor(() => expect(memoStore.serverRevision).toBe(3));
+        const retry = JSON.parse(fetchMock.mock.calls[2][1].body);
+        expect(retry.baseRevision).toBe(2);
+        expect(retry.memos.map((memo: { content: string }) => memo.content)).toEqual(['CLI最新メモ', 'ローカル編集中メモ']);
     });
 
     it('applyServerTaskAction_連続タスク更新と削除を受けてもサーバーへ全件POSTしない', async () => {

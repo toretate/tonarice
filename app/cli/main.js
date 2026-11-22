@@ -33,6 +33,10 @@ export function parseArgs(args, env = process.env) {
     const seen = new Set();
     for (let index = command === 'ping' ? 1 : 2; index < args.length; index++) {
         const option = args[index];
+        if (option === '--isolated' && !seen.has(option)) {
+            seen.add(option);
+            continue;
+        }
         const allowed = command === 'interactive' ? ['--url', '--timeout', '--engine', '--model', '--lmstudio-endpoint', '--system-prompt'] : ['--url', '--timeout'];
         if (!allowed.includes(option) || seen.has(option) || !args[index + 1] || args[index + 1].startsWith('--')) {
             throw new CliError('invalid_input', 'オプションが不正です。', 2);
@@ -52,8 +56,16 @@ export function parseArgs(args, env = process.env) {
             if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 2147483647) throw new CliError('invalid_input', 'タイムアウトが範囲外です。', 2);
         }
     }
+    const isolated = seen.has('--isolated');
+    if (isolated) {
+        if (!url) throw new CliError('invalid_input', '隔離テストには --url で接続先を指定してください。', 2);
+        const origin = parseOrigin(url);
+        if (!['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname) || !origin.port) {
+            throw new CliError('invalid_input', '隔離テストにはローカルの接続先と明示ポートが必要です。', 2);
+        }
+    }
     if (!url) url = resolveDefaultUrl(env);
-    return { command, url, timeout, ...(command === 'interactive' ? { chatConfig, explicit: [...seen] } : {}) };
+    return { command, url, timeout, ...(isolated ? { isolated } : {}), ...(command === 'interactive' ? { chatConfig, explicit: [...seen] } : {}) };
 }
 
 export function parseOrigin(baseUrl) {
@@ -71,7 +83,7 @@ export async function ping(baseUrl, timeoutMs, fetcher = fetch) {
     const url = parseOrigin(baseUrl);
     let response;
     try {
-        response = await fetcher(new URL('/api/ping', url), { signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
+        response = await fetcher(new URL('/api/ping', url), { signal: AbortSignal.timeout(timeoutMs), redirect: 'error', cache: 'no-store' });
     } catch (error) {
         if (error?.name === 'TimeoutError') throw new CliError('timeout', 'サーバーへの接続がタイムアウトしました。', 5);
         throw new CliError('connection_error', 'サーバーとの接続エラーが発生しました。', 4);
@@ -85,14 +97,21 @@ export async function ping(baseUrl, timeoutMs, fetcher = fetch) {
         throw new CliError('invalid_response', 'サーバーの応答を読み取れませんでした。', 6);
     }
     if (!data || data.success !== true || data.message !== 'pong') throw new CliError('invalid_response', 'サーバーの応答が ping の形式と一致しません。', 6);
-    return { message: data.message, timestamp: data.timestamp, mastra: data.mastra };
+    return { message: data.message, timestamp: data.timestamp, mastra: data.mastra, ...(typeof data.isolated === 'boolean' ? { isolated: data.isolated } : {}) };
+}
+
+export async function assertIsolatedServer(options, fetcher = fetch) {
+    const status = await ping(options.url, options.timeout, fetcher);
+    if (status.isolated !== true) throw new CliError('invalid_input', '接続先は隔離サーバーではありません。', 2);
+    return status;
 }
 
 export async function run(args, fetcher = fetch, input, chatSend) {
     try {
         const options = parseArgs(args);
+        const isolatedStatus = options.isolated ? await assertIsolatedServer(options, fetcher) : undefined;
         const result = options.command === 'ping'
-            ? await ping(options.url, options.timeout, fetcher)
+            ? isolatedStatus || await ping(options.url, options.timeout, fetcher)
             : await chatSend(options, input);
         return { exitCode: 0, output: { version: 1, ok: true, result } };
     } catch (error) {

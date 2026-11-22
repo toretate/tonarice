@@ -46,6 +46,7 @@ describe('CLI のマスコットプロンプトとアクセス制御', () => {
         const dir = createOwnedMascot('userA', 'm1');
         fs.writeFileSync(path.join(dir, 'soul.md'), '親切', 'utf8');
         const result = (handler as any)({ context: { user: { id: 'userA' } }, query: { mascotId: 'm1' } });
+        expect(result.configured).toBe(true);
         expect(result.prompts.soul).toBe('親切');
         expect(result.prompts.memory).toBe('');
         expect(fs.existsSync(path.join(dir, 'memory.md'))).toBe(false);
@@ -71,6 +72,7 @@ describe('CLI のマスコットプロンプトとアクセス制御', () => {
         fs.writeFileSync(path.join(legacyDir, 'memory.md'), '共有ディレクトリの記憶', 'utf8');
 
         const result = (handler as any)({ context: { user: { id: 'userB' } }, query: { mascotId: 'shared_id' } });
+        expect(result.configured).toBe(false);
         expect(result.prompts.user).toBe('');
         expect(result.prompts.memory).toBe('');
     });
@@ -123,6 +125,13 @@ describe('CLI のマスコットプロンプトとアクセス制御', () => {
 
         const loaded = (handler as any)({ context: { user: { id: 'userA' } }, query: { mascotId: 'm1' } });
         expect(loaded.prompts.memory).toBe('記憶');
+    });
+
+    it('handler_明示的に空で保存された設定を未移行扱いしない', async () => {
+        createOwnedMascot('userA', 'blank');
+        const context = { user: { id: 'userA' } };
+        await (postHandler as any)({ context, body: { mascotId: 'blank', prompts: {} } });
+        expect((handler as any)({ context, query: { mascotId: 'blank' } })).toMatchObject({ configured: true, prompts: { soul: '' } });
     });
 
     it('postHandler_他ユーザーのマスコットへの保存と不正入力を拒否する', async () => {

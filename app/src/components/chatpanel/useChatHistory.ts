@@ -1,3 +1,4 @@
+import { loadMascotPrompts, saveMascotPrompts } from '../../utils/mascot-prompt-client';
 import { ref, nextTick, computed, watch, ComputedRef } from 'vue';
 import { useConfigStore } from '../../store/config';
 import { useMascotStore } from '../../store/mascot';
@@ -482,39 +483,41 @@ export function useChatHistory(scrollToBottom: () => void) {
                 // シークレットセッションの場合は長期記憶の自動更新をスキップする
                 const isSecretSession = session.isSecret || isSecretMode.value;
                 if (!isSecretSession) {
-                    const mascotPrompts = await window.electronAPI.getMascotPrompts(mascot.id);
-                    const currentMemory = mascotPrompts.memory || '';
-                    
-                    console.log(`[Compaction] Calling /api/update-memory. Engine: ${engine}, Model: ${model}`);
-                    const memResponse = await fetch('/api/update-memory', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            currentMemory,
-                            chatHistory: chatText,
-                            engine,
-                            model,
-                            apiKey,
-                            lmstudioEndpoint: lmsEndpoint
-                        })
-                    });
+                    const { prompts: mascotPrompts, configured } = await loadMascotPrompts(mascot.id);
+                    if (configured) {
+                        const currentMemory = mascotPrompts.memory || '';
 
-                    if (memResponse.ok) {
-                        const memJson = await memResponse.json();
-                        if (memJson && memJson.success && memJson.memory) {
-                            let newMemory = memJson.memory;
-                            newMemory = newMemory.replace(/\[\w+\]/g, '').trim();
-                            
-                            mascotPrompts.memory = newMemory;
-                            await window.electronAPI.saveMascotPrompts(mascot.id, mascotPrompts);
-                            console.log('[Compaction] Memory update succeeded. New memory length:', newMemory.length);
+                        console.log(`[Compaction] Calling /api/update-memory. Engine: ${engine}, Model: ${model}`);
+                        const memResponse = await fetch('/api/update-memory', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                currentMemory,
+                                chatHistory: chatText,
+                                engine,
+                                model,
+                                apiKey,
+                                lmstudioEndpoint: lmsEndpoint
+                            })
+                        });
+
+                        if (memResponse.ok) {
+                            const memJson = await memResponse.json();
+                            if (memJson && memJson.success && memJson.memory) {
+                                let newMemory = memJson.memory;
+                                newMemory = newMemory.replace(/\[\w+\]/g, '').trim();
+
+                                mascotPrompts.memory = newMemory;
+                                await saveMascotPrompts(mascot.id, mascotPrompts);
+                                console.log('[Compaction] Memory update succeeded. New memory length:', newMemory.length);
+                            } else {
+                                console.error('[Compaction] Memory update failed:', memJson.error || 'No memory returned');
+                            }
                         } else {
-                            console.error('[Compaction] Memory update failed:', memJson.error || 'No memory returned');
+                            console.error('[Compaction] Memory update HTTP error! status:', memResponse.status);
                         }
-                    } else {
-                        console.error('[Compaction] Memory update HTTP error! status:', memResponse.status);
                     }
                 } else {
                     console.log('[Compaction] Secret session. Skipping long-term memory update.');

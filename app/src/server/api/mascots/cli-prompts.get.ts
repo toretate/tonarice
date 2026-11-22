@@ -11,9 +11,9 @@ export default defineEventHandler(event => {
     if (typeof mascotId !== 'string' || !/^[a-zA-Z0-9_-]{1,200}$/.test(mascotId)) throw createError({ statusCode: 400 });
 
     const allowLegacyLocalFallback = isAuthBypassAllowed() && userId === LOCAL_DEV_BYPASS_USER_ID;
-    const prompts = readUserMascotPrompts(userId, mascotId, { allowLegacyLocalFallback });
-    if (!prompts) throw createError({ statusCode: 404 });
+    const result = readUserMascotPrompts(userId, mascotId, { allowLegacyLocalFallback });
+    if (!result) throw createError({ statusCode: 404 });
 
     setHeader(event, 'Cache-Control', 'no-store');
-    return { success: true, prompts };
+    return { success: true, ...result };
 });

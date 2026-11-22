@@ -1,4 +1,4 @@
-import { CliError, parseArgs, run } from './main.js';
+import { CliError, assertIsolatedServer, parseArgs, run } from './main.js';
 import { chatSend } from './chat.js';
 import { interactive } from './interactive.js';
 
@@ -11,7 +11,9 @@ const args = rawArgs[0] === '-p' || rawArgs[0] === '--print'
 
 if (args[0] === 'chat' && args[1] === 'interactive') {
     try {
-        process.exitCode = await interactive(parseArgs(args));
+        const options = parseArgs(args);
+        if (options.isolated) await assertIsolatedServer(options);
+        process.exitCode = await interactive(options);
     } catch (error) {
         process.stderr.write(`${error instanceof CliError ? error.message : 'CLI の処理に失敗しました。'}\n`);
         process.exitCode = error instanceof CliError ? error.exitCode : 6;

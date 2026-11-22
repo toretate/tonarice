@@ -1,9 +1,10 @@
-import { CliError, parseOrigin } from './main.js';
+import { CliError, assertIsolatedServer, parseOrigin } from './main.js';
 
 export function createMascotClient(options, dependencies = {}) {
     const origin = parseOrigin(options.url);
     const fetcher = dependencies.fetch || fetch;
     async function request(path, body) {
+        if (body && options.isolated) await assertIsolatedServer(options, fetcher);
         const token = (dependencies.env || process.env).TONARICE_SESSION_TOKEN || '';
         if ((token || path === '/api/config') && origin.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)) throw new CliError('invalid_input', '設定や認証情報を使用する接続先は HTTPS またはローカルにしてください。', 2);
         let response;

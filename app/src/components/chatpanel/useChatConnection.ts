@@ -1,3 +1,4 @@
+import { loadMascotPrompts } from '../../utils/mascot-prompt-client';
 import { ref, nextTick, Ref, watch } from 'vue';
 import { useConfigStore } from '../../store/config';
 import { useMascotStore } from '../../store/mascot';
@@ -610,9 +611,9 @@ export function useChatConnection(params: {
         }
 
         // マスコット固有のプロンプト
-        if (window.electronAPI && window.electronAPI.getMascotPrompts && mascot) {
+        if (mascot) {
             try {
-                const mascotPrompts = await window.electronAPI.getMascotPrompts(mascot.id);
+                const { prompts: mascotPrompts } = await loadMascotPrompts(mascot.id);
                 if (mascotPrompts.identity) {
                     systemPrompt += `# Mascot Identity\n${mascotPrompts.identity}\n\n`;
                 }
@@ -629,7 +630,7 @@ export function useChatConnection(params: {
                     systemPrompt += `# Mascot Long-term Memory\n${mascotPrompts.memory}\n\n`;
                 }
             } catch (e) {
-                console.error('Failed to load mascot prompts via IPC:', e);
+                console.error('マスコットのプロンプト取得に失敗しました:', e);
             }
         }
 

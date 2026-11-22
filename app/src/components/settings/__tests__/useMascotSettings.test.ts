@@ -4,6 +4,8 @@ import { selectOutfitPreviewExpression, useMascotSettings, uploadImportedImage }
 import { createPinia, setActivePinia } from 'pinia';
 import { useConfigStore } from '../../../store/config';
 
+vi.mock('../../../utils/mascot-prompt-client', () => ({ loadMascotPrompts: vi.fn().mockResolvedValue({ prompts: {} }) }));
+
 vi.mock('../../../skills/expression-alignment/auto-align-v2', () => ({
     autoAlignBatch: vi.fn(),
     CONFIDENCE_THRESHOLD: 0.5

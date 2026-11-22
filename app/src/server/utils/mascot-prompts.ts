@@ -38,7 +38,7 @@ export function readUserMascotPrompts(
     userId: string,
     mascotId: string,
     options?: { allowLegacyLocalFallback?: boolean }
-): MascotPrompts | null {
+): { prompts: MascotPrompts; configured: boolean } | null {
     if (!isOwnedMascot(userId, mascotId)) {
         return null;
     }
@@ -55,21 +55,24 @@ export function readUserMascotPrompts(
         memory: ''
     };
 
+    let configured = false;
     for (const name of MASCOT_PROMPT_NAMES) {
         const userFile = path.join(userDir, `${name}.md`);
         if (fs.existsSync(userFile)) {
+            configured = true;
             prompts[name] = fs.readFileSync(userFile, 'utf8');
             continue;
         }
         if (allowLegacyFallback) {
             const legacyFile = path.join(legacyDir, `${name}.md`);
             if (isPathInside(path.join(APP_ROOT, 'mascots'), legacyFile) && fs.existsSync(legacyFile)) {
+                configured = true;
                 prompts[name] = fs.readFileSync(legacyFile, 'utf8');
             }
         }
     }
 
-    return prompts;
+    return { prompts, configured };
 }
 
 /**

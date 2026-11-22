@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 import Button from 'primevue/button';
+import { loadMascotPrompts, saveMascotPrompts, type MascotPrompts } from '../../../utils/mascot-prompt-client';
 import AppModalShell from '../../common/AppModalShell.vue';
 
 const props = defineProps<{
@@ -20,105 +21,69 @@ const agents = ref('');
 const memory = ref('');
 const isSaving = ref(false);
 
-const loadPrompts = async () => {
-    if (!props.mascotId) return;
+const loaded = ref(false);
+const canImportLegacy = ref(false);
+let loadVersion = 0;
+
+function showPrompts(data?: MascotPrompts) {
+    identity.value = data?.identity || '';
+    soul.value = data?.soul || '';
+    userPrompt.value = data?.user || '';
+    agents.value = data?.agents || '';
+    memory.value = data?.memory || '';
+}
+
+watch(() => [props.visible, props.mascotId] as const, async ([visible, mascotId]) => {
+    const version = ++loadVersion;
+    loaded.value = false;
+    canImportLegacy.value = false;
+    showPrompts();
+    if (!visible || !mascotId) return;
     try {
-        // サーバー側のユーザー別プロンプトを優先取得する。
-        const res = await fetch(`/api/mascots/cli-prompts?${new URLSearchParams({ mascotId: props.mascotId })}`, {
-            credentials: 'include'
-        });
-        if (res.ok) {
-            const json = await res.json();
-            if (json?.success && json.prompts) {
-                identity.value = json.prompts.identity || '';
-                soul.value = json.prompts.soul || '';
-                userPrompt.value = json.prompts.user || '';
-                agents.value = json.prompts.agents || '';
-                memory.value = json.prompts.memory || '';
-                return;
-            }
-        }
-    } catch (err) {
-        console.warn('サーバーからのプロンプト取得に失敗したためローカル IPC へフォールバックします:', err);
+        const result = await loadMascotPrompts(mascotId);
+        if (version !== loadVersion) return;
+        showPrompts(result.prompts);
+        loaded.value = true;
+        canImportLegacy.value = !result.configured && !!window.electronAPI?.getMascotPrompts;
+    } catch {
+        if (version === loadVersion) alert('プロンプトを読み込めませんでした。');
     }
+}, { immediate: true });
+
+async function importLegacyPrompts() {
+    const legacy = window.electronAPI;
+    if (!legacy || !canImportLegacy.value || !window.confirm('この端末にある旧設定が、現在のアカウントに移す内容であることを確認してください。読み込んだ内容は保存前に確認できます。')) return;
+    const version = loadVersion;
     try {
-        if (window.electronAPI) {
-            const data = await window.electronAPI.getMascotPrompts(props.mascotId);
-            identity.value = data.identity || '';
-            soul.value = data.soul || '';
-            userPrompt.value = data.user || '';
-            agents.value = data.agents || '';
-            memory.value = data.memory || '';
-        }
-    } catch (err) {
-        console.error('Failed to load mascot prompts in modal:', err);
+        const prompts = await legacy.getMascotPrompts(props.mascotId);
+        if (version !== loadVersion) return;
+        showPrompts(prompts);
+    } catch {
+        alert('この端末の旧設定を読み込めませんでした。');
     }
-};
+}
 
-watch(
-    () => props.visible,
-    (newVal) => {
-        if (newVal) {
-            loadPrompts();
-        }
-    },
-    { immediate: true }
-);
-
-watch(
-    () => props.mascotId,
-    () => {
-        if (props.visible) {
-            loadPrompts();
-        }
-    }
-);
-
-const handleSave = async () => {
-    if (!props.mascotId) return;
+async function handleSave() {
+    if (!loaded.value || isSaving.value) return;
+    const version = loadVersion;
     isSaving.value = true;
-    const payload = {
-        identity: identity.value,
-        soul: soul.value,
-        user: userPrompt.value,
-        agents: agents.value,
-        memory: memory.value
-    };
     try {
-        try {
-            const res = await fetch('/api/mascots/cli-prompts', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ mascotId: props.mascotId, prompts: payload })
-            });
-            if (res.ok) {
-                emit('save-done');
-                emit('close');
-                return;
-            }
-            if (res.status === 400 || res.status === 401 || res.status === 403 || res.status === 404) {
-                alert('保存に失敗しました: サーバーでプロンプトを保存できませんでした。');
-                return;
-            }
-        } catch (err) {
-            console.warn('サーバーへのプロンプト保存に失敗したためローカル IPC へフォールバックします:', err);
-        }
-        if (window.electronAPI) {
-            const res = await window.electronAPI.saveMascotPrompts(props.mascotId, payload);
-            if (res.success) {
-                emit('save-done');
-                emit('close');
-            } else {
-                alert('保存に失敗しました: ' + res.error);
-            }
-        }
-    } catch (err: any) {
-        alert('保存エラー: ' + err.message);
+        await saveMascotPrompts(props.mascotId, {
+            identity: identity.value,
+            soul: soul.value,
+            user: userPrompt.value,
+            agents: agents.value,
+            memory: memory.value
+        });
+        if (version !== loadVersion) return;
+        emit('save-done');
+        emit('close');
+    } catch {
+        alert('プロンプトを保存できませんでした。');
     } finally {
         isSaving.value = false;
     }
-};
+}
 </script>
 
 <template>
@@ -232,8 +197,9 @@ const handleSave = async () => {
             </div>
 
         <div class="modal-footer flex justify-content-end gap-2 pt-3 border-top border-gray-200 mt-3">
+            <Button v-if="canImportLegacy" label="この端末の旧設定を読み込む" class="p-button-outlined p-button-sm" @click="importLegacyPrompts" :disabled="isSaving" />
             <Button label="キャンセル" icon="pi pi-times" class="p-button-outlined p-button-secondary p-button-sm" @click="emit('close')" :disabled="isSaving" />
-            <Button label="保存する" icon="pi pi-save" class="p-button-primary p-button-sm px-4" @click="handleSave" :loading="isSaving" />
+            <Button label="保存する" icon="pi pi-save" class="p-button-primary p-button-sm px-4" @click="handleSave" :loading="isSaving" :disabled="!loaded" />
         </div>
     </AppModalShell>
 </template>

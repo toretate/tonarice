@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
+import { createRevisionSave } from './revision-save';
 import { startNotificationCheck } from '../utils/task-notification';
 
 // カテゴリ（タブ）のインターフェース
@@ -59,7 +60,6 @@ export const useTaskStore = defineStore('task', () => {
     const isLoaded = ref(false);
     const serverRevision = ref<number | null>(null);
     let suppressServerSync = 0;
-    let saveQueued = false;
 
     const persistLocalOnly = () => {
         if (typeof window === 'undefined') return;
@@ -92,6 +92,30 @@ export const useTaskStore = defineStore('task', () => {
         }
     };
 
+    const sync = createRevisionSave({
+        url: '/api/tasks',
+        revision: serverRevision,
+        read: () => ({
+            categories: categories.value,
+            tasks: tasks.value,
+            enableNotification: enableNotification.value,
+            notificationMinutes: notificationMinutes.value,
+            completionGraceSeconds: completionGraceSeconds.value,
+            defaultDurationHours: defaultDurationHours.value,
+            muteNotificationsDuringMeetings: muteNotificationsDuringMeetings.value
+        }),
+        collections: ['categories', 'tasks'],
+        apply: data => runFromServer(() => {
+            categories.value = data.categories as Category[];
+            tasks.value = data.tasks as Task[];
+            enableNotification.value = data.enableNotification as boolean;
+            notificationMinutes.value = data.notificationMinutes as number;
+            completionGraceSeconds.value = data.completionGraceSeconds as number;
+            defaultDurationHours.value = data.defaultDurationHours as number;
+            muteNotificationsDuringMeetings.value = data.muteNotificationsDuringMeetings as boolean;
+        })
+    });
+
     const reloadFromServer = async () => {
         if (typeof window === 'undefined') return;
         try {
@@ -99,13 +123,10 @@ export const useTaskStore = defineStore('task', () => {
             if (!res.ok) return;
             const resJson = await res.json();
             if (!resJson.success) return;
-            runFromServer(() => {
-                categories.value = Array.isArray(resJson.categories) ? resJson.categories : categories.value;
-                tasks.value = Array.isArray(resJson.tasks) ? resJson.tasks : [];
-                if (typeof resJson.revision === 'number' && Number.isSafeInteger(resJson.revision) && resJson.revision >= 0) {
-                    serverRevision.value = resJson.revision;
-                }
-            });
+            if (sync.isPending()) return;
+            if (Number.isSafeInteger(resJson.revision) && resJson.revision >= (serverRevision.value ?? 0)) {
+                sync.mergeRemote(resJson, resJson.revision);
+            }
         } catch (error) {
             console.warn('サーバーからのタスク再読込に失敗しました:', error);
         }
@@ -113,7 +134,7 @@ export const useTaskStore = defineStore('task', () => {
 
     // LocalStorage および サーバーからデータをロード
     const loadFromLocalStorage = async () => {
-        if (typeof window === 'undefined') return;
+        if (typeof window === 'undefined' || sync.isPending()) return;
 
         // 1. まず LocalStorage の値を読み込んで初期表示を高速にする
         suppressServerSync += 1;
@@ -174,26 +195,22 @@ export const useTaskStore = defineStore('task', () => {
             const res = await fetch('/api/tasks', { credentials: 'include' });
             if (res.ok) {
                 const resJson = await res.json();
-                if (resJson.success) {
-                    // データ消失防止:
-                    // このアプリは変更のたびにローカルとサーバーへ同時保存するため、
-                    // 「ローカルに存在するのにサーバーが空」= サーバー側の欠落/破損とみなし、ローカルを優先する。
-                    // （サーバーが空を返した瞬間にローカルを空で上書き→初期化→空を保存、という消失連鎖を防ぐ）
+                const revision = Number.isSafeInteger(resJson.revision) && resJson.revision >= 0 ? resJson.revision : 0;
+                if (resJson.success && !sync.isPending() && revision >= (serverRevision.value ?? 0)) {
+                    // リビジョンがない従来データの初回読み込みでは、空のサーバーにローカルのデータを移す。
                     const serverCategories = Array.isArray(resJson.categories) ? resJson.categories : [];
                     const serverTasks = Array.isArray(resJson.tasks) ? resJson.tasks : [];
 
                     runFromServer(() => {
-                        serverRevision.value = typeof resJson.revision === 'number' && Number.isSafeInteger(resJson.revision) && resJson.revision >= 0
-                            ? resJson.revision
-                            : 0;
-                        if (serverTasks.length > 0 || tasks.value.length === 0) {
+                        sync.adopt(resJson, revision);
+                        if (revision > 0 || serverTasks.length > 0 || tasks.value.length === 0) {
                             tasks.value = serverTasks;
                         } else {
                             recoveredFromLocal = true;
                             console.warn('[TaskStore] サーバーのタスクが空のため、ローカルの既存データを保持しました（データ消失防止）。');
                         }
 
-                        if (serverCategories.length > 0 || categories.value.length === 0) {
+                        if (revision > 0 || serverCategories.length > 0 || categories.value.length === 0) {
                             categories.value = serverCategories;
                         } else {
                             recoveredFromLocal = true;
@@ -289,42 +306,7 @@ export const useTaskStore = defineStore('task', () => {
 
         persistLocalOnly();
 
-        // baseRevision 未取得時は古い状態でサーバーを上書きしないよう送信を抑止する。
-        if (serverRevision.value === null) return;
-
-        const payload: Record<string, unknown> = {
-            categories: categories.value,
-            tasks: tasks.value,
-            enableNotification: enableNotification.value,
-            notificationMinutes: notificationMinutes.value,
-            completionGraceSeconds: completionGraceSeconds.value,
-            defaultDurationHours: defaultDurationHours.value,
-            muteNotificationsDuringMeetings: muteNotificationsDuringMeetings.value,
-            baseRevision: serverRevision.value
-        };
-
-        // サーバーへ同期保存 (非同期実行)
-        fetch('/api/tasks', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload),
-            credentials: 'include'
-        }).then(async (res) => {
-            if (res.status === 409) {
-                console.warn('[TaskStore] サーバー側でタスクが更新されているため再読み込みします。');
-                await reloadFromServer();
-                return;
-            }
-            if (!res.ok) return;
-            const json = await res.json().catch(() => null);
-            if (json && typeof json.revision === 'number' && Number.isSafeInteger(json.revision) && json.revision >= 0) {
-                serverRevision.value = json.revision;
-            }
-        }).catch(err => {
-            console.warn('サーバーへのタスク保存に失敗しました:', err);
-        });
+        if (serverRevision.value !== null) sync.request();
     };
 
     // 自動保存の設定
@@ -343,13 +325,7 @@ export const useTaskStore = defineStore('task', () => {
         ],
         () => {
             if (suppressServerSync > 0 || !isLoaded.value) return;
-            if (!saveQueued) {
-                saveQueued = true;
-                queueMicrotask(() => {
-                    saveQueued = false;
-                    saveToLocalStorage();
-                });
-            }
+            saveToLocalStorage();
         },
         { deep: true, flush: 'sync' }
     );
@@ -518,23 +494,34 @@ export const useTaskStore = defineStore('task', () => {
         taskId?: string;
         revision?: number;
     }) => {
+        while (sync.isPending()) await sync.settled();
         const { action, task, categories: updatedCategories, taskId, revision } = payload;
         const hasValidRevision = typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= 0;
-        if (hasValidRevision && serverRevision.value !== null) {
-            if (revision <= serverRevision.value) {
-                return;
-            }
-            if (revision > serverRevision.value + 1) {
+        if (hasValidRevision) {
+            const currentRevision = serverRevision.value;
+            if (currentRevision !== null && revision <= currentRevision) return;
+            if (currentRevision === null || revision > currentRevision + 1) {
                 await reloadFromServer();
                 return;
             }
+            sync.applyDelta(revision, data => {
+                const entries = (data.tasks as Task[] | undefined) || [];
+                let next = entries;
+                if (action === 'deleteTask') next = entries.filter(item => item.id !== taskId);
+                else if (task) {
+                    next = entries.some(item => item.id === task.id)
+                        ? entries.map(item => item.id === task.id ? task : item)
+                        : [...entries, task];
+                }
+                return { categories: updatedCategories ?? data.categories, tasks: next };
+            });
+            return;
         }
 
         if (action === 'deleteTask') {
             if (taskId) {
                 runFromServer(() => {
                     tasks.value = tasks.value.filter(t => t.id !== taskId);
-                    if (hasValidRevision) serverRevision.value = revision;
                 });
             }
             return;
@@ -551,7 +538,6 @@ export const useTaskStore = defineStore('task', () => {
                 } else {
                     tasks.value[idx] = task;
                 }
-                if (hasValidRevision) serverRevision.value = revision;
             });
         }
     };

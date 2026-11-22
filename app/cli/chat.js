@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { CliError, parseOrigin } from './main.js';
+import { CliError, assertIsolatedServer, parseOrigin } from './main.js';
 
 const allowedFields = new Set(['message', 'engine', 'model', 'systemPrompt', 'lmstudioEndpoint', 'history', 'activeMascotId', 'memorySessionId', 'memoryUserMessageId', 'memoryAssistantMessageId', 'turnId', 'temperature', 'frequencyPenalty', 'repetitionPenalty', 'maxOutputTokens', 'enableThinking', 'enableTools', 'tools', 'approval']);
 
@@ -60,6 +60,7 @@ export async function chatSend(options, text, dependencies = {}) {
     if ((token || input.apiKey) && origin.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)) {
         throw new CliError('invalid_input', '認証情報を使用する接続先は HTTPS またはローカルにしてください。', 2);
     }
+    if (options.isolated) await assertIsolatedServer(options, dependencies.fetch);
     let WebSocket = dependencies.WebSocket;
     if (!WebSocket) {
         try { WebSocket = (await import('ws')).default; }

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, watch, computed } from 'vue';
+import { createRevisionSave } from './revision-save';
 
 export interface Memo {
     id: string;
@@ -24,7 +25,6 @@ export const useMemoStore = defineStore('memo', () => {
     const isLoaded = ref(false);
     const serverRevision = ref<number | null>(null);
     let suppressServerSync = 0;
-    let saveQueued = false;
 
     const persistLocalOnly = () => {
         if (typeof window === 'undefined') return;
@@ -49,6 +49,16 @@ export const useMemoStore = defineStore('memo', () => {
         }
     };
 
+    const sync = createRevisionSave({
+        url: '/api/memos',
+        revision: serverRevision,
+        read: () => ({ memos: memos.value }),
+        collections: ['memos'],
+        apply: data => runFromServer(() => {
+            memos.value = data.memos as Memo[];
+        })
+    });
+
     const reloadFromServer = async () => {
         if (typeof window === 'undefined') return;
         try {
@@ -58,20 +68,17 @@ export const useMemoStore = defineStore('memo', () => {
             if (!contentType.includes('application/json')) return;
             const resJson = await res.json();
             if (!resJson.success) return;
-            const serverMemos = Array.isArray(resJson.memos) ? resJson.memos : [];
-            runFromServer(() => {
-                memos.value = serverMemos;
-                if (typeof resJson.revision === 'number' && Number.isSafeInteger(resJson.revision) && resJson.revision >= 0) {
-                    serverRevision.value = resJson.revision;
-                }
-            });
+            if (sync.isPending()) return;
+            if (Number.isSafeInteger(resJson.revision) && resJson.revision >= (serverRevision.value ?? 0)) {
+                sync.mergeRemote(resJson, resJson.revision);
+            }
         } catch (error) {
             console.warn('サーバーからのメモ再読込失敗:', error);
         }
     };
 
     const loadFromLocalStorage = async () => {
-        if (typeof window === 'undefined') return;
+        if (typeof window === 'undefined' || sync.isPending()) return;
 
         // 1. ローカルストレージからの読み込み
         suppressServerSync += 1;
@@ -100,13 +107,12 @@ export const useMemoStore = defineStore('memo', () => {
                     throw new Error(`メモAPIがJSON以外を返しました (${contentType || 'Content-Typeなし'})`);
                 }
                 const resJson = await res.json();
-                if (resJson.success) {
+                const revision = Number.isSafeInteger(resJson.revision) && resJson.revision >= 0 ? resJson.revision : 0;
+                if (resJson.success && !sync.isPending() && revision >= (serverRevision.value ?? 0)) {
                     const serverMemos = Array.isArray(resJson.memos) ? resJson.memos : [];
                     runFromServer(() => {
-                        serverRevision.value = typeof resJson.revision === 'number' && Number.isSafeInteger(resJson.revision) && resJson.revision >= 0
-                            ? resJson.revision
-                            : 0;
-                        if (serverMemos.length > 0 || memos.value.length === 0) {
+                        sync.adopt(resJson, revision);
+                        if (revision > 0 || serverMemos.length > 0 || memos.value.length === 0) {
                             memos.value = serverMemos;
                         } else {
                             recoveredFromLocal = true;
@@ -132,46 +138,14 @@ export const useMemoStore = defineStore('memo', () => {
 
         persistLocalOnly();
 
-        // baseRevision 未取得時は古い状態でサーバーを上書きしないよう送信を抑止する。
-        if (serverRevision.value === null) return;
-
-        const payload = {
-            memos: memos.value,
-            baseRevision: serverRevision.value
-        };
-
-        fetch('/api/memos', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            credentials: 'include'
-        }).then(async (res) => {
-            if (res.status === 409) {
-                console.warn('[MemoStore] サーバー側でメモが更新されているため再読み込みします。');
-                await reloadFromServer();
-                return;
-            }
-            if (!res.ok) return;
-            const json = await res.json().catch(() => null);
-            if (json && typeof json.revision === 'number' && Number.isSafeInteger(json.revision) && json.revision >= 0) {
-                serverRevision.value = json.revision;
-            }
-        }).catch(err => {
-            console.warn('サーバーへのメモ保存失敗:', err);
-        });
+        if (serverRevision.value !== null) sync.request();
     };
 
     watch(
         [() => memos.value, () => showMemoWidget.value],
         () => {
             if (suppressServerSync > 0 || !isLoaded.value) return;
-            if (!saveQueued) {
-                saveQueued = true;
-                queueMicrotask(() => {
-                    saveQueued = false;
-                    saveToLocalStorage();
-                });
-            }
+            saveToLocalStorage();
         },
         { deep: true, flush: 'sync' }
     );
@@ -221,23 +195,31 @@ export const useMemoStore = defineStore('memo', () => {
      * サーバーへの書き戻し（POST）は発生させず、リビジョン欠落を検知した場合は最新を再読込する。
      */
     const applyServerMemoAction = async (payload: ServerMemoActionPayload) => {
+        while (sync.isPending()) await sync.settled();
         const { action, memo, memoId, revision } = payload;
         const hasValidRevision = typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= 0;
-        if (hasValidRevision && serverRevision.value !== null) {
-            if (revision <= serverRevision.value) {
-                return;
-            }
-            if (revision > serverRevision.value + 1) {
+        if (hasValidRevision) {
+            const currentRevision = serverRevision.value;
+            if (currentRevision !== null && revision <= currentRevision) return;
+            if (currentRevision === null || revision > currentRevision + 1) {
                 await reloadFromServer();
                 return;
             }
+            sync.applyDelta(revision, data => {
+                const entries = (data.memos as Memo[] | undefined) || [];
+                if (action === 'delete') return { memos: entries.filter(item => item.id !== memoId) };
+                const next = memo && entries.some(item => item.id === memo.id)
+                    ? entries.map(item => item.id === memo.id ? memo : item)
+                    : memo ? [...entries, memo] : entries;
+                return { memos: next };
+            });
+            return;
         }
 
         if (action === 'delete') {
             if (memoId) {
                 runFromServer(() => {
                     memos.value = memos.value.filter(m => m.id !== memoId);
-                    if (hasValidRevision) serverRevision.value = revision;
                 });
             }
             return;
@@ -251,7 +233,6 @@ export const useMemoStore = defineStore('memo', () => {
                 } else {
                     memos.value.push(memo);
                 }
-                if (hasValidRevision) serverRevision.value = revision;
             });
         }
     };

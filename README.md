@@ -115,6 +115,8 @@ npm run build
 
 CLI の接続先となる開発サーバーが起動していない場合は、別のターミナルで `npm run dev:cli` を実行します。このコマンドも `.env.local` を読み込みます。別ワークスペースとポートを分けたい場合は `.env.local` などで `TONARICE_PORT`（または `PORT`）を指定すると、サーバー起動ポートと CLI の既定接続先が揃います。動作テスト時に実データへ影響を出さず一時的な隔離ストレージで起動したい場合は、`TONARICE_PORT` または `--port` で空きポートを明示したうえで `npm run dev:cli:isolated`（または `npm run dev:cli -- --isolated-storage --port ポート番号`）を使用してください（指定ポートが使用中の場合は誤接続を防ぐため起動を中止します）。
 
+隔離サーバーへ接続するときは、起動ポートが 3010 の例なら、対話モードは `npm run cli -- --isolated --url http://localhost:3010`、疎通確認は `npm run cli -- ping --isolated --url http://localhost:3010` を使用します。CLI は接続先の隔離状態を検証します。
+
 対話中の `/mascot` からマスコットの選択・作成・性格設定、`/model` から選択中マスコットのエンジン・モデル設定ができます。
 
 `/private` は履歴を保存しない会話への切り替え、`/memo` と `/todo` はメモ・タスクの一覧です。操作方法は `/memo help`、`/todo help` で確認できます。

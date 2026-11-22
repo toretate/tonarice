@@ -97,7 +97,7 @@ export function resolveDevNuxtOptions(argv, projectDir, env = process.env) {
         nuxtArgs.push(arg);
     }
 
-    const childEnv = { ...env };
+    const childEnv = { ...env, TONARICE_ISOLATED_SERVER: '0' };
     let port = explicitPort;
     if (port === null) {
         port = resolveServerPort(env);
@@ -191,7 +191,8 @@ export function prepareIsolatedStorage(options) {
         },
         childEnv: {
             ...options.childEnv,
-            MASCOT_STORAGE_DIR: dir
+            MASCOT_STORAGE_DIR: dir,
+            TONARICE_ISOLATED_SERVER: '1'
         }
     };
 }

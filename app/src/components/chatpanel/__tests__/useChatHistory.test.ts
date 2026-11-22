@@ -164,8 +164,8 @@ describe('useChatHistory.ts のテスト', () => {
         // runCompaction の実行
         await history.runCompaction('default', currentSession.id);
 
-        // シークレットセッションであるため、saveMascotPrompts は呼び出されていないはず
-        expect(window.electronAPI!.saveMascotPrompts).not.toHaveBeenCalled();
+        const savedPrompts = () => vi.mocked(fetch).mock.calls.filter(([url, init]) => url === '/api/mascots/cli-prompts' && init?.method === 'POST');
+        expect(savedPrompts()).toHaveLength(0);
 
         // 通常モードに戻す
         mascotStore.setSecretMode(false);
@@ -178,11 +178,15 @@ describe('useChatHistory.ts のテスト', () => {
             text: `メッセージ ${i}`
         }));
 
-        // 通常セッションで runCompaction を実行
+        // 通常セッションの長期記憶は共有プロンプト API に保存する。
+        const defaultFetch = vi.mocked(fetch).getMockImplementation()!;
+        vi.mocked(fetch).mockImplementation((url, init) => String(url).startsWith('/api/mascots/cli-prompts')
+            ? Promise.resolve(Response.json({ success: true, configured: true, prompts: { memory: '既存の長期記憶' } }))
+            : defaultFetch(url, init));
         await history.runCompaction('default', normalSession.id);
 
         // 通常セッションなので saveMascotPrompts が呼び出されていること
-        expect(window.electronAPI!.saveMascotPrompts).toHaveBeenCalled();
+        expect(savedPrompts()).toHaveLength(1);
     });
 
     it('deleteMessage_指定したIDのメッセージを削除し、履歴を保存すること', async () => {
