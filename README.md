@@ -191,7 +191,7 @@ npm run build
 
 ## 技術仕様
 
-- **アプリケーションフレームワーク**: Nuxt 3 (Vite と Nitro サーバーを内包)
+- **アプリケーションフレームワーク**: Nuxt 4 (Vite と Nitro サーバーを内包)
 - **クライアントシェル**: Electron (Desktop版のみ)
 - **フロントエンド**: Vue 3, Tailwind CSS, Pixi.js (WebGL 描画), Pinia, TypeScript
 - **バックエンド**: Nitro サーバー (Nuxt 内蔵), WebSocket (`ws`)

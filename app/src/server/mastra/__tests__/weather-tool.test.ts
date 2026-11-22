@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchCurrentWeather } from '../../../skills/tool-use/weather-core';
+import { fetchCurrentWeather, weatherInputSchema } from '../../../skills/tool-use/weather-core';
 import { createMascotRequestContext } from '../request-context';
 import { mastraWeatherTool } from '../weather-tool';
 
@@ -140,5 +140,35 @@ describe('mastraWeatherToolのテスト', () => {
         expect(first).toMatchObject({ city: '東京', weather: '曇り' });
         expect(second).toEqual({ error: 'この発話では天気情報を取得済みです。' });
         expect(fetchMock).toHaveBeenCalledOnce();
+    });
+
+    it('inputSchema_Mastra向けスキーマがZod4で緯度経度都市名の制約と任意項目を維持すること', async () => {
+        // Zod 4 スキーマであること（_zod 内部定義を持つ）を確認する。
+        expect('_zod' in weatherInputSchema).toBe(true);
+        expect(mastraWeatherTool.inputSchema).toBe(weatherInputSchema);
+
+        expect(weatherInputSchema.safeParse({}).success).toBe(true);
+        expect(weatherInputSchema.parse({ city: '  東京  ', latitude: 35.6895, longitude: 139.6917 })).toEqual({
+            city: '東京',
+            latitude: 35.6895,
+            longitude: 139.6917
+        });
+        expect(weatherInputSchema.safeParse({ latitude: -90, longitude: -180 }).success).toBe(true);
+        expect(weatherInputSchema.safeParse({ latitude: 90, longitude: 180 }).success).toBe(true);
+
+        expect(weatherInputSchema.safeParse({ latitude: -90.1 }).success).toBe(false);
+        expect(weatherInputSchema.safeParse({ latitude: 90.1 }).success).toBe(false);
+        expect(weatherInputSchema.safeParse({ longitude: -180.1 }).success).toBe(false);
+        expect(weatherInputSchema.safeParse({ longitude: 180.1 }).success).toBe(false);
+        expect(weatherInputSchema.safeParse({ city: '   ' }).success).toBe(false);
+        expect(weatherInputSchema.safeParse({ city: 'あ'.repeat(101) }).success).toBe(false);
+
+        const schema = mastraWeatherTool.inputSchema;
+        if (!schema) throw new Error('天気ツールの入力スキーマがありません。');
+        const valid = await schema['~standard'].validate({ city: ' 大阪 ' });
+        const invalid = await schema['~standard'].validate({ latitude: 95 });
+        expect(valid.issues).toBeUndefined();
+        expect('value' in valid ? valid.value : undefined).toEqual({ city: '大阪' });
+        expect(invalid.issues).toBeDefined();
     });
 });

@@ -1,15 +1,13 @@
-import { lmStudioZod as z } from '../../utils/lmstudio-tool-schema';
+import { z } from 'zod';
 import { resolveJapaneseCity } from './weather-geocoding';
 
 export const weatherDescription = '指定された緯度・経度、または都市の現在の天気予報を取得します。緯度経度がわからない場合は都市名(city)のみを指定してください。';
 
-export const weatherParameters = {
+export const weatherInputSchema = z.object({
     latitude: z.number().min(-90).max(90).optional().describe('緯度（例: 35.6895）'),
     longitude: z.number().min(-180).max(180).optional().describe('経度（例: 139.6917）'),
     city: z.string().trim().min(1).max(100).optional().describe('都市名（例: 大阪、東京）')
-};
-
-export const weatherInputSchema = z.object(weatherParameters);
+});
 export type WeatherInput = z.infer<typeof weatherInputSchema>;
 
 export interface WeatherData {
