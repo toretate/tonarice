@@ -13,15 +13,23 @@ export interface MemoData {
     pinned?: boolean;
 }
 
-export function loadMemosFromDb(userId: string) {
+export function loadMemosFromDb(userId: string): Array<MemoData & { id: string }> {
     const memosPath = getUserMemosPath(userId);
-    if (!fs.existsSync(memosPath)) {
-        return [];
+    let raw: string;
+    try {
+        raw = fs.readFileSync(memosPath, 'utf8');
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            return [];
+        }
+        throw error;
     }
 
-    const raw = fs.readFileSync(memosPath, 'utf8');
     const data = JSON.parse(raw);
-    return Array.isArray(data.memos) ? data.memos : [];
+    if (!Array.isArray(data?.memos)) {
+        throw new Error('memos.json の memos が配列ではありません。');
+    }
+    return data.memos;
 }
 
 export function saveMemosToDb(userId: string, memos: unknown[]) {
@@ -90,27 +98,36 @@ export function addMemoToDb(userId: string, payload: MemoData) {
     };
 }
 
-export function searchMemosFromDb(userId: string, query?: string) {
-    const memosPath = getUserMemosPath(userId);
-    if (!fs.existsSync(memosPath)) {
-        return [];
+export function searchMemosFromDb(userId: string, query?: string, literalQuery = false) {
+    const memos = loadMemosFromDb(userId);
+    if (!query) {
+        return memos;
     }
 
-    try {
-        const raw = fs.readFileSync(memosPath, 'utf8');
-        const data = JSON.parse(raw);
-        let memos = data.memos || [];
+    const lowerQuery = query.toLowerCase();
+    if (literalQuery || !lowerQuery.includes('*')) {
+        return memos.filter(memo => memo.content?.toLowerCase().includes(lowerQuery));
+    }
 
-        if (query) {
-            const lowerQuery = query.toLowerCase();
-            memos = memos.filter((m: any) => m.content && m.content.toLowerCase().includes(lowerQuery));
+    const [prefix = '', ...segments] = lowerQuery.split('*');
+    const suffix = segments.pop() ?? '';
+    return memos.filter(memo => {
+        const content = memo.content?.toLowerCase() ?? '';
+        const suffixStart = content.length - suffix.length;
+        if (!content.startsWith(prefix) || !content.endsWith(suffix)) {
+            return false;
         }
 
-        return memos;
-    } catch (e) {
-        console.error('[MemosDB] Failed to search memos:', e);
-        return [];
-    }
+        let offset = prefix.length;
+        for (const segment of segments) {
+            const index = content.indexOf(segment, offset);
+            if (index === -1) {
+                return false;
+            }
+            offset = index + segment.length;
+        }
+        return offset <= suffixStart;
+    });
 }
 
 export function updateMemoInDb(

@@ -100,7 +100,7 @@
 
 - 公開 API（`tasks-service.ts` に対応させる）:
   - `addMemoToDb(userId, { content, color?, pinned? })` — ディレクトリ生成 → 読み込み/マージ → 冪等ガード（同一 `content` の重複追加を無視、tasks の重複ガードに倣う）→ 追加 → 保存 → `{ memo }` を返す。
-  - `searchMemosFromDb(userId, query?)` — `content` 部分一致で絞り込み。
+  - `searchMemosFromDb(userId, query?, literalQuery?)` — メモ一覧 API と同じ読み取り処理を使う。`query` 指定時は大文字小文字を区別せず、通常は `content` の部分一致で絞り込む。ワイルドカードを含む場合は本文全体にパターンを照合し、`*` が改行を含む任意の0文字以上に一致する。ファイルが存在しなければ空配列を返し、読み取りや JSON 形式の異常はエラーにする。
   - `updateMemoInDb(userId, id, { content?, color?, pinned? })` — 対象更新、`updatedAt` を更新。無ければ throw。
   - `deleteMemoFromDb(userId, id)` — id で除去、無ければ throw。
 
@@ -124,11 +124,13 @@
 | `action` | `z.enum(['add','search','update','delete'])` | ✅ | 操作種別。 |
 | `content` | `z.string().optional()` | add 時必須 | メモ本文。 |
 | `id` | `z.string().optional()` | update/delete 時必須 | 対象メモID。 |
-| `query` | `z.string().optional()` | | 本文の検索キーワード（search 時）。 |
+| `query` | `z.string().optional()` | | 本文の検索キーワード（search 時）。全件一覧と件数の確認では省略する。空白のみ、または単独の `*` も全件取得として扱う。`買い物*` は前方一致、`*買い物` は後方一致、`買い物*リスト` は前後の条件を組み合わせる。 |
+| `literalQuery` | `z.boolean().optional()` | | `true` の場合は `query` をそのまま部分一致に使う。文字としての `*` を探す場合に指定する。 |
 | `color` | `z.string().optional()` | | 付箋色（任意・§10）。 |
 | `pinned` | `z.boolean().optional()` | | ピン留め（任意）。 |
 
 - **戻り値**: 成功 `{ "success": true, ... }` / 失敗 `{ "success": false, "error": "<理由>" }`（例外は投げない）。
+- **検索結果**: 0 件の場合は `success: true` と `count: 0` を返す。読み取りに失敗した場合は `success: false` とエラーメッセージを返す。Mastra のログには検索条件の種類と成功時の件数を記録する。
 - **登録**: `app/src/server/skills/tool-use/manage-memos-tool.ts`（`memo-tools-shared` の re-export）を作り、`app/src/server/skills/tool-use/index.ts` の `lmStudioTools` 配列に追加。
 - **一覧反映**: メモ追加/更新時にクライアントへ反映するイベント（`task-action` に相当する `memo-action` 等）を送るか、既存経路を流用するかは §10 で確定。
 
