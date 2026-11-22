@@ -4,6 +4,7 @@
         "includes": [
             "src/**/*.{js,jsx,ts,tsx,vue}",
             "electron/**/*.{js,jsx,ts,tsx}",
+            "cli/**/*.js",
             "scripts/**/*.js",
             "web/**/*.{js,jsx,ts,tsx,vue}",
             "*.{js,ts}"

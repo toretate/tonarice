@@ -4,6 +4,7 @@ import path from 'path';
 import { randomUUID } from 'node:crypto';
 import { USERS_DIR } from '../../utils/paths';
 import { safeWriteFileSync } from '../../utils/fs-helpers';
+import { saveMascotCliSettings } from '../../utils/mascot-cli-settings';
 
 function getMascotConfigPath(userId: string, mascotId: string): string {
     return path.join(USERS_DIR, userId, 'mascots', mascotId, 'mascot_config.json');
@@ -111,6 +112,7 @@ export default defineEventHandler(async (event) => {
         }
 
         safeWriteFileSync(configPath, JSON.stringify(mascot, null, 4));
+        saveMascotCliSettings(mascotDir, mascot);
         console.log(`[Server] Mascot saved successfully: ${configPath}`);
 
         return { success: true, mascot };

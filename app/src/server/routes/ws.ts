@@ -244,7 +244,7 @@ export default defineWebSocketHandler({
                     enableThinking,
                     ttsDictionary
                 } = data;
-                const enableTools = engine !== 'lmstudio' || toolUseEnabled !== false;
+                const enableTools = toolUseEnabled !== false;
 
                 console.log(`=========================================`);
                 console.log(`[WS] chat-send received (Nitro)!`);

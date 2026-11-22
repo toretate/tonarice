@@ -107,6 +107,16 @@ npm run build
   認証を省略する家庭内テストでは、公開範囲を信頼できるLANに限定したうえで
   `ALLOW_AUTH_BYPASS=true` を設定してください。一般公開環境では使用しないでください。
 
+### CLI での接続確認
+
+`app` ディレクトリで `node cli/index.js ping --url http://127.0.0.1:3000` を実行すると、サーバーと Mastra の状態を JSON で取得できます。自動操作時は `node cli/index.js -p` に JSON を標準入力から渡せます。認証・履歴・承認と終了コードは [CLI 仕様](docs/specs/Cli.spec.md) を参照してください。
+
+ターミナルで続けて会話する場合は `node cli/index.js --engine lmstudio --model モデル名` を実行します。引数なしでも対話モードで起動し、`/exit` で終了、`/clear` で会話の文脈を消去します。
+
+対話中の `/mascot` からマスコットの選択・作成・性格設定、`/model` から選択中マスコットのエンジン・モデル設定ができます。
+
+認証が必要な場合は対話中に `/login` を入力し、ブラウザーで Google ログインを完了してください。
+
 ### 3. テストの実行
 
 ```bash
