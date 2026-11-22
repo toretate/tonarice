@@ -1,5 +1,4 @@
-// LM Studio SDK のツール定義は Zod 3 のスキーマを受け取る。
-import { z } from 'zod/v3';
+import { lmStudioZod as z } from '../../utils/lmstudio-tool-schema';
 import { resolveJapaneseCity } from './weather-geocoding';
 
 export const weatherDescription = '指定された緯度・経度、または都市の現在の天気予報を取得します。緯度経度がわからない場合は都市名(city)のみを指定してください。';

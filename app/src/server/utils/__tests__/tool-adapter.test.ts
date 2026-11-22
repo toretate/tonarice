@@ -1,8 +1,7 @@
 import { describe, test, expect, vi } from 'vitest';
 import { convertLmStudioToolToVercel } from '../tool-adapter';
 import { tool } from '@lmstudio/sdk';
-// LM Studio SDK のツール定義は Zod 3 のスキーマを受け取る。
-import { z } from 'zod/v3';
+import { lmStudioZod as z } from '../../../utils/lmstudio-tool-schema';
 import type { Tool } from '@lmstudio/sdk';
 
 describe('tool-adapter のテスト', () => {

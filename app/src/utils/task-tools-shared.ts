@@ -1,6 +1,5 @@
 import { tool } from '@lmstudio/sdk';
-// LM Studio SDK のツール定義は Zod 3 のスキーマを受け取る。
-import { z } from 'zod/v3';
+import { lmStudioZod as z } from './lmstudio-tool-schema';
 
 export const manageTasksToolShared = tool({
     name: 'manageTasks',

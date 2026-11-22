@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
-import { flushPromises, mount } from '@vue/test-utils';
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import ChatPanel from '../ChatPanel.vue';
 
 describe('ChatPanel.vue - カスタムリサイズテスト', () => {
+    let wrapper: VueWrapper | undefined;
+
     beforeEach(() => {
         setActivePinia(createPinia());
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -16,27 +18,29 @@ describe('ChatPanel.vue - カスタムリサイズテスト', () => {
             readonly readyState = 0;
             close = vi.fn();
         });
-        
+
         // window.electronAPI のモック
-        window.electronAPI = {
+        vi.stubGlobal('electronAPI', {
             resizeChatWindow: vi.fn(),
             getAppConfig: vi.fn().mockResolvedValue({ chatWidth: 350, chatHeight: 400 }),
             onConfigUpdated: vi.fn().mockReturnValue(() => {}),
             onChatToggled: vi.fn().mockReturnValue(() => {}),
             onEmotionChanged: vi.fn().mockReturnValue(() => {}),
             onScheduledPromptChanged: vi.fn().mockReturnValue(() => {}),
-        } as any;
+        } satisfies Partial<NonNullable<Window['electronAPI']>>);
     });
 
     afterEach(() => {
+        wrapper?.unmount();
+        wrapper = undefined;
         vi.unstubAllGlobals();
         vi.restoreAllMocks();
     });
 
     it('右端のハンドルをドラッグした際、メインプロセスへ正しい新規サイズが送信されること', async () => {
-        const wrapper = mount(ChatPanel);
+        wrapper = mount(ChatPanel);
         await flushPromises();
-        
+
         // リサイズハンドルを取得
         const rightHandle = wrapper.find('.resize-handle.right');
         expect(rightHandle.exists()).toBe(true);
@@ -70,6 +74,5 @@ describe('ChatPanel.vue - カスタムリサイズテスト', () => {
         // 3. ドラッグ終了 (mouseup)
         const upEvent = new MouseEvent('mouseup');
         document.dispatchEvent(upEvent);
-        wrapper.unmount();
     });
 });
