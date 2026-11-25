@@ -45,6 +45,10 @@ export interface IElectronAPI {
     saveChatHistory: (history: any) => Promise<{ success: boolean; error?: string }>;
     openChatHistory: () => void;
     openFolder: (path: string) => void;
+    previewLegacyMascotPrompts?: (mascotId: string) => Promise<{
+        found: boolean;
+        prompts: Partial<{ soul: string; identity: string; user: string; agents: string; memory: string }>;
+    }>;
     getMascotPrompts: (mascotId: string) => Promise<{ soul: string; identity: string; user: string; agents: string; memory: string }>;
     saveMascotPrompts: (mascotId: string, prompts: { soul: string; identity: string; user: string; agents: string; memory: string }) => Promise<{ success: boolean; error?: string }>;
     getLmStudioModels: (endpoint: string) => Promise<{ success: boolean; models: { id: string; capabilities?: any }[]; error?: string }>;

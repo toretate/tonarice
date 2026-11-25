@@ -1,7 +1,8 @@
-import { createError, defineEventHandler, getQuery, getRequestURL, sendRedirect, setCookie } from 'h3';
+import { createError, defineEventHandler, getQuery, getRequestURL, sendRedirect, setCookie, setHeader } from 'h3';
 import * as https from 'https';
 import { authenticateUserToken } from '../../middleware/auth';
 import { resolveGoogleRedirectUri } from '../../utils/auth-redirect-uri';
+import { completeCliLogin } from '../../utils/cli-login';
 
 function exchangeCodeForToken(code: string, clientId: string, clientSecret: string, redirectUri: string): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -82,6 +83,12 @@ export default defineEventHandler(async (event) => {
         const user = await authenticateUserToken(idToken);
         const primaryEmail = user.identities.find(ident => ident.email)?.email || '';
         console.log(`[Auth] ユーザーログイン成功: ${primaryEmail}`);
+
+        if (typeof query.state === 'string') {
+            if (!completeCliLogin(query.state, idToken)) throw createError({ statusCode: 400, statusMessage: 'CLIログイン要求が無効または期限切れです。' });
+            setHeader(event, 'Cache-Control', 'no-store');
+            return 'CLIへのログインが完了しました。このタブを閉じてください。';
+        }
 
         const isSecureRequest = getRequestURL(event).protocol === 'https:';
         

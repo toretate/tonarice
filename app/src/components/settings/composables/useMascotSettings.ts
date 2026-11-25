@@ -1,3 +1,4 @@
+import { loadMascotPrompts as loadSharedMascotPrompts } from '../../../utils/mascot-prompt-client';
 import { ref, computed, watch, nextTick } from 'vue';
 import { useConfigStore } from '../../../store/config';
 import { autoAlignBatch, CONFIDENCE_THRESHOLD } from '../../../skills/expression-alignment/auto-align-v2';
@@ -231,9 +232,9 @@ export function useMascotSettings(
     });
 
     const loadMascotPrompts = async () => {
-        if (window.electronAPI && editingMascot.value && editingMascot.value.id) {
+        if (editingMascot.value && editingMascot.value.id) {
             try {
-                const data = await window.electronAPI.getMascotPrompts(editingMascot.value.id);
+                const { prompts: data } = await loadSharedMascotPrompts(editingMascot.value.id);
                 mascotPrompts.value = data;
             } catch (e) {
                 console.error('Failed to load mascot prompts in settings:', e);

@@ -30,6 +30,10 @@
 
 * ユニットテスト・統合テストなどのテストコードを積極的に作成する。
 * テストメソッド名は「テスト対象のメソッド名＋テスト内容（日本語）」で記述する。
+* サーバー・対話機能・Mastra Memory・ツール承認・メモ/タスク操作の実機動作テストには、CLI（`app/cli/`）を利用できる。仕様とコマンド詳細は `docs/specs/Cli.spec.md` を参照する。
+	* 実データを保護するため、動作テスト時は別ポート（`TONARICE_PORT` 等）と隔離ストレージオプション（`app/` で `npm run dev:cli:isolated` または `npm run dev:cli -- --isolated-storage`）で独立サーバーを起動し、本番・開発用の共有データを変更しない。
+	* 機械判定を行う自動テストでは `npm run cli -- ping` や `npm run cli -- chat send`（または `node --env-file=.env.local cli/index.js -p`）の JSON 出力と終了コードを利用する。
+	* API キー、認証トークン、`.env.local` の値、および不要な会話本文をログや報告へ出力しない。
 
 # 開発・ビルド・検証
 
@@ -66,6 +70,7 @@
 * 画像生成 AI 設定画面: `docs/specs/ImageGenAIConfigWindow.spec.md`
 * 動画生成 AI 設定画面: `docs/specs/VideoGenAIConfigWindow.spec.md`
 * API KEY 設定画面: `docs/specs/ApiKeyConfigWindow.spec.md`
+* CLI 仕様: `docs/specs/Cli.spec.md`
 * ウィジェット関連: `docs/specs/widgets/` 以下
 * タスク管理: `docs/specs/widgets/task-management/` 以下
 

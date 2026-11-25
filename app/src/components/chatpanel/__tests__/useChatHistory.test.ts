@@ -164,8 +164,8 @@ describe('useChatHistory.ts のテスト', () => {
         // runCompaction の実行
         await history.runCompaction('default', currentSession.id);
 
-        // シークレットセッションであるため、saveMascotPrompts は呼び出されていないはず
-        expect(window.electronAPI!.saveMascotPrompts).not.toHaveBeenCalled();
+        const savedPrompts = () => vi.mocked(fetch).mock.calls.filter(([url, init]) => url === '/api/mascots/cli-prompts' && init?.method === 'POST');
+        expect(savedPrompts()).toHaveLength(0);
 
         // 通常モードに戻す
         mascotStore.setSecretMode(false);
@@ -178,11 +178,75 @@ describe('useChatHistory.ts のテスト', () => {
             text: `メッセージ ${i}`
         }));
 
-        // 通常セッションで runCompaction を実行
+        // 通常セッションの長期記憶は共有プロンプト API に保存する。
+        const defaultFetch = vi.mocked(fetch).getMockImplementation()!;
+        vi.mocked(fetch).mockImplementation((url, init) => String(url).startsWith('/api/mascots/cli-prompts')
+            ? Promise.resolve(Response.json({ success: true, configured: true, prompts: { memory: '既存の長期記憶' } }))
+            : defaultFetch(url, init));
         await history.runCompaction('default', normalSession.id);
 
-        // 通常セッションなので saveMascotPrompts が呼び出されていること
-        expect(window.electronAPI!.saveMascotPrompts).toHaveBeenCalled();
+        // 通常セッションなので memory 専用保存が呼び出されていること
+        expect(savedPrompts()).toHaveLength(1);
+        expect(JSON.parse(String(savedPrompts()[0][1]?.body))).toMatchObject({
+            mascotId: 'default',
+            mode: 'memory',
+            memory: '新しい長期記憶',
+            expectedCurrentMemory: '既存の長期記憶'
+        });
+    });
+
+    it('runCompaction_IPCのない新規未設定マスコットでも長期記憶を初回保存し未移行旧設定がある場合は抑止する', async () => {
+        // window.electronAPI のない Web 環境を再現
+        delete (window as any).electronAPI;
+
+        const scrollToBottom = vi.fn();
+        const history = useChatHistory(scrollToBottom);
+        const defaultFetch = vi.mocked(fetch).getMockImplementation()!;
+        vi.mocked(fetch).mockImplementation((url, init) => {
+            if (String(url).startsWith('/api/mascots/cli-prompts') && init?.method !== 'POST') {
+                return Promise.resolve(Response.json({
+                    success: true,
+                    configured: false,
+                    prompts: { identity: '', soul: '', user: '', agents: '', memory: '' }
+                }));
+            }
+            if (String(url) === '/api/mascots/cli-prompts' && init?.method === 'POST') {
+                return Promise.resolve(Response.json({ success: true, memory: '新しい長期記憶', configured: false }));
+            }
+            return defaultFetch(url, init);
+        });
+
+        await history.loadHistory();
+        const session = history.sessions.value[0];
+        session.messages = Array.from({ length: 15 }, (_, i) => ({
+            id: i,
+            sender: i % 2 === 0 ? 'user' : 'mascot',
+            text: `メッセージ ${i}`
+        }));
+
+        await history.runCompaction('default', session.id);
+
+        const memoryPosts = () => vi.mocked(fetch).mock.calls.filter(
+            ([url, init]) => url === '/api/mascots/cli-prompts' && init?.method === 'POST'
+        );
+        expect(memoryPosts()).toHaveLength(1);
+        expect(JSON.parse(String(memoryPosts()[0][1]?.body))).toEqual({
+            mascotId: 'default',
+            mode: 'memory',
+            memory: '新しい長期記憶',
+            expectedCurrentMemory: ''
+        });
+
+        // 端末に未移行の旧設定が存在する場合は自動更新を抑止し共有先へ送らないこと
+        vi.mocked(fetch).mockClear();
+        localStorage.setItem('desktop_ai_mascot_prompts_default', JSON.stringify({ soul: '旧ローカル設定' }));
+        session.messages = Array.from({ length: 15 }, (_, i) => ({
+            id: i + 100,
+            sender: i % 2 === 0 ? 'user' : 'mascot',
+            text: `メッセージ ${i}`
+        }));
+        await history.runCompaction('default', session.id);
+        expect(memoryPosts()).toHaveLength(0);
     });
 
     it('deleteMessage_指定したIDのメッセージを削除し、履歴を保存すること', async () => {

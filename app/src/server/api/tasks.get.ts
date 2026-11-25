@@ -2,6 +2,7 @@ import { defineEventHandler, createError } from 'h3';
 import fs from 'fs';
 import path from 'path';
 import { USERS_DIR } from '../utils/paths';
+import { normalizeRevision } from '../utils/revision-conflict';
 
 function getUserTasksPath(userId: string): string {
     return path.join(USERS_DIR, userId, 'tasks.json');
@@ -26,7 +27,8 @@ export default defineEventHandler(async (event) => {
             notificationMinutes: 5,
             completionGraceSeconds: 5,
             defaultDurationHours: 1,
-            muteNotificationsDuringMeetings: false
+            muteNotificationsDuringMeetings: false,
+            revision: 0
         };
 
         if (fs.existsSync(tasksPath)) {
@@ -44,7 +46,7 @@ export default defineEventHandler(async (event) => {
             }
             try {
                 const parsed = JSON.parse(fileData);
-                data = { ...data, ...parsed };
+                data = { ...data, ...parsed, revision: normalizeRevision(parsed.revision) };
             } catch (e: any) {
                 // JSON 破損時も同様にエラーを返し、クライアント側のローカルデータを保護する。
                 console.error(`[Server] tasks.json の解析に失敗しました（破損の可能性）: ${e.message}`);
@@ -57,6 +59,7 @@ export default defineEventHandler(async (event) => {
 
         return { success: true, ...data };
     } catch (error: any) {
+        if (error?.statusCode) throw error;
         console.error('[Server] Failed to load tasks:', error.message);
         throw createError({
             statusCode: 500,

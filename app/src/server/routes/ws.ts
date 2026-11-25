@@ -9,7 +9,7 @@ import { authenticateUserToken } from '../middleware/auth';
 import { normalizeTextForTts, stripResidualAsterisks } from '../utils/tts-normalizer';
 import { PROJECT_ROOT, USERS_DIR } from '../utils/paths';
 import { executeMemosTool, executeTasksTool } from '../utils/tool-executor';
-import { updateTaskInDb } from '../utils/tasks-service';
+import { loadTasksStateFromDb } from '../utils/tasks-service';
 import { isAuthBypassAllowed } from '../utils/auth-bypass';
 import { encodeAudioBinaryFrame } from '../../utils/audio-binary-frame';
 import { MastraChatService } from '../mastra/mastra-chat-service';
@@ -18,11 +18,11 @@ import { getMastraChatErrorMessage } from '../mastra/chat-route';
 import { openChatMemoryTurn } from '../mastra/chat-memory-turn';
 import { requestToolApproval, respondToolApproval } from '../mastra/tool-approval';
 import { claimMutation } from '../mastra/mutation-claim';
+import { addUserConnection, removeUserConnection, broadcastToUser } from '../utils/user-connections';
 import { GenerationBudget } from '../mastra/generation-budget';
 
 
 // ユーザーごとの接続管理（crosswsのPeerオブジェクトをSetに保存）
-const userConnections = new Map<string, Set<any>>();
 const activeMastraRequests = new WeakMap<object, Set<AbortController>>();
 
 function registerMastraRequest(peer: object, controller: AbortController): void {
@@ -42,33 +42,6 @@ function abortMastraRequests(peer: object): void {
         controller.abort();
     }
     activeMastraRequests.delete(peer);
-}
-
-function addConnection(userId: string, peer: any) {
-    if (!userConnections.has(userId)) {
-        userConnections.set(userId, new Set());
-    }
-    userConnections.get(userId)!.add(peer);
-}
-
-function removeConnection(userId: string, peer: any) {
-    const conns = userConnections.get(userId);
-    if (conns) {
-        conns.delete(peer);
-        if (conns.size === 0) {
-            userConnections.delete(userId);
-        }
-    }
-}
-
-function broadcastToUser(userId: string, event: string, data: any) {
-    const conns = userConnections.get(userId);
-    if (conns) {
-        const payload = JSON.stringify({ event, data });
-        conns.forEach((peer) => {
-            peer.send(payload);
-        });
-    }
 }
 
 function getPeerUserId(peer: { context: Record<string, unknown> }): string {
@@ -113,23 +86,43 @@ function notifyDataToolResult(
         if (name === 'manageMemos') {
             peer.send(JSON.stringify({
                 event: 'memo-action',
-                data: { action: input.action, memoId: result.id || input.id, memo: result.memo }
+                data: {
+                    action: input.action,
+                    memoId: result.id || input.id,
+                    memo: result.memo,
+                    ...(result.revision !== undefined ? { revision: result.revision } : {})
+                }
             }));
             return;
         }
         if (input.action === 'add' || input.action === 'update') {
-            // カテゴリの最新スナップショットを取得するため、無害な空更新でDBから再取得する。
-            const saved = updateTaskInDb(getPeerUserId(peer), result.id, {});
+            const state = Array.isArray(result.categories) && result.task
+                ? { categories: result.categories, task: result.task }
+                : (() => {
+                    const loaded = loadTasksStateFromDb(getPeerUserId(peer));
+                    return {
+                        categories: loaded.categories,
+                        task: result.task || loaded.tasks.find((t: any) => t.id === (result.id || input.id))
+                    };
+                })();
             peer.send(JSON.stringify({
                 event: 'task-action',
                 data: {
                     action: input.action === 'add' ? (input.scheduledAt ? 'addSchedule' : 'addTask') : 'updateTask',
-                    categories: saved.categories,
-                    task: saved.task
+                    categories: state.categories,
+                    task: state.task,
+                    ...(result.revision !== undefined ? { revision: result.revision } : {})
                 }
             }));
         } else if (input.action === 'delete') {
-            peer.send(JSON.stringify({ event: 'task-action', data: { action: 'deleteTask', taskId: input.id } }));
+            peer.send(JSON.stringify({
+                event: 'task-action',
+                data: {
+                    action: 'deleteTask',
+                    taskId: input.id,
+                    ...(result.revision !== undefined ? { revision: result.revision } : {})
+                }
+            }));
         }
     } catch {
         console.warn(`[WS] ${name}の画面同期に失敗`);
@@ -190,7 +183,7 @@ export default defineWebSocketHandler({
 
         // コネクションの登録
         peer.context.userId = userId;
-        addConnection(userId, peer);
+        addUserConnection(userId, peer);
         console.log(`[WS] Client connected successfully (User: ${userId})`);
     },
 
@@ -244,7 +237,7 @@ export default defineWebSocketHandler({
                     enableThinking,
                     ttsDictionary
                 } = data;
-                const enableTools = engine !== 'lmstudio' || toolUseEnabled !== false;
+                const enableTools = toolUseEnabled !== false;
 
                 console.log(`=========================================`);
                 console.log(`[WS] chat-send received (Nitro)!`);
@@ -489,6 +482,6 @@ export default defineWebSocketHandler({
         const userId = getPeerUserId(peer);
         abortMastraRequests(peer);
         console.log(`[WS] Client disconnected (User: ${userId}, Details: ${JSON.stringify(details)})`);
-        removeConnection(userId, peer);
+        removeUserConnection(userId, peer);
     }
 });

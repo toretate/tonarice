@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, watch, computed } from 'vue';
+import { createRevisionSave } from './revision-save';
 
 export interface Memo {
     id: string;
@@ -11,15 +12,80 @@ export interface Memo {
     updatedAt: string;
 }
 
+export interface ServerMemoActionPayload {
+    action: 'add' | 'update' | 'delete';
+    memo?: Memo;
+    memoId?: string;
+    revision?: number;
+}
+
+let activeMemoStorageListener: ((e: StorageEvent) => void) | null = null;
+
 export const useMemoStore = defineStore('memo', () => {
     const memos = ref<Memo[]>([]);
     const showMemoWidget = ref<boolean>(false);
     const isLoaded = ref(false);
+    const serverRevision = ref<number | null>(null);
+    let suppressServerSync = 0;
+    let storageSyncRunning = false;
+    const pendingStorageKeys = new Set<string>();
+
+    const persistLocalOnly = () => {
+        if (typeof window === 'undefined') return;
+        try {
+            localStorage.setItem('desktop-mascot-memos', JSON.stringify(memos.value));
+            localStorage.setItem('desktop-mascot-show-memo-widget', String(showMemoWidget.value));
+        } catch (error) {
+            console.error('LocalStorageへのメモ保存エラー:', error);
+        }
+    };
+
+    /**
+     * サーバー起点の状態反映では watch による全件 POST を抑止し、LocalStorage のみ更新する。
+     */
+    const runFromServer = (fn: () => void) => {
+        suppressServerSync += 1;
+        try {
+            fn();
+            persistLocalOnly();
+        } finally {
+            suppressServerSync -= 1;
+        }
+    };
+
+    const sync = createRevisionSave({
+        url: '/api/memos',
+        revision: serverRevision,
+        read: () => ({ memos: memos.value }),
+        collections: ['memos'],
+        apply: data => runFromServer(() => {
+            memos.value = data.memos as Memo[];
+        })
+    });
+
+    const reloadFromServer = async () => {
+        if (typeof window === 'undefined') return;
+        try {
+            const res = await fetch('/api/memos', { credentials: 'include' });
+            if (!res.ok) return;
+            const contentType = res.headers.get('content-type') ?? '';
+            if (!contentType.includes('application/json')) return;
+            const resJson = await res.json();
+            if (!resJson.success) return;
+            if (sync.isPending()) return;
+            if (Number.isSafeInteger(resJson.revision) && resJson.revision >= (serverRevision.value ?? 0)) {
+                sync.mergeRemote(resJson, resJson.revision);
+            }
+        } catch (error) {
+            console.warn('サーバーからのメモ再読込失敗:', error);
+        }
+    };
 
     const loadFromLocalStorage = async () => {
-        if (typeof window === 'undefined') return;
+        if (typeof window === 'undefined' || sync.isPending()) return;
 
         // 1. ローカルストレージからの読み込み
+        suppressServerSync += 1;
         try {
             const savedMemos = localStorage.getItem('desktop-mascot-memos');
             if (savedMemos) {
@@ -31,6 +97,8 @@ export const useMemoStore = defineStore('memo', () => {
             }
         } catch (error) {
             console.warn('LocalStorageからのメモ読み込みエラー:', error);
+        } finally {
+            suppressServerSync -= 1;
         }
 
         // 2. サーバーからの読み込み
@@ -43,15 +111,18 @@ export const useMemoStore = defineStore('memo', () => {
                     throw new Error(`メモAPIがJSON以外を返しました (${contentType || 'Content-Typeなし'})`);
                 }
                 const resJson = await res.json();
-                if (resJson.success) {
+                const revision = Number.isSafeInteger(resJson.revision) && resJson.revision >= 0 ? resJson.revision : 0;
+                if (resJson.success && !sync.isPending() && revision >= (serverRevision.value ?? 0)) {
                     const serverMemos = Array.isArray(resJson.memos) ? resJson.memos : [];
-                    if (serverMemos.length > 0 || memos.value.length === 0) {
-                        memos.value = serverMemos;
-                    } else {
-                        recoveredFromLocal = true;
-                        console.warn('[MemoStore] サーバーのメモが空のため、ローカルの既存データを保持しました。');
-                    }
-                    localStorage.setItem('desktop-mascot-memos', JSON.stringify(memos.value));
+                    runFromServer(() => {
+                        sync.adopt(resJson, revision);
+                        if (revision > 0 || serverMemos.length > 0 || memos.value.length === 0) {
+                            memos.value = serverMemos;
+                        } else {
+                            recoveredFromLocal = true;
+                            console.warn('[MemoStore] サーバーのメモが空のため、ローカルの既存データを保持しました。');
+                        }
+                    });
                 }
             } else if (memos.value.length > 0) {
                 recoveredFromLocal = true;
@@ -69,29 +140,18 @@ export const useMemoStore = defineStore('memo', () => {
     const saveToLocalStorage = () => {
         if (typeof window === 'undefined' || !isLoaded.value) return;
 
-        try {
-            localStorage.setItem('desktop-mascot-memos', JSON.stringify(memos.value));
-            localStorage.setItem('desktop-mascot-show-memo-widget', String(showMemoWidget.value));
+        persistLocalOnly();
 
-            fetch('/api/memos', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ memos: memos.value }),
-                credentials: 'include'
-            }).catch(err => {
-                console.warn('サーバーへのメモ保存失敗:', err);
-            });
-        } catch (error) {
-            console.error('LocalStorageへのメモ保存エラー:', error);
-        }
+        if (serverRevision.value !== null) sync.request();
     };
 
     watch(
         [() => memos.value, () => showMemoWidget.value],
         () => {
+            if (suppressServerSync > 0 || !isLoaded.value) return;
             saveToLocalStorage();
         },
-        { deep: true }
+        { deep: true, flush: 'sync' }
     );
 
     const sortedMemos = computed(() => {
@@ -118,12 +178,66 @@ export const useMemoStore = defineStore('memo', () => {
     };
 
     const addMemoFromServer = (memo: Memo) => {
-        const exists = memos.value.some(m => m.id === memo.id);
-        if (!exists) {
-            memos.value.push(memo);
-        } else {
+        runFromServer(() => {
             const idx = memos.value.findIndex(m => m.id === memo.id);
-            if (idx !== -1) memos.value[idx] = memo;
+            if (idx === -1) {
+                memos.value.push(memo);
+            } else {
+                memos.value[idx] = memo;
+            }
+        });
+    };
+
+    const deleteMemoFromServer = (id: string) => {
+        runFromServer(() => {
+            memos.value = memos.value.filter(m => m.id !== id);
+        });
+    };
+
+    /**
+     * WebSocket 経由のサーバー起点メモ更新を適用する。
+     * サーバーへの書き戻し（POST）は発生させず、リビジョン欠落を検知した場合は最新を再読込する。
+     */
+    const applyServerMemoAction = async (payload: ServerMemoActionPayload) => {
+        while (sync.isPending()) await sync.settled();
+        const { action, memo, memoId, revision } = payload;
+        const hasValidRevision = typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= 0;
+        if (hasValidRevision) {
+            const currentRevision = serverRevision.value;
+            if (currentRevision !== null && revision <= currentRevision) return;
+            if (currentRevision === null || revision > currentRevision + 1) {
+                await reloadFromServer();
+                return;
+            }
+            sync.applyDelta(revision, data => {
+                const entries = (data.memos as Memo[] | undefined) || [];
+                if (action === 'delete') return { memos: entries.filter(item => item.id !== memoId) };
+                const next = memo && entries.some(item => item.id === memo.id)
+                    ? entries.map(item => item.id === memo.id ? memo : item)
+                    : memo ? [...entries, memo] : entries;
+                return { memos: next };
+            });
+            return;
+        }
+
+        if (action === 'delete') {
+            if (memoId) {
+                runFromServer(() => {
+                    memos.value = memos.value.filter(m => m.id !== memoId);
+                });
+            }
+            return;
+        }
+
+        if (memo && (action === 'add' || action === 'update')) {
+            runFromServer(() => {
+                const idx = memos.value.findIndex(m => m.id === memo.id);
+                if (idx >= 0) {
+                    memos.value[idx] = memo;
+                } else {
+                    memos.value.push(memo);
+                }
+            });
         }
     };
 
@@ -138,25 +252,61 @@ export const useMemoStore = defineStore('memo', () => {
     const deleteMemo = (id: string) => {
         memos.value = memos.value.filter(m => m.id !== id);
     };
-    
-    if (typeof window !== 'undefined') {
-        window.addEventListener('storage', (e) => {
-            if (e.key === 'desktop-mascot-memos' || e.key === 'desktop-mascot-show-memo-widget') {
-                isLoaded.value = false;
-                loadFromLocalStorage();
+
+    const syncFromStorageEvent = async (key: string) => {
+        if (!isLoaded.value) return;
+        pendingStorageKeys.add(key);
+        if (storageSyncRunning) return;
+        storageSyncRunning = true;
+        try {
+            while (pendingStorageKeys.size > 0) {
+                while (sync.isPending()) {
+                    await sync.settled();
+                }
+                const keys = Array.from(pendingStorageKeys);
+                pendingStorageKeys.clear();
+                if (keys.includes('desktop-mascot-show-memo-widget')) {
+                    const savedShowWidget = localStorage.getItem('desktop-mascot-show-memo-widget');
+                    if (savedShowWidget !== null) {
+                        runFromServer(() => {
+                            showMemoWidget.value = savedShowWidget === 'true';
+                        });
+                    }
+                }
+                if (keys.includes('desktop-mascot-memos')) {
+                    await reloadFromServer();
+                }
             }
-        });
+        } finally {
+            storageSyncRunning = false;
+        }
+    };
+
+    if (typeof window !== 'undefined') {
+        if (activeMemoStorageListener) {
+            window.removeEventListener('storage', activeMemoStorageListener);
+        }
+        activeMemoStorageListener = (e: StorageEvent) => {
+            if (e.key === 'desktop-mascot-memos' || e.key === 'desktop-mascot-show-memo-widget') {
+                void syncFromStorageEvent(e.key);
+            }
+        };
+        window.addEventListener('storage', activeMemoStorageListener);
     }
 
     return {
         memos,
         showMemoWidget,
         isLoaded,
+        serverRevision,
         sortedMemos,
         loadFromLocalStorage,
+        reloadFromServer,
         saveToLocalStorage,
         addMemo,
         addMemoFromServer,
+        deleteMemoFromServer,
+        applyServerMemoAction,
         updateMemo,
         deleteMemo
     };

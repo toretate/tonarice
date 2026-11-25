@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 import Button from 'primevue/button';
+import {
+    loadMascotPrompts,
+    previewLocalLegacyMascotPrompts,
+    saveMascotPrompts,
+    type MascotPrompts
+} from '../../../utils/mascot-prompt-client';
 import AppModalShell from '../../common/AppModalShell.vue';
 
 const props = defineProps<{
@@ -20,66 +26,81 @@ const agents = ref('');
 const memory = ref('');
 const isSaving = ref(false);
 
-const loadPrompts = async () => {
-    if (!props.mascotId) return;
+const loaded = ref(false);
+const canImportLegacy = ref(false);
+let loadVersion = 0;
+
+function showPrompts(data?: MascotPrompts) {
+    identity.value = data?.identity || '';
+    soul.value = data?.soul || '';
+    userPrompt.value = data?.user || '';
+    agents.value = data?.agents || '';
+    memory.value = data?.memory || '';
+}
+
+watch(() => [props.visible, props.mascotId] as const, async ([visible, mascotId]) => {
+    const version = ++loadVersion;
+    loaded.value = false;
+    canImportLegacy.value = false;
+    showPrompts();
+    if (!visible || !mascotId) return;
     try {
-        if (window.electronAPI) {
-            const data = await window.electronAPI.getMascotPrompts(props.mascotId);
-            identity.value = data.identity || '';
-            soul.value = data.soul || '';
-            userPrompt.value = data.user || '';
-            agents.value = data.agents || '';
-            memory.value = data.memory || '';
+        const result = await loadMascotPrompts(mascotId);
+        if (version !== loadVersion || !props.visible) return;
+        showPrompts(result.prompts);
+        loaded.value = true;
+        if (!result.configured) {
+            const legacy = await previewLocalLegacyMascotPrompts(mascotId);
+            if (version !== loadVersion || !props.visible) return;
+            canImportLegacy.value = legacy.found;
         }
-    } catch (err) {
-        console.error('Failed to load mascot prompts in modal:', err);
+    } catch {
+        if (version === loadVersion && props.visible) alert('プロンプトを読み込めませんでした。');
     }
-};
+}, { immediate: true });
 
-watch(
-    () => props.visible,
-    (newVal) => {
-        if (newVal) {
-            loadPrompts();
+async function importLegacyPrompts() {
+    if (!canImportLegacy.value || !window.confirm('この端末にある旧設定が、現在のアカウントに移す内容であることを確認してください。読み込んだ内容は保存前に確認できます。')) return;
+    const version = loadVersion;
+    try {
+        const preview = await previewLocalLegacyMascotPrompts(props.mascotId);
+        if (version !== loadVersion || !props.visible) return;
+        if (!preview.found) {
+            alert('この端末に旧設定は見つかりませんでした。');
+            return;
         }
-    },
-    { immediate: true }
-);
-
-watch(
-    () => props.mascotId,
-    () => {
-        if (props.visible) {
-            loadPrompts();
-        }
+        // 旧設定に存在する項目だけを反映し、未存在の項目ではサーバー側の既存値を空欄で上書きしない。
+        if (Object.prototype.hasOwnProperty.call(preview.prompts, 'identity')) identity.value = preview.prompts.identity ?? '';
+        if (Object.prototype.hasOwnProperty.call(preview.prompts, 'soul')) soul.value = preview.prompts.soul ?? '';
+        if (Object.prototype.hasOwnProperty.call(preview.prompts, 'user')) userPrompt.value = preview.prompts.user ?? '';
+        if (Object.prototype.hasOwnProperty.call(preview.prompts, 'agents')) agents.value = preview.prompts.agents ?? '';
+        if (Object.prototype.hasOwnProperty.call(preview.prompts, 'memory')) memory.value = preview.prompts.memory ?? '';
+    } catch {
+        if (version === loadVersion && props.visible) alert('この端末の旧設定を読み込めませんでした。');
     }
-);
+}
 
-const handleSave = async () => {
-    if (!props.mascotId) return;
+async function handleSave() {
+    if (!loaded.value || isSaving.value) return;
+    const version = loadVersion;
     isSaving.value = true;
     try {
-        if (window.electronAPI) {
-            const res = await window.electronAPI.saveMascotPrompts(props.mascotId, {
-                identity: identity.value,
-                soul: soul.value,
-                user: userPrompt.value,
-                agents: agents.value,
-                memory: memory.value
-            });
-            if (res.success) {
-                emit('save-done');
-                emit('close');
-            } else {
-                alert('保存に失敗しました: ' + res.error);
-            }
-        }
-    } catch (err: any) {
-        alert('保存エラー: ' + err.message);
+        await saveMascotPrompts(props.mascotId, {
+            identity: identity.value,
+            soul: soul.value,
+            user: userPrompt.value,
+            agents: agents.value,
+            memory: memory.value
+        });
+        if (version !== loadVersion) return;
+        emit('save-done');
+        emit('close');
+    } catch {
+        alert('プロンプトを保存できませんでした。');
     } finally {
         isSaving.value = false;
     }
-};
+}
 </script>
 
 <template>
@@ -193,8 +214,9 @@ const handleSave = async () => {
             </div>
 
         <div class="modal-footer flex justify-content-end gap-2 pt-3 border-top border-gray-200 mt-3">
+            <Button v-if="canImportLegacy" label="この端末の旧設定を読み込む" class="p-button-outlined p-button-sm" @click="importLegacyPrompts" :disabled="isSaving" />
             <Button label="キャンセル" icon="pi pi-times" class="p-button-outlined p-button-secondary p-button-sm" @click="emit('close')" :disabled="isSaving" />
-            <Button label="保存する" icon="pi pi-save" class="p-button-primary p-button-sm px-4" @click="handleSave" :loading="isSaving" />
+            <Button label="保存する" icon="pi pi-save" class="p-button-primary p-button-sm px-4" @click="handleSave" :loading="isSaving" :disabled="!loaded" />
         </div>
     </AppModalShell>
 </template>

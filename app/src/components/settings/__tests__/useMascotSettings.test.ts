@@ -4,6 +4,8 @@ import { selectOutfitPreviewExpression, useMascotSettings, uploadImportedImage }
 import { createPinia, setActivePinia } from 'pinia';
 import { useConfigStore } from '../../../store/config';
 
+vi.mock('../../../utils/mascot-prompt-client', () => ({ loadMascotPrompts: vi.fn().mockResolvedValue({ prompts: {} }) }));
+
 vi.mock('../../../skills/expression-alignment/auto-align-v2', () => ({
     autoAlignBatch: vi.fn(),
     CONFIDENCE_THRESHOLD: 0.5
@@ -69,6 +71,49 @@ describe('useMascotSettings', () => {
 
         expect(editingMascot.value.id).toBe('mascot_a');
         expect(editingMascot.value.name).toBe('マスコットA');
+    });
+
+    it('initEditingMascot - electronAPIのないWeb環境でもサーバーAPIからプロンプトを読み込めること', async () => {
+        const promptClient = await import('../../../utils/mascot-prompt-client');
+        vi.mocked(promptClient.loadMascotPrompts).mockResolvedValueOnce({
+            configured: true,
+            prompts: {
+                identity: 'Web共有の役割',
+                soul: 'Web共有の性格',
+                user: '',
+                agents: '',
+                memory: 'Web共有の記憶'
+            }
+        });
+        delete (window as any).electronAPI;
+
+        const configStore = useConfigStore();
+        configStore.mascots = [
+            {
+                id: 'mascot_web',
+                name: 'Webマスコット',
+                avatar: '🤖',
+                profile: '',
+                currentOutfitId: '',
+                aiConfig: {
+                    chat: { engine: 'gemini', model: 'gemini-3.5-flash-lite', temperature: 0.7 },
+                    voice: { engine: 'voicevox', speaker_id: 2, style: 'normal' }
+                },
+                assets: { outfits: [], expressions: [], poses: [] }
+            }
+        ];
+
+        const { mascotPrompts, initEditingMascot } = useMascotSettings(
+            { mascots: configStore.mascots, activeMascotId: 'mascot_web', geminiApiKey: '' },
+            vi.fn()
+        );
+        initEditingMascot();
+
+        await vi.waitFor(() => {
+            expect(mascotPrompts.value.identity).toBe('Web共有の役割');
+            expect(mascotPrompts.value.memory).toBe('Web共有の記憶');
+        });
+        expect(promptClient.loadMascotPrompts).toHaveBeenCalledWith('mascot_web');
     });
 
     it('setDefaultExpression - 指定した表情IDが通常表示の表情として保存され、プレビューと設定保存イベントが送信されること', () => {
