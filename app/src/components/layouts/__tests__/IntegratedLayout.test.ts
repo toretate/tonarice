@@ -54,7 +54,6 @@ describe('IntegratedLayout.vue - 統合ウィンドウのテスト', () => {
             onChatToggled: vi.fn().mockReturnValue(() => {}),
             onEmotionChanged: vi.fn().mockReturnValue(() => {}),
             onConfigUpdated: vi.fn().mockReturnValue(() => {}),
-            onScheduledPromptChanged: vi.fn().mockReturnValue(() => {}),
             getChatHistory: vi.fn().mockResolvedValue(null),
         } as any;
     });

@@ -26,7 +26,6 @@ describe('ChatPanel.vue - カスタムリサイズテスト', () => {
             onConfigUpdated: vi.fn().mockReturnValue(() => {}),
             onChatToggled: vi.fn().mockReturnValue(() => {}),
             onEmotionChanged: vi.fn().mockReturnValue(() => {}),
-            onScheduledPromptChanged: vi.fn().mockReturnValue(() => {}),
         } satisfies Partial<NonNullable<Window['electronAPI']>>);
     });
 

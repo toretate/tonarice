@@ -190,7 +190,7 @@ ui/
 ## 3. AIエージェント基盤
 
 * Gemini/OpenAI/LM Studioの対話チャットはNitroサーバープロセス内のMastraを使用する。
-* CoWorkの定期実行、要約、読み辞書などのAI処理は既存のVercel AI SDK経路を使用する。
+* CoWork の定期実行は Nitro API サーバーが担当する。要約や読み辞書と同様に、AI 生成には既存の Vercel AI SDK 経路を使用する。[CoWork 仕様](ScheduledPromptTask.spec.md)
 * MastraランタイムをElectronメインプロセスやRendererへ配置しない。
 * 旧チャット経路および機能フラグによる切り戻しは廃止する。切り戻しには前のリリースを使用する。
 * 詳細は`docs/specs/MastraIntegration.spec.md`に定める。

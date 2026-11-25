@@ -39,7 +39,7 @@ MastraをAIエージェントのオーケストレーション基盤として段
 
 - Gemini/OpenAI/LM Studioの対話チャットはMastraのみを使う。未対応エンジンはエラーとし、旧経路へ切り替えない。従来の環境変数`MASTRA_CHAT_ENABLED`は参照しない。
 - 互換用のLM StudioチャットHTTP APIもMastraを使い、従来の応答形式を維持する。他のAI処理は既存経路を使う。
-- CoWorkの定期実行は今回の切り替え対象外とし、既存のElectron経路を維持する。
+- CoWork の定期実行は Nitro のスケジューラから既存の `ChatAiService` を利用する。運用設定は [CoWork 仕様](ScheduledPromptTask.spec.md) を参照。
 - `toolsWeather`、`toolsWebSearch`、`toolsGpsLocation`、`toolsVolume`、`toolsAppLauncher`が明示的に`true`の発話だけ対応ツールを公開する。無効・未指定の場合は公開しない。
 - タスク・メモは認証済みWebSocket接続のユーザー別DB操作関数が利用できる場合だけ公開する。
 - LM Studioのモデル別ツール設定が無効なら、認証状態にかかわらずタスク・メモを含めすべてのツールを公開しない。

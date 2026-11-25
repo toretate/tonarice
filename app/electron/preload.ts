@@ -207,25 +207,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
         };
     },
 
-    // 定期実行タスクの取得・更新
-    getScheduledPromptData: () => ipcRenderer.invoke('scheduled-prompt:list'),
-    createScheduledPromptTask: (input: any) =>
-        ipcRenderer.invoke('scheduled-prompt:create', input),
-    updateScheduledPromptTask: (id: string, input: any) =>
-        ipcRenderer.invoke('scheduled-prompt:update', id, input),
-    setScheduledPromptTaskEnabled: (id: string, enabled: boolean) =>
-        ipcRenderer.invoke('scheduled-prompt:set-enabled', id, enabled),
-    deleteScheduledPromptTask: (id: string) =>
-        ipcRenderer.invoke('scheduled-prompt:delete', id),
-    runScheduledPromptTaskNow: (id: string) =>
-        ipcRenderer.invoke('scheduled-prompt:run-now', id),
-    onScheduledPromptChanged: (callback: () => void) => {
-        const listener = () => callback();
-        ipcRenderer.on('scheduled-prompt:changed', listener);
-        return () => {
-            ipcRenderer.off('scheduled-prompt:changed', listener);
-        };
-    },
+    requestCoWork: (request: import('../src/types/cowork-desktop').CoWorkDesktopRequest) =>
+        ipcRenderer.invoke('cowork:request', request),
+    openCoWorkPairing: () => ipcRenderer.invoke('cowork:open-pairing'),
+    pairCoWork: (code: string) => ipcRenderer.invoke('cowork:pair', code),
 
     // ラジオモード用プロンプトの取得
     getRadioPrompts: () => ipcRenderer.invoke('get-radio-prompts'),

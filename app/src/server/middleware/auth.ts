@@ -4,6 +4,7 @@ import * as crypto from 'crypto';
 import { verifyGoogleIdToken } from '../utils/auth-service';
 import { USERS_FILE_PATH } from '../utils/paths';
 import { isAuthBypassAllowed } from '../utils/auth-bypass';
+import { findCoWorkDesktopOwner } from '../cowork/pairing';
 
 export interface Identity {
     provider: string;
@@ -142,7 +143,8 @@ export default defineEventHandler(async (event) => {
     }
 
     // 認証開始・OAuthコールバック・pingは未認証でアクセスできる必要がある。
-    if (url === '/api/ping' || url === '/api/auth/login' || url === '/api/auth/callback') {
+    if (url === '/api/ping' || url === '/api/auth/login' || url === '/api/auth/callback'
+        || url === '/api/cowork/pair/claim') {
         return;
     }
 
@@ -167,6 +169,18 @@ export default defineEventHandler(async (event) => {
     // 2. Cookie をチェック (session_token)
     if (!token) {
         token = getCookie(event, 'session_token') || '';
+    }
+
+    // デスクトップ接続用の短期セッションは CoWork のデータ操作に限定する。
+    if (token.startsWith('cowork_')) {
+        const allowed = url === '/api/cowork' || url === '/api/cowork/activity' || url === '/api/cowork/import' ||
+            url === '/api/cowork/tasks' || url.startsWith('/api/cowork/tasks/');
+        if (!allowed || !authHeader?.startsWith('Bearer ')) throw createError({ statusCode: 403 });
+        const owner = findCoWorkDesktopOwner(token);
+        const user = owner && readUsersConfig().users.find(candidate => candidate.id === owner);
+        if (!user) throw createError({ statusCode: 401, message: 'CoWork のデスクトップ接続を更新してください。' });
+        event.context.user = { id: user.id, email: user.identities.find(identity => identity.email)?.email || '', role: user.role };
+        return;
     }
 
     if (!token) {

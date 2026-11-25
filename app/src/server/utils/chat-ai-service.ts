@@ -193,6 +193,9 @@ export class ChatAiService {
         repetitionPenalty?: number;
         maxOutputTokens?: number;
         enableThinking?: boolean;
+        signal?: AbortSignal;
+        logContent?: boolean;
+        maxRetries?: number;
         history?: any[];
         attachments?: any[];
         tools?: any;
@@ -201,7 +204,9 @@ export class ChatAiService {
         onToolExecute?: (toolName: string, args: any) => Promise<any>;
     }): Promise<string> {
         const { message, apiKey, systemPrompt, model, engine, lmstudioEndpoint, temperature, frequencyPenalty, repetitionPenalty, maxOutputTokens, enableThinking, history, attachments, tools, toolUseEnabled, onToolResult, onToolExecute } = params;
+        const { signal, logContent = true, maxRetries } = params;
         const controller = new AbortController();
+        const abortSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
         const timeoutId = setTimeout(() => controller.abort(), 60000);
 
         try {
@@ -363,7 +368,7 @@ export class ChatAiService {
 
             if (currentEngine === 'lmstudio') {
                 const finalEndpoint = normalizeLmStudioBaseUrl(lmstudioEndpoint);
-                console.log(`[ChatAiService] Routing to LM Studio via Vercel AI SDK: ${finalEndpoint} (Model: ${model || 'unspecified'})`);
+                if (logContent) console.log(`[ChatAiService] Routing to LM Studio via Vercel AI SDK: ${finalEndpoint} (Model: ${model || 'unspecified'})`);
 
                 const lmstudio = createOpenAI({
                     baseURL: finalEndpoint,
@@ -393,9 +398,11 @@ export class ChatAiService {
             }
 
             // デバッグログ
-            console.log("[ChatAiService] finalSystemPrompt:", finalSystemPrompt);
-            console.log("[ChatAiService] messages:", JSON.stringify(messages, null, 2));
-            console.log("[ChatAiService] vercelTools:", Object.keys(vercelTools));
+            if (logContent) {
+                console.log("[ChatAiService] finalSystemPrompt:", finalSystemPrompt);
+                console.log("[ChatAiService] messages:", JSON.stringify(messages, null, 2));
+                console.log("[ChatAiService] vercelTools:", Object.keys(vercelTools));
+            }
 
             // Vercel AI SDK での生成実行 (ツールが定義されている場合のみ tools / stopWhen を指定する)
             const hasTools = Object.keys(vercelTools).length > 0;
@@ -407,7 +414,8 @@ export class ChatAiService {
                 temperature: temperature !== undefined ? temperature : (hasTools ? 0.2 : 0.7),
                 frequencyPenalty: frequencyPenalty !== undefined ? frequencyPenalty : 0.0,
                 maxOutputTokens: maxOutputTokens !== undefined ? maxOutputTokens : 2048,
-                abortSignal: controller.signal
+                abortSignal,
+                maxRetries
             };
 
             if (hasTools) {
@@ -437,13 +445,15 @@ export class ChatAiService {
 
             clearTimeout(timeoutId);
 
-            console.log("[ChatAiService] raw generateText response.text:", response.text);
-            console.log("[ChatAiService] generateText response steps:", JSON.stringify(response.steps.map(s => ({
-                text: s.text,
-                toolCalls: s.toolCalls,
-                toolResults: s.toolResults,
-                finishReason: s.finishReason
-            })), null, 2));
+            if (logContent) {
+                console.log("[ChatAiService] raw generateText response.text:", response.text);
+                console.log("[ChatAiService] generateText response steps:", JSON.stringify(response.steps.map(s => ({
+                    text: s.text,
+                    toolCalls: s.toolCalls,
+                    toolResults: s.toolResults,
+                    finishReason: s.finishReason
+                })), null, 2));
+            }
             const rawContent = response.text || '';
             let cleanedContent = rawContent;
 
@@ -499,6 +509,7 @@ export class ChatAiService {
 
         } catch (aiError: any) {
             clearTimeout(timeoutId);
+            if (!logContent) throw aiError;
             if (engine === 'lmstudio' && isLmStudioTemplateError(aiError)) {
                 console.warn('[ChatAiService] LM Studioのチャットテンプレートエラー');
                 throw aiError;

@@ -1,9 +1,5 @@
 import type { Base64AudioPayload } from './types/audio';
-import type {
-    ScheduledPromptRun,
-    ScheduledPromptTask,
-    ScheduledPromptTaskInput
-} from './types/scheduled-prompt-task';
+import type { CoWorkDesktopRequest, CoWorkDesktopResponse } from './types/cowork-desktop';
 
 interface MascotAsset {
     id: string;
@@ -78,17 +74,9 @@ export interface IElectronAPI {
     startTimer: (seconds: number, memo: string) => void;
     triggerTimerNotification: (memo: string, options?: { notificationId?: string; speak?: boolean }) => void;
     onTimerTrigger: (callback: (memo: string, options?: { notificationId?: string; speak?: boolean }) => void) => () => void;
-    getScheduledPromptData: () => Promise<{
-        tasks: ScheduledPromptTask[];
-        runs: ScheduledPromptRun[];
-        readOnly: boolean;
-    }>;
-    createScheduledPromptTask: (input: ScheduledPromptTaskInput) => Promise<ScheduledPromptTask>;
-    updateScheduledPromptTask: (id: string, input: ScheduledPromptTaskInput) => Promise<ScheduledPromptTask>;
-    setScheduledPromptTaskEnabled: (id: string, enabled: boolean) => Promise<ScheduledPromptTask>;
-    deleteScheduledPromptTask: (id: string) => Promise<void>;
-    runScheduledPromptTaskNow: (id: string) => Promise<ScheduledPromptRun | undefined>;
-    onScheduledPromptChanged: (callback: () => void) => () => void;
+    requestCoWork?: (request: CoWorkDesktopRequest) => Promise<CoWorkDesktopResponse>;
+    openCoWorkPairing?: () => Promise<void>;
+    pairCoWork?: (code: string) => Promise<boolean>;
     getRadioPrompts: () => Promise<{ radioMode: string; activeTalk: string; exRadioMode?: string; exActiveTalk?: string }>;
     saveRadioPrompts: (prompts: { radioMode: string; activeTalk: string; exRadioMode?: string; exActiveTalk?: string }) => Promise<{ success: boolean; error?: string }>;
     forgeGenerateImage?: (params: any, host: string) => Promise<string>;

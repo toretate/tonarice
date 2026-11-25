@@ -16,8 +16,8 @@ import { registerHeartbeatHandlers } from './ipc-handlers/heartbeat-handler';
 import { registerHistoryHandlers } from './ipc-handlers/history-handler';
 import { registerLifecycleHandlers } from './ipc-handlers/lifecycle-handler';
 import { registerAuthHandlers } from './ipc-handlers/auth-handler';
+import { registerCoWorkHandlers } from './ipc-handlers/cowork-handler';
 import { registerScheduleHandlers } from './ipc-handlers/schedule-handler';
-import { registerScheduledPromptHandlers, stopScheduledPromptScheduler } from './ipc-handlers/scheduled-prompt-handler';
 import { registerConfigHandlers } from './ipc-handlers/config-handler';
 import { registerWindowHandlers } from './ipc-handlers/window-handler';
 import { initSettingsWindow, getSettingsWindow, createSettingsWindow, openSettingsWindow } from './window/settings-window';
@@ -215,6 +215,7 @@ app.whenReady().then(async () => {
         process.env.PORT = '3000';
     }
 
+    registerCoWorkHandlers(process.env.VITE_DEV_SERVER_URL || `http://localhost:${serverPort}`);
     createWindows();
     registerSelectLocalImageHandler();
     registerMusicFolderHandlers();
@@ -227,7 +228,6 @@ app.whenReady().then(async () => {
     registerLifecycleHandlers();
     registerAuthHandlers(() => config.get());
     registerScheduleHandlers();
-    registerScheduledPromptHandlers(() => config.get());
     registerConfigHandlers(config);
     registerWindowHandlers(config);
 
@@ -347,6 +347,5 @@ app.on('window-all-closed', () => {
 });
 
 app.on('will-quit', () => {
-    stopScheduledPromptScheduler();
     stopNitroServer();
 });
