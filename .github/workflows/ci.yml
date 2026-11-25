@@ -14,6 +14,10 @@ on:
 permissions:
     contents: read
 
+env:
+    # Linux ランナーでは GPU 不要のため onnxruntime-node の CUDA バイナリ取得をスキップする
+    npm_config_onnxruntime_node_install_cuda: 'skip'
+
 concurrency:
     # 同一 PR / ブランチへの連続 push 時は古い実行を自動キャンセルする
     group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
