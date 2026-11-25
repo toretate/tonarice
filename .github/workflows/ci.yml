@@ -102,6 +102,10 @@ jobs:
                   CI: 'true'
               run: npm test
 
+            - name: CLI & Script Tests (Node Test Runner)
+              working-directory: app
+              run: node --test cli/*.node-test.js scripts/*.node-test.js
+
     # メインアプリの実ブラウザテスト（Vitest Browser Mode + Playwright Chromium、毎回実行）
     app-browser-test:
         name: App Browser Tests (Playwright)

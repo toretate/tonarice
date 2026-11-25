@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
+import { createRevisionSave } from './revision-save';
 import { startNotificationCheck } from '../utils/task-notification';
 
 // カテゴリ（タブ）のインターフェース
@@ -41,6 +42,7 @@ export interface Task {
 }
 
 export const MEETING_CATEGORY_ID = 'meeting';
+let activeTaskStorageListener: ((e: StorageEvent) => void) | null = null;
 
 export const useTaskStore = defineStore('task', () => {
     // 状態管理
@@ -57,12 +59,88 @@ export const useTaskStore = defineStore('task', () => {
     const defaultDurationHours = ref<number>(1);
     const muteNotificationsDuringMeetings = ref<boolean>(false);
     const isLoaded = ref(false);
+    const serverRevision = ref<number | null>(null);
+    let suppressServerSync = 0;
+    let storageSyncRunning = false;
+    const pendingStorageKeys = new Set<string>();
+
+    const persistLocalOnly = () => {
+        if (typeof window === 'undefined') return;
+        try {
+            localStorage.setItem('desktop-mascot-categories', JSON.stringify(categories.value));
+            localStorage.setItem('desktop-mascot-tasks', JSON.stringify(tasks.value));
+            localStorage.setItem('desktop-mascot-active-category', activeCategoryId.value);
+            localStorage.setItem('desktop-mascot-task-view', currentView.value);
+            localStorage.setItem('desktop-mascot-show-task-widget', String(showTaskWidget.value));
+            localStorage.setItem('desktop-mascot-enable-notification', String(enableNotification.value));
+            localStorage.setItem('desktop-mascot-notification-minutes', String(notificationMinutes.value));
+            localStorage.setItem('desktop-mascot-completion-grace-seconds', String(completionGraceSeconds.value));
+            localStorage.setItem('desktop-mascot-default-duration-hours', String(defaultDurationHours.value));
+            localStorage.setItem('desktop-mascot-mute-during-meetings', String(muteNotificationsDuringMeetings.value));
+        } catch (error) {
+            console.error('LocalStorageへのタスク保存エラー:', error);
+        }
+    };
+
+    /**
+     * サーバー起点の状態反映では watch による全件 POST を抑止し、LocalStorage のみ更新する。
+     */
+    const runFromServer = (fn: () => void) => {
+        suppressServerSync += 1;
+        try {
+            fn();
+            persistLocalOnly();
+        } finally {
+            suppressServerSync -= 1;
+        }
+    };
+
+    const sync = createRevisionSave({
+        url: '/api/tasks',
+        revision: serverRevision,
+        read: () => ({
+            categories: categories.value,
+            tasks: tasks.value,
+            enableNotification: enableNotification.value,
+            notificationMinutes: notificationMinutes.value,
+            completionGraceSeconds: completionGraceSeconds.value,
+            defaultDurationHours: defaultDurationHours.value,
+            muteNotificationsDuringMeetings: muteNotificationsDuringMeetings.value
+        }),
+        collections: ['categories', 'tasks'],
+        apply: data => runFromServer(() => {
+            categories.value = data.categories as Category[];
+            tasks.value = data.tasks as Task[];
+            enableNotification.value = data.enableNotification as boolean;
+            notificationMinutes.value = data.notificationMinutes as number;
+            completionGraceSeconds.value = data.completionGraceSeconds as number;
+            defaultDurationHours.value = data.defaultDurationHours as number;
+            muteNotificationsDuringMeetings.value = data.muteNotificationsDuringMeetings as boolean;
+        })
+    });
+
+    const reloadFromServer = async () => {
+        if (typeof window === 'undefined') return;
+        try {
+            const res = await fetch('/api/tasks', { credentials: 'include' });
+            if (!res.ok) return;
+            const resJson = await res.json();
+            if (!resJson.success) return;
+            if (sync.isPending()) return;
+            if (Number.isSafeInteger(resJson.revision) && resJson.revision >= (serverRevision.value ?? 0)) {
+                sync.mergeRemote(resJson, resJson.revision);
+            }
+        } catch (error) {
+            console.warn('サーバーからのタスク再読込に失敗しました:', error);
+        }
+    };
 
     // LocalStorage および サーバーからデータをロード
     const loadFromLocalStorage = async () => {
-        if (typeof window === 'undefined') return;
+        if (typeof window === 'undefined' || sync.isPending()) return;
 
         // 1. まず LocalStorage の値を読み込んで初期表示を高速にする
+        suppressServerSync += 1;
         try {
             const savedCategories = localStorage.getItem('desktop-mascot-categories');
             if (savedCategories) {
@@ -108,6 +186,8 @@ export const useTaskStore = defineStore('task', () => {
             }
         } catch (error) {
             console.warn('LocalStorageからの初期タスク読み込みエラー:', error);
+        } finally {
+            suppressServerSync -= 1;
         }
 
         // 2. 次にサーバー（API）から最新データをロードする
@@ -118,51 +198,44 @@ export const useTaskStore = defineStore('task', () => {
             const res = await fetch('/api/tasks', { credentials: 'include' });
             if (res.ok) {
                 const resJson = await res.json();
-                if (resJson.success) {
-                    // データ消失防止:
-                    // このアプリは変更のたびにローカルとサーバーへ同時保存するため、
-                    // 「ローカルに存在するのにサーバーが空」= サーバー側の欠落/破損とみなし、ローカルを優先する。
-                    // （サーバーが空を返した瞬間にローカルを空で上書き→初期化→空を保存、という消失連鎖を防ぐ）
+                const revision = Number.isSafeInteger(resJson.revision) && resJson.revision >= 0 ? resJson.revision : 0;
+                if (resJson.success && !sync.isPending() && revision >= (serverRevision.value ?? 0)) {
+                    // リビジョンがない従来データの初回読み込みでは、空のサーバーにローカルのデータを移す。
                     const serverCategories = Array.isArray(resJson.categories) ? resJson.categories : [];
                     const serverTasks = Array.isArray(resJson.tasks) ? resJson.tasks : [];
 
-                    if (serverTasks.length > 0 || tasks.value.length === 0) {
-                        tasks.value = serverTasks;
-                    } else {
-                        recoveredFromLocal = true;
-                        console.warn('[TaskStore] サーバーのタスクが空のため、ローカルの既存データを保持しました（データ消失防止）。');
-                    }
+                    runFromServer(() => {
+                        sync.adopt(resJson, revision);
+                        if (revision > 0 || serverTasks.length > 0 || tasks.value.length === 0) {
+                            tasks.value = serverTasks;
+                        } else {
+                            recoveredFromLocal = true;
+                            console.warn('[TaskStore] サーバーのタスクが空のため、ローカルの既存データを保持しました（データ消失防止）。');
+                        }
 
-                    if (serverCategories.length > 0 || categories.value.length === 0) {
-                        categories.value = serverCategories;
-                    } else {
-                        recoveredFromLocal = true;
-                    }
+                        if (revision > 0 || serverCategories.length > 0 || categories.value.length === 0) {
+                            categories.value = serverCategories;
+                        } else {
+                            recoveredFromLocal = true;
+                        }
 
-                    if (resJson.enableNotification !== undefined) {
-                        enableNotification.value = resJson.enableNotification;
-                    }
-                    if (resJson.notificationMinutes !== undefined) {
-                        notificationMinutes.value = resJson.notificationMinutes;
-                    }
-                    if (resJson.completionGraceSeconds !== undefined) {
-                        completionGraceSeconds.value = resJson.completionGraceSeconds;
-                    }
-                    if (resJson.defaultDurationHours !== undefined) {
-                        const duration = Number(resJson.defaultDurationHours);
-                        defaultDurationHours.value = Number.isFinite(duration) && duration > 0 ? duration : 1;
-                    }
-                    if (resJson.muteNotificationsDuringMeetings !== undefined) {
-                        muteNotificationsDuringMeetings.value = !!resJson.muteNotificationsDuringMeetings;
-                    }
-                    // 同期のために LocalStorage にも書き込んでおく
-                    localStorage.setItem('desktop-mascot-categories', JSON.stringify(categories.value));
-                    localStorage.setItem('desktop-mascot-tasks', JSON.stringify(tasks.value));
-                    localStorage.setItem('desktop-mascot-enable-notification', String(enableNotification.value));
-                    localStorage.setItem('desktop-mascot-notification-minutes', String(notificationMinutes.value));
-                    localStorage.setItem('desktop-mascot-completion-grace-seconds', String(completionGraceSeconds.value));
-                    localStorage.setItem('desktop-mascot-default-duration-hours', String(defaultDurationHours.value));
-                    localStorage.setItem('desktop-mascot-mute-during-meetings', String(muteNotificationsDuringMeetings.value));
+                        if (resJson.enableNotification !== undefined) {
+                            enableNotification.value = resJson.enableNotification;
+                        }
+                        if (resJson.notificationMinutes !== undefined) {
+                            notificationMinutes.value = resJson.notificationMinutes;
+                        }
+                        if (resJson.completionGraceSeconds !== undefined) {
+                            completionGraceSeconds.value = resJson.completionGraceSeconds;
+                        }
+                        if (resJson.defaultDurationHours !== undefined) {
+                            const duration = Number(resJson.defaultDurationHours);
+                            defaultDurationHours.value = Number.isFinite(duration) && duration > 0 ? duration : 1;
+                        }
+                        if (resJson.muteNotificationsDuringMeetings !== undefined) {
+                            muteNotificationsDuringMeetings.value = !!resJson.muteNotificationsDuringMeetings;
+                        }
+                    });
                 }
             } else if (tasks.value.length > 0) {
                 // サーバーがエラー（tasks.json 破損時の 500 など）を返した場合もローカルを保持し、修復を試みる
@@ -172,50 +245,55 @@ export const useTaskStore = defineStore('task', () => {
         } catch (error) {
             console.warn('サーバーからのタスクロードに失敗しました (LocalStorageを使用します):', error);
         } finally {
-            // デフォルトカテゴリの初期化
-            if (categories.value.length === 0) {
-                categories.value = [
-                    { id: 'default', name: 'Work', order: 0 },
-                    { id: 'private', name: 'Private', order: 1 },
-                    { id: MEETING_CATEGORY_ID, name: '会議', order: 2 }
-                ];
-            }
-            const meetingCategory = categories.value.find(category => category.id === MEETING_CATEGORY_ID);
-            if (meetingCategory) {
-                meetingCategory.name = '会議';
-            } else {
-                categories.value.push({
-                    id: MEETING_CATEGORY_ID,
-                    name: '会議',
-                    order: categories.value.length
-                });
-                addedMeetingCategory = true;
-            }
-            // 旧詳細画面で予定日時が実績フィールドへ保存された未着手タスクを移行する。
-            tasks.value.forEach(task => {
-                const isUnstartedTask = !task.completed && (task.status === 'todo' || !task.status);
-                if (isUnstartedTask && task.startedAt && task.endedAt && !task.scheduledEndAt) {
-                    task.scheduledAt = task.scheduledAt || task.startedAt;
-                    task.scheduledEndAt = task.endedAt;
-                    task.startedAt = undefined;
-                    task.endedAt = undefined;
-                    migratedScheduledTimes = true;
+            suppressServerSync += 1;
+            try {
+                // デフォルトカテゴリの初期化
+                if (categories.value.length === 0) {
+                    categories.value = [
+                        { id: 'default', name: 'Work', order: 0 },
+                        { id: 'private', name: 'Private', order: 1 },
+                        { id: MEETING_CATEGORY_ID, name: '会議', order: 2 }
+                    ];
                 }
-
-                if (task.categoryId === MEETING_CATEGORY_ID && task.scheduledAt && !task.scheduledEndAt) {
-                    const startTime = new Date(task.scheduledAt).getTime();
-                    if (Number.isFinite(startTime)) {
-                        task.scheduledEndAt = new Date(
-                            startTime + defaultDurationHours.value * 3_600_000
-                        ).toISOString();
+                const meetingCategory = categories.value.find(category => category.id === MEETING_CATEGORY_ID);
+                if (meetingCategory) {
+                    meetingCategory.name = '会議';
+                } else {
+                    categories.value.push({
+                        id: MEETING_CATEGORY_ID,
+                        name: '会議',
+                        order: categories.value.length
+                    });
+                    addedMeetingCategory = true;
+                }
+                // 旧詳細画面で予定日時が実績フィールドへ保存された未着手タスクを移行する。
+                tasks.value.forEach(task => {
+                    const isUnstartedTask = !task.completed && (task.status === 'todo' || !task.status);
+                    if (isUnstartedTask && task.startedAt && task.endedAt && !task.scheduledEndAt) {
+                        task.scheduledAt = task.scheduledAt || task.startedAt;
+                        task.scheduledEndAt = task.endedAt;
+                        task.startedAt = undefined;
+                        task.endedAt = undefined;
                         migratedScheduledTimes = true;
                     }
+
+                    if (task.categoryId === MEETING_CATEGORY_ID && task.scheduledAt && !task.scheduledEndAt) {
+                        const startTime = new Date(task.scheduledAt).getTime();
+                        if (Number.isFinite(startTime)) {
+                            task.scheduledEndAt = new Date(
+                                startTime + defaultDurationHours.value * 3_600_000
+                            ).toISOString();
+                            migratedScheduledTimes = true;
+                        }
+                    }
+                });
+                if (!activeCategoryId.value && categories.value.length > 0) {
+                    activeCategoryId.value = categories.value[0].id;
                 }
-            });
-            if (!activeCategoryId.value && categories.value.length > 0) {
-                activeCategoryId.value = categories.value[0].id;
+                isLoaded.value = true;
+            } finally {
+                suppressServerSync -= 1;
             }
-            isLoaded.value = true;
             // サーバー側が空/欠落でローカルを復旧した場合、正しいデータをサーバーへ書き戻して修復する
             if (recoveredFromLocal || addedMeetingCategory || migratedScheduledTimes) {
                 saveToLocalStorage();
@@ -229,39 +307,9 @@ export const useTaskStore = defineStore('task', () => {
     const saveToLocalStorage = () => {
         if (typeof window === 'undefined' || !isLoaded.value) return;
 
-        try {
-            localStorage.setItem('desktop-mascot-categories', JSON.stringify(categories.value));
-            localStorage.setItem('desktop-mascot-tasks', JSON.stringify(tasks.value));
-            localStorage.setItem('desktop-mascot-active-category', activeCategoryId.value);
-            localStorage.setItem('desktop-mascot-task-view', currentView.value);
-            localStorage.setItem('desktop-mascot-show-task-widget', String(showTaskWidget.value));
-            localStorage.setItem('desktop-mascot-enable-notification', String(enableNotification.value));
-            localStorage.setItem('desktop-mascot-notification-minutes', String(notificationMinutes.value));
-            localStorage.setItem('desktop-mascot-default-duration-hours', String(defaultDurationHours.value));
-            localStorage.setItem('desktop-mascot-mute-during-meetings', String(muteNotificationsDuringMeetings.value));
+        persistLocalOnly();
 
-            // サーバーへ同期保存 (非同期実行)
-            fetch('/api/tasks', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    categories: categories.value,
-                    tasks: tasks.value,
-                    enableNotification: enableNotification.value,
-                    notificationMinutes: notificationMinutes.value,
-                    completionGraceSeconds: completionGraceSeconds.value,
-                    defaultDurationHours: defaultDurationHours.value,
-                    muteNotificationsDuringMeetings: muteNotificationsDuringMeetings.value
-                }),
-                credentials: 'include'
-            }).catch(err => {
-                console.warn('サーバーへのタスク保存に失敗しました:', err);
-            });
-        } catch (error) {
-            console.error('LocalStorageへのタスク保存エラー:', error);
-        }
+        if (serverRevision.value !== null) sync.request();
     };
 
     // 自動保存の設定
@@ -279,9 +327,10 @@ export const useTaskStore = defineStore('task', () => {
             () => muteNotificationsDuringMeetings.value
         ],
         () => {
+            if (suppressServerSync > 0 || !isLoaded.value) return;
             saveToLocalStorage();
         },
-        { deep: true }
+        { deep: true, flush: 'sync' }
     );
 
     // ゲッター：アクティブなカテゴリに属する未完了タスクを順序順に取得
@@ -415,17 +464,84 @@ export const useTaskStore = defineStore('task', () => {
     };
 
     const addTaskFromServer = (task: Task, updatedCategories?: Category[]) => {
-        if (updatedCategories) {
-            categories.value = updatedCategories;
-        }
-        const exists = tasks.value.some(t => t.id === task.id);
-        if (!exists) {
-            tasks.value.push(task);
-        } else {
-            const idx = tasks.value.findIndex(t => t.id === task.id);
-            if (idx !== -1) {
-                tasks.value[idx] = task;
+        runFromServer(() => {
+            if (updatedCategories) {
+                categories.value = updatedCategories;
             }
+            const exists = tasks.value.some(t => t.id === task.id);
+            if (!exists) {
+                tasks.value.push(task);
+            } else {
+                const idx = tasks.value.findIndex(t => t.id === task.id);
+                if (idx !== -1) {
+                    tasks.value[idx] = task;
+                }
+            }
+        });
+    };
+
+    const deleteTaskFromServer = (id: string) => {
+        runFromServer(() => {
+            tasks.value = tasks.value.filter(t => t.id !== id);
+        });
+    };
+
+    /**
+     * WebSocket 経由のサーバー起点タスク更新を適用する。
+     * サーバーへの書き戻し（POST）は発生させず、リビジョン欠落を検知した場合は最新を再読込する。
+     */
+    const applyServerTaskAction = async (payload: {
+        action: string;
+        task?: Task;
+        categories?: Category[];
+        taskId?: string;
+        revision?: number;
+    }) => {
+        while (sync.isPending()) await sync.settled();
+        const { action, task, categories: updatedCategories, taskId, revision } = payload;
+        const hasValidRevision = typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= 0;
+        if (hasValidRevision) {
+            const currentRevision = serverRevision.value;
+            if (currentRevision !== null && revision <= currentRevision) return;
+            if (currentRevision === null || revision > currentRevision + 1) {
+                await reloadFromServer();
+                return;
+            }
+            sync.applyDelta(revision, data => {
+                const entries = (data.tasks as Task[] | undefined) || [];
+                let next = entries;
+                if (action === 'deleteTask') next = entries.filter(item => item.id !== taskId);
+                else if (task) {
+                    next = entries.some(item => item.id === task.id)
+                        ? entries.map(item => item.id === task.id ? task : item)
+                        : [...entries, task];
+                }
+                return { categories: updatedCategories ?? data.categories, tasks: next };
+            });
+            return;
+        }
+
+        if (action === 'deleteTask') {
+            if (taskId) {
+                runFromServer(() => {
+                    tasks.value = tasks.value.filter(t => t.id !== taskId);
+                });
+            }
+            return;
+        }
+
+        if (task) {
+            runFromServer(() => {
+                if (updatedCategories) {
+                    categories.value = updatedCategories;
+                }
+                const idx = tasks.value.findIndex(t => t.id === task.id);
+                if (idx === -1) {
+                    tasks.value.push(task);
+                } else {
+                    tasks.value[idx] = task;
+                }
+            });
         }
     };
 
@@ -711,23 +827,78 @@ export const useTaskStore = defineStore('task', () => {
     };
 
     // 他のウィンドウによる localStorage の変更を検知して自動で同期する
-    if (typeof window !== 'undefined') {
-        window.addEventListener('storage', (e) => {
-            if (
-                e.key === 'desktop-mascot-tasks' || 
-                e.key === 'desktop-mascot-categories' || 
-                e.key === 'desktop-mascot-active-category' ||
-                e.key === 'desktop-mascot-show-task-widget' ||
-                e.key === 'desktop-mascot-enable-notification' ||
-                e.key === 'desktop-mascot-notification-minutes' ||
-                e.key === 'desktop-mascot-default-duration-hours' ||
-                e.key === 'desktop-mascot-mute-during-meetings'
-            ) {
-                console.log('[TaskStore] Detected storage change from another window, reloading...');
-                isLoaded.value = false;
-                loadFromLocalStorage();
+    const SERVER_MANAGED_TASK_STORAGE_KEYS = new Set([
+        'desktop-mascot-tasks',
+        'desktop-mascot-categories',
+        'desktop-mascot-enable-notification',
+        'desktop-mascot-notification-minutes',
+        'desktop-mascot-completion-grace-seconds',
+        'desktop-mascot-default-duration-hours',
+        'desktop-mascot-mute-during-meetings'
+    ]);
+    const LOCAL_UI_TASK_STORAGE_KEYS = new Set([
+        'desktop-mascot-active-category',
+        'desktop-mascot-task-view',
+        'desktop-mascot-show-task-widget'
+    ]);
+
+    const syncFromStorageEvent = async (key: string) => {
+        if (!isLoaded.value) return;
+        pendingStorageKeys.add(key);
+        if (storageSyncRunning) return;
+        storageSyncRunning = true;
+        try {
+            while (pendingStorageKeys.size > 0) {
+                while (sync.isPending()) {
+                    await sync.settled();
+                }
+                const keys = Array.from(pendingStorageKeys);
+                pendingStorageKeys.clear();
+
+                const hasLocalUiKey = keys.some(item => LOCAL_UI_TASK_STORAGE_KEYS.has(item));
+                if (hasLocalUiKey) {
+                    runFromServer(() => {
+                        if (keys.includes('desktop-mascot-active-category')) {
+                            const savedActiveId = localStorage.getItem('desktop-mascot-active-category');
+                            if (savedActiveId) activeCategoryId.value = savedActiveId;
+                        }
+                        if (keys.includes('desktop-mascot-task-view')) {
+                            const savedView = localStorage.getItem('desktop-mascot-task-view');
+                            if (savedView === 'todo' || savedView === 'timeline' || savedView === 'completed') {
+                                currentView.value = savedView;
+                            }
+                        }
+                        if (keys.includes('desktop-mascot-show-task-widget')) {
+                            const savedShowWidget = localStorage.getItem('desktop-mascot-show-task-widget');
+                            if (savedShowWidget !== null) {
+                                showTaskWidget.value = savedShowWidget === 'true';
+                            }
+                        }
+                    });
+                }
+
+                if (keys.some(item => SERVER_MANAGED_TASK_STORAGE_KEYS.has(item))) {
+                    await reloadFromServer();
+                }
             }
-        });
+        } finally {
+            storageSyncRunning = false;
+        }
+    };
+
+    if (typeof window !== 'undefined') {
+        if (activeTaskStorageListener) {
+            window.removeEventListener('storage', activeTaskStorageListener);
+        }
+        activeTaskStorageListener = (e: StorageEvent) => {
+            if (
+                e.key
+                && (SERVER_MANAGED_TASK_STORAGE_KEYS.has(e.key) || LOCAL_UI_TASK_STORAGE_KEYS.has(e.key))
+            ) {
+                void syncFromStorageEvent(e.key);
+            }
+        };
+        window.addEventListener('storage', activeTaskStorageListener);
     }
 
     return {
@@ -742,12 +913,14 @@ export const useTaskStore = defineStore('task', () => {
         defaultDurationHours,
         muteNotificationsDuringMeetings,
         isLoaded,
+        serverRevision,
         filteredTasks,
         timelineTasks,
         completedTasks,
         completedTasksByDate,
         activeCategoryCompletionRate,
         loadFromLocalStorage,
+        reloadFromServer,
         saveToLocalStorage,
         addCategory,
         updateCategory,
@@ -755,6 +928,8 @@ export const useTaskStore = defineStore('task', () => {
         updateCategoriesOrder,
         addTask,
         addTaskFromServer,
+        deleteTaskFromServer,
+        applyServerTaskAction,
         updateTask,
         deleteTask,
         toggleTask,

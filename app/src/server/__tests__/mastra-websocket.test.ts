@@ -132,6 +132,18 @@ describe('WebSocketのMastra対話経路', () => {
         });
     });
 
+    it('message_OpenAIでツール無効時にすべてのツールを公開しないこと', async () => {
+        serviceMocks.mastraGenerate.mockResolvedValue('了解');
+        await sendChat(createPeer(), {
+            toolUseEnabled: false,
+            tools: { toolsWeather: true, toolsWebSearch: true, toolsGpsLocation: true, toolsVolume: true, toolsAppLauncher: true }
+        });
+        expect(serviceMocks.mastraGenerate.mock.calls[0][0]).toMatchObject({
+            weatherEnabled: false, webSearchEnabled: false, locationEnabled: false,
+            volumeEnabled: false, appLauncherEnabled: false, executeDataTool: undefined
+        });
+    });
+
     it('message_Mastraのメモ操作を認証ユーザーのDBと画面イベントへ接続すること', async () => {
         serviceMocks.executeMemos.mockResolvedValue(JSON.stringify({ success: true, action: 'add', id: 'memo-1', memo: { id: 'memo-1', content: '買い物' } }));
         serviceMocks.mastraGenerate.mockImplementation(async (params) => {

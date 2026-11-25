@@ -80,6 +80,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 指定されたパスのフォルダを開く
     openFolder: (path: string) => ipcRenderer.send('open-folder', path),
 
+    // マスコットごとの旧ローカル openclaw プロンプトを読み取り専用で参照
+    previewLegacyMascotPrompts: (mascotId: string) => ipcRenderer.invoke('preview-legacy-mascot-prompts', mascotId),
+
     // マスコットごとの openclaw プロンプトの取得
     getMascotPrompts: (mascotId: string) => ipcRenderer.invoke('get-mascot-prompts', mascotId),
         

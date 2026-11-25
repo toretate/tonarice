@@ -38,7 +38,7 @@ export async function executeMemosTool(userId: string, args: MemosToolArgs): Pro
                 color: args.color,
                 pinned: args.pinned
             });
-            return JSON.stringify({ success: true, action: 'add', id: saved.memo.id, memo: saved.memo });
+            return JSON.stringify({ success: true, action: 'add', id: saved.memo.id, memo: saved.memo, revision: saved.revision });
         }
         case 'search': {
             const query = args.literalQuery ? args.query : args.query?.trim();
@@ -66,14 +66,14 @@ export async function executeMemosTool(userId: string, args: MemosToolArgs): Pro
                 color: args.color,
                 pinned: args.pinned
             });
-            return JSON.stringify({ success: true, action: 'update', id: args.id, memo: saved.memo });
+            return JSON.stringify({ success: true, action: 'update', id: args.id, memo: saved.memo, revision: saved.revision });
         }
         case 'delete': {
             if (!args.id) {
                 return JSON.stringify({ success: false, error: 'delete には id が必須です。' });
             }
-            deleteMemoFromDb(userId, args.id);
-            return JSON.stringify({ success: true, action: 'delete', id: args.id });
+            const deleted = deleteMemoFromDb(userId, args.id);
+            return JSON.stringify({ success: true, action: 'delete', id: args.id, revision: deleted.revision });
         }
         default:
             return JSON.stringify({ success: false, error: `不明な action: ${(args as any).action}` });
@@ -99,7 +99,9 @@ export async function executeTasksTool(userId: string, args: TasksToolArgs): Pro
                 success: true,
                 action: 'add',
                 id: saved.task.id,
-                task: saved.task
+                task: saved.task,
+                categories: saved.categories,
+                revision: saved.revision
             });
         }
         case 'search': {
@@ -125,18 +127,21 @@ export async function executeTasksTool(userId: string, args: TasksToolArgs): Pro
                 success: true,
                 action: 'update',
                 id: args.id,
-                task: saved.task
+                task: saved.task,
+                categories: saved.categories,
+                revision: saved.revision
             });
         }
         case 'delete': {
             if (!args.id) {
                 return JSON.stringify({ success: false, error: 'delete には id が必須です。' });
             }
-            deleteTaskFromDb(userId, args.id);
+            const deleted = deleteTaskFromDb(userId, args.id);
             return JSON.stringify({
                 success: true,
                 action: 'delete',
-                id: args.id
+                id: args.id,
+                revision: deleted.revision
             });
         }
         default:
