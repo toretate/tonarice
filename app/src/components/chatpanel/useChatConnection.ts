@@ -1,3 +1,4 @@
+import { loadMascotPrompts } from '../../utils/mascot-prompt-client';
 import { ref, nextTick, Ref, watch } from 'vue';
 import { useConfigStore } from '../../store/config';
 import { useMascotStore } from '../../store/mascot';
@@ -348,41 +349,13 @@ export function useChatConnection(params: {
                         window.electronAPI.triggerTimerNotification(memo);
                     }
                 } else if (wsEvent === 'task-action') {
-                    const { action, task, categories, taskId } = data;
-                    console.log('[useChatConnection] Task action received:', action, task, taskId);
+                    console.log('[useChatConnection] Task action received:', data?.action, data?.task, data?.taskId);
                     const taskStore = useTaskStore();
-                    if (action === 'deleteTask') {
-                        if (taskId) {
-                            taskStore.deleteTask(taskId);
-                        }
-                    } else if (task) {
-                        taskStore.addTaskFromServer(task, categories);
-                    }
+                    await taskStore.applyServerTaskAction(data);
                 } else if (wsEvent === 'memo-action') {
-                    const { action, memo, memoId } = data;
-                    console.log('[useChatConnection] Memo action received:', action, memo, memoId);
+                    console.log('[useChatConnection] Memo action received:', data?.action, data?.memo, data?.memoId);
                     const memoStore = useMemoStore();
-                    if (action === 'delete') {
-                        if (memoId) {
-                            memoStore.deleteMemo(memoId);
-                        }
-                    } else if (memo) {
-                        if (action === 'add') {
-                            const exists = memoStore.memos.findIndex(m => m.id === memo.id);
-                            if (exists >= 0) {
-                                memoStore.memos[exists] = memo;
-                            } else {
-                                memoStore.memos.push(memo);
-                            }
-                            memoStore.saveToLocalStorage();
-                        } else if (action === 'update') {
-                            const index = memoStore.memos.findIndex(m => m.id === memo.id);
-                            if (index >= 0) {
-                                memoStore.memos[index] = memo;
-                                memoStore.saveToLocalStorage();
-                            }
-                        }
-                    }
+                    await memoStore.applyServerMemoAction(data);
                 } else if (wsEvent === 'chat-error') {
                     await failPendingMessage(data.message);
                 }
@@ -638,9 +611,9 @@ export function useChatConnection(params: {
         }
 
         // マスコット固有のプロンプト
-        if (window.electronAPI && window.electronAPI.getMascotPrompts && mascot) {
+        if (mascot) {
             try {
-                const mascotPrompts = await window.electronAPI.getMascotPrompts(mascot.id);
+                const { prompts: mascotPrompts } = await loadMascotPrompts(mascot.id);
                 if (mascotPrompts.identity) {
                     systemPrompt += `# Mascot Identity\n${mascotPrompts.identity}\n\n`;
                 }
@@ -657,7 +630,7 @@ export function useChatConnection(params: {
                     systemPrompt += `# Mascot Long-term Memory\n${mascotPrompts.memory}\n\n`;
                 }
             } catch (e) {
-                console.error('Failed to load mascot prompts via IPC:', e);
+                console.error('マスコットのプロンプト取得に失敗しました:', e);
             }
         }
 

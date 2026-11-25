@@ -1,5 +1,5 @@
 import { createError, defineEventHandler } from 'h3';
-import { loadMemosFromDb } from '../utils/memos-service';
+import { loadMemosStateFromDb } from '../utils/memos-service';
 
 export default defineEventHandler((event) => {
     if (!event.context.user) {
@@ -10,9 +10,11 @@ export default defineEventHandler((event) => {
     }
 
     try {
+        const state = loadMemosStateFromDb(event.context.user.id);
         return {
             success: true,
-            memos: loadMemosFromDb(event.context.user.id)
+            memos: state.memos,
+            revision: state.revision
         };
     } catch (error: any) {
         console.error('[Server] Failed to load memos:', error.message);

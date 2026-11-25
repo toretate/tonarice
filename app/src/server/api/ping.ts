@@ -6,6 +6,7 @@ export default defineEventHandler((event) => {
     return {
         success: true,
         message: 'pong',
+        isolated: process.env.TONARICE_ISOLATED_SERVER === '1',
         timestamp: new Date().toISOString(),
         mastra: getMastraRuntimeStatus()
     };

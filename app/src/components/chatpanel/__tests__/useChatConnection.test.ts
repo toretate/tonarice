@@ -4,7 +4,6 @@ import { createPinia, setActivePinia } from 'pinia';
 import { useChatConnection } from '../useChatConnection';
 import { useTaskStore } from '../../../store/task';
 import { useConfigStore } from '../../../store/config';
-import { useMascotStore } from '../../../store/mascot';
 import { ref } from 'vue';
 
 describe('useChatConnection.ts のタスク連携機能テスト', () => {
@@ -84,6 +83,32 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
         expect(sourceSession.messages.at(-1).text).toBe('元の会話への回答');
         expect(sourceMessages.value[0].text).toBe('別の会話');
         connection.disconnectWebSocket();
+    });
+
+    it('sendMessage_Electronでもサーバーに保存したマスコット設定を対話に使う', async () => {
+        useConfigStore().mascots = [{ id: 'shared-mascot', name: '共有マスコット' }];
+        const legacyReader = vi.fn();
+        window.electronAPI!.getMascotPrompts = legacyReader;
+        const fetchMock = vi.mocked(fetch);
+        fetchMock.mockImplementation(async input => (
+            String(input) === '/api/mascots/cli-prompts?mascotId=shared-mascot'
+                ? Response.json({ success: true, configured: true, prompts: { identity: '共有された設定' } })
+                : Response.json({ success: true })
+        ));
+        const connection = useChatConnection({
+            messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref('試験'),
+            usesMastraHistory: ref(true), saveHistory: vi.fn(), runCompaction: vi.fn(), scrollToBottom: vi.fn()
+        });
+        connection.connectWebSocket();
+        mockWebSocket.readyState = 1;
+        try {
+            await connection.sendMessage();
+            const sent = JSON.parse(mockWebSocket.send.mock.calls.at(-1)[0]).data;
+            expect(sent.systemPrompt).toContain('共有された設定');
+            expect(legacyReader).not.toHaveBeenCalled();
+        } finally {
+            connection.disconnectWebSocket();
+        }
     });
 
     it('toolApproval_サーバーが承認を終了したら確認画面を閉じること', async () => {

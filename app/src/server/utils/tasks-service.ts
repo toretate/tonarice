@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { USERS_DIR } from './paths';
 import { safeWriteFileSync } from './fs-helpers';
+import { DataRevisionConflictError, normalizeRevision } from './revision-conflict';
 
 function getUserTasksPath(userId: string): string {
     return path.join(USERS_DIR, userId, 'tasks.json');
@@ -13,6 +14,87 @@ export interface TaskData {
     categoryId?: string;
     scheduledAt?: string;
     scheduledEndAt?: string;
+}
+
+export interface TasksDbState {
+    categories: any[];
+    tasks: any[];
+    enableNotification: boolean;
+    notificationMinutes: number;
+    completionGraceSeconds: number;
+    defaultDurationHours: number;
+    muteNotificationsDuringMeetings: boolean;
+    revision: number;
+}
+
+const DEFAULT_TASKS_STATE: TasksDbState = {
+    categories: [],
+    tasks: [],
+    enableNotification: true,
+    notificationMinutes: 5,
+    completionGraceSeconds: 5,
+    defaultDurationHours: 1,
+    muteNotificationsDuringMeetings: false,
+    revision: 0
+};
+
+/**
+ * ユーザーの tasks.json と現在リビジョンを読み込む。
+ */
+export function loadTasksStateFromDb(userId: string): TasksDbState {
+    const tasksPath = getUserTasksPath(userId);
+    if (!fs.existsSync(tasksPath)) {
+        return { ...DEFAULT_TASKS_STATE, categories: [], tasks: [] };
+    }
+    const raw = fs.readFileSync(tasksPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    return {
+        ...DEFAULT_TASKS_STATE,
+        ...parsed,
+        categories: Array.isArray(parsed.categories) ? parsed.categories : [],
+        tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+        revision: normalizeRevision(parsed.revision)
+    };
+}
+
+/**
+ * ユーザーの tasks.json を全体保存する。baseRevision 指定時は競合を検出して 409 エラーを投げる。
+ */
+export function saveTasksToDb(
+    userId: string,
+    payload: Omit<TasksDbState, 'revision'>,
+    options?: { baseRevision?: number }
+): { revision: number } {
+    const tasksPath = getUserTasksPath(userId);
+    const userDir = path.dirname(tasksPath);
+
+    if (!fs.existsSync(userDir)) {
+        fs.mkdirSync(userDir, { recursive: true });
+    }
+
+    let currentState: TasksDbState = { ...DEFAULT_TASKS_STATE, categories: [], tasks: [] };
+    if (fs.existsSync(tasksPath)) {
+        try {
+            currentState = loadTasksStateFromDb(userId);
+        } catch (e) {
+            console.error('[TasksDB] Failed to read tasks.json:', e);
+        }
+    }
+
+    if (
+        options?.baseRevision !== undefined
+        && options.baseRevision !== currentState.revision
+    ) {
+        throw new DataRevisionConflictError(
+            'タスクが他の操作で更新されています。最新状態を再読み込みしてください。',
+            currentState.revision,
+            currentState
+        );
+    }
+
+    const nextRevision = currentState.revision + 1;
+    safeWriteFileSync(tasksPath, JSON.stringify({ ...payload, revision: nextRevision }, null, 4));
+    return { revision: nextRevision };
 }
 
 /**
@@ -36,13 +118,15 @@ export function addTaskToDb(userId: string, payload: TaskData) {
         enableNotification: true,
         notificationMinutes: 5,
         defaultDurationHours: 1,
-        muteNotificationsDuringMeetings: false
+        muteNotificationsDuringMeetings: false,
+        revision: 0
     };
 
     if (fs.existsSync(tasksPath)) {
         try {
             const raw = fs.readFileSync(tasksPath, 'utf8');
-            data = { ...data, ...JSON.parse(raw) };
+            const parsed = JSON.parse(raw);
+            data = { ...data, ...parsed, revision: normalizeRevision(parsed.revision) };
         } catch (e) {
             console.error('[TasksDB] Failed to read tasks.json:', e);
         }
@@ -84,7 +168,8 @@ export function addTaskToDb(userId: string, payload: TaskData) {
         return {
             categories: data.categories,
             task: duplicate,
-            duplicate: true
+            duplicate: true,
+            revision: data.revision
         };
     }
 
@@ -111,12 +196,14 @@ export function addTaskToDb(userId: string, payload: TaskData) {
     };
 
     data.tasks.push(newTask);
+    data.revision = normalizeRevision(data.revision) + 1;
 
     safeWriteFileSync(tasksPath, JSON.stringify(data, null, 4));
 
     return {
         categories: data.categories,
-        task: newTask
+        task: newTask,
+        revision: data.revision
     };
 }
 
@@ -246,11 +333,13 @@ export function updateTaskInDb(
         }
     }
 
+    data.revision = normalizeRevision(data.revision) + 1;
     safeWriteFileSync(tasksPath, JSON.stringify(data, null, 4));
 
     return {
         categories: data.categories,
-        task
+        task,
+        revision: data.revision
     };
 }
 
@@ -272,5 +361,7 @@ export function deleteTaskFromDb(userId: string, id: string) {
         throw new Error(`Task with ID ${id} not found.`);
     }
 
+    data.revision = normalizeRevision(data.revision) + 1;
     safeWriteFileSync(tasksPath, JSON.stringify(data, null, 4));
+    return { revision: data.revision };
 }

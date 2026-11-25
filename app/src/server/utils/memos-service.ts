@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { USERS_DIR } from './paths';
 import { safeWriteFileSync } from './fs-helpers';
+import { DataRevisionConflictError, normalizeRevision } from './revision-conflict';
 
 function getUserMemosPath(userId: string): string {
     return path.join(USERS_DIR, userId, 'memos.json');
@@ -13,14 +14,30 @@ export interface MemoData {
     pinned?: boolean;
 }
 
-export function loadMemosFromDb(userId: string): Array<MemoData & { id: string }> {
+export interface StoredMemo extends MemoData {
+    id: string;
+    order?: number;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+export interface MemosDbState {
+    memos: StoredMemo[];
+    revision: number;
+}
+
+/**
+ * ユーザーの memos.json からメモ一覧とリビジョンを読み込む。
+ * ファイル未作成 (ENOENT) のみ空配列・revision 0 を返し、破損 JSON・非配列・権限エラー等は送出する。
+ */
+export function loadMemosStateFromDb(userId: string): MemosDbState {
     const memosPath = getUserMemosPath(userId);
     let raw: string;
     try {
         raw = fs.readFileSync(memosPath, 'utf8');
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-            return [];
+            return { memos: [], revision: 0 };
         }
         throw error;
     }
@@ -29,72 +46,92 @@ export function loadMemosFromDb(userId: string): Array<MemoData & { id: string }
     if (!Array.isArray(data?.memos)) {
         throw new Error('memos.json の memos が配列ではありません。');
     }
-    return data.memos;
+    return {
+        memos: data.memos,
+        revision: normalizeRevision(data.revision)
+    };
 }
 
-export function saveMemosToDb(userId: string, memos: unknown[]) {
+export function loadMemosFromDb(userId: string): StoredMemo[] {
+    return loadMemosStateFromDb(userId).memos;
+}
+
+export function saveMemosToDb(
+    userId: string,
+    memos: unknown[],
+    options?: { baseRevision?: number }
+): { revision: number } {
     const memosPath = getUserMemosPath(userId);
     const userDir = path.dirname(memosPath);
+
+    // 破損ファイルや権限エラーを revision 0 とみなして上書きしないよう、共通経路で読み込む。
+    const currentState = loadMemosStateFromDb(userId);
+
+    if (
+        options?.baseRevision !== undefined
+        && options.baseRevision !== currentState.revision
+    ) {
+        throw new DataRevisionConflictError(
+            'メモが他の操作で更新されています。最新状態を再読み込みしてください。',
+            currentState.revision,
+            { memos: currentState.memos, revision: currentState.revision }
+        );
+    }
 
     if (!fs.existsSync(userDir)) {
         fs.mkdirSync(userDir, { recursive: true });
     }
 
-    safeWriteFileSync(memosPath, JSON.stringify({ memos }, null, 4));
+    const nextRevision = currentState.revision + 1;
+    safeWriteFileSync(memosPath, JSON.stringify({ memos, revision: nextRevision }, null, 4));
+    return { revision: nextRevision };
 }
 
 export function addMemoToDb(userId: string, payload: MemoData) {
     const memosPath = getUserMemosPath(userId);
     const userDir = path.dirname(memosPath);
 
-    if (!fs.existsSync(userDir)) {
-        fs.mkdirSync(userDir, { recursive: true });
-    }
-
-    let data = {
-        memos: [] as any[]
-    };
-
-    if (fs.existsSync(memosPath)) {
-        try {
-            const raw = fs.readFileSync(memosPath, 'utf8');
-            data = { ...data, ...JSON.parse(raw) };
-        } catch (e) {
-            console.error('[MemosDB] Failed to read memos.json:', e);
-        }
-    }
-
     const normalizedContent = (payload.content || '').trim();
     if (!normalizedContent) {
         throw new Error('Memo content cannot be empty');
     }
 
-    const duplicate = data.memos.find((m: any) =>
+    // 既存ファイルの破損・権限エラーを握りつぶさず保護する。
+    const currentState = loadMemosStateFromDb(userId);
+
+    const duplicate = currentState.memos.find((m) =>
         (m.content || '').trim() === normalizedContent
     );
     if (duplicate) {
         console.log(`[MemosDB] Duplicate add ignored (idempotent): "${normalizedContent}"`);
         return {
             memo: duplicate,
-            duplicate: true
+            duplicate: true,
+            revision: currentState.revision
         };
     }
 
-    const newMemo = {
+    if (!fs.existsSync(userDir)) {
+        fs.mkdirSync(userDir, { recursive: true });
+    }
+
+    const newMemo: StoredMemo = {
         id: 'memo_' + Math.random().toString(36).substring(2, 11),
         content: normalizedContent,
         color: payload.color || 'yellow',
         pinned: payload.pinned || false,
-        order: data.memos.length,
+        order: currentState.memos.length,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
     };
 
-    data.memos.push(newMemo);
-    safeWriteFileSync(memosPath, JSON.stringify(data, null, 4));
+    const nextMemos = [...currentState.memos, newMemo];
+    const nextRevision = currentState.revision + 1;
+    safeWriteFileSync(memosPath, JSON.stringify({ memos: nextMemos, revision: nextRevision }, null, 4));
 
     return {
-        memo: newMemo
+        memo: newMemo,
+        revision: nextRevision
     };
 }
 
@@ -145,11 +182,9 @@ export function updateMemoInDb(
         throw new Error('Memos database does not exist.');
     }
 
-    const raw = fs.readFileSync(memosPath, 'utf8');
-    const data = JSON.parse(raw);
-    const memos = data.memos || [];
-
-    const memo = memos.find((m: any) => m.id === id);
+    const currentState = loadMemosStateFromDb(userId);
+    const memos = [...currentState.memos];
+    const memo = memos.find((m) => m.id === id);
     if (!memo) {
         throw new Error(`Memo with ID ${id} not found.`);
     }
@@ -165,11 +200,13 @@ export function updateMemoInDb(
     if (updates.order !== undefined) memo.order = updates.order;
 
     memo.updatedAt = new Date().toISOString();
+    const nextRevision = currentState.revision + 1;
 
-    safeWriteFileSync(memosPath, JSON.stringify(data, null, 4));
+    safeWriteFileSync(memosPath, JSON.stringify({ memos, revision: nextRevision }, null, 4));
 
     return {
-        memo
+        memo,
+        revision: nextRevision
     };
 }
 
@@ -179,14 +216,14 @@ export function deleteMemoFromDb(userId: string, id: string) {
         throw new Error('Memos database does not exist.');
     }
 
-    const raw = fs.readFileSync(memosPath, 'utf8');
-    const data = JSON.parse(raw);
-    const initialLength = data.memos.length;
-    data.memos = data.memos.filter((m: any) => m.id !== id);
+    const currentState = loadMemosStateFromDb(userId);
+    const nextMemos = currentState.memos.filter((m) => m.id !== id);
 
-    if (data.memos.length === initialLength) {
+    if (nextMemos.length === currentState.memos.length) {
         throw new Error(`Memo with ID ${id} not found.`);
     }
 
-    safeWriteFileSync(memosPath, JSON.stringify(data, null, 4));
+    const nextRevision = currentState.revision + 1;
+    safeWriteFileSync(memosPath, JSON.stringify({ memos: nextMemos, revision: nextRevision }, null, 4));
+    return { revision: nextRevision };
 }

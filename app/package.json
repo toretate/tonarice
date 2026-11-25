@@ -4,6 +4,9 @@
     "main": "dist-electron/main.cjs",
     "type": "module",
     "scripts": {
+        "cli": "node --env-file=.env.local cli/index.js",
+        "dev:cli": "node --env-file=.env.local scripts/dev-nuxt.js",
+        "dev:cli:isolated": "node --env-file=.env.local scripts/dev-nuxt.js --isolated-storage",
         "dev": "node scripts/dev-nuxt.js",
         "dev:remote": "node scripts/dev-nuxt.js --host 0.0.0.0",
         "dev:electron": "node scripts/dev-electron.js",

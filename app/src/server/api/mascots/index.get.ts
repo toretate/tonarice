@@ -2,6 +2,7 @@ import { defineEventHandler, createError } from 'h3';
 import fs from 'fs';
 import path from 'path';
 import { USERS_DIR } from '../../utils/paths';
+import { applyMascotCliSettings } from '../../utils/mascot-cli-settings';
 
 function getUserMascotsDir(userId: string): string {
     return path.join(USERS_DIR, userId, 'mascots');
@@ -30,7 +31,7 @@ export default defineEventHandler(async (event) => {
                     if (fs.existsSync(configPath)) {
                         try {
                             const configData = fs.readFileSync(configPath, 'utf8');
-                            mascots.push(JSON.parse(configData));
+                            mascots.push(applyMascotCliSettings(path.dirname(configPath), JSON.parse(configData)));
                         } catch (e: any) {
                             console.error(`[Server] Failed to load mascot config for ${mascotId}:`, e.message);
                         }

@@ -309,6 +309,30 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
         openFolder: (path: string) => {
             console.log(`[Polyfill] openFolder triggered for path: ${path}`);
         },
+        previewLegacyMascotPrompts: async (mascotId: string) => {
+            try {
+                const promptStr = localStorage.getItem(`desktop_ai_mascot_prompts_${mascotId}`);
+                if (promptStr === null) {
+                    return { found: false, prompts: {} };
+                }
+                const parsed = JSON.parse(promptStr);
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                    return { found: false, prompts: {} };
+                }
+                const prompts: Partial<Record<'soul' | 'identity' | 'user' | 'agents' | 'memory', string>> = {};
+                let found = false;
+                for (const key of ['identity', 'soul', 'user', 'agents', 'memory'] as const) {
+                    if (Object.prototype.hasOwnProperty.call(parsed, key) && typeof parsed[key] === 'string') {
+                        prompts[key] = parsed[key];
+                        found = true;
+                    }
+                }
+                return { found, prompts };
+            } catch (e) {
+                console.error('[Polyfill] Failed to preview legacy mascot prompts:', e);
+                return { found: false, prompts: {} };
+            }
+        },
         getMascotPrompts: async (mascotId: string) => {
             try {
                 const promptStr = localStorage.getItem(`desktop_ai_mascot_prompts_${mascotId}`);

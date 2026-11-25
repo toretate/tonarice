@@ -1,7 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
 import { executeMemosTool } from '../tool-executor';
-import { loadMemosFromDb, saveMemosToDb } from '../memos-service';
+import {
+    addMemoToDb,
+    deleteMemoFromDb,
+    loadMemosFromDb,
+    loadMemosStateFromDb,
+    saveMemosToDb,
+    updateMemoInDb
+} from '../memos-service';
+import { DataRevisionConflictError } from '../revision-conflict';
 
 const fsMocks = vi.hoisted(() => ({
     existsSync: vi.fn(),
@@ -18,11 +26,13 @@ describe('memos-service', () => {
         vi.clearAllMocks();
     });
 
-    it('loadMemosFromDb メモファイルがない場合は空配列を返すこと', async () => {
+    it('loadMemosFromDb メモファイルがない場合は空配列と revision 0 を返すこと', async () => {
         const missingFile = Object.assign(new Error('ファイルがありません'), { code: 'ENOENT' });
         fsMocks.readFileSync.mockImplementationOnce(() => { throw missingFile; });
         fsMocks.readFileSync.mockImplementationOnce(() => { throw missingFile; });
+        fsMocks.readFileSync.mockImplementationOnce(() => { throw missingFile; });
 
+        expect(loadMemosStateFromDb('user-1')).toEqual({ memos: [], revision: 0 });
         expect(loadMemosFromDb('user-1')).toEqual([]);
         expect(JSON.parse(await executeMemosTool('user-1', { action: 'search' }))).toMatchObject({
             success: true,
@@ -30,26 +40,80 @@ describe('memos-service', () => {
         });
     });
 
-    it('loadMemosFromDb 保存済みのメモ配列を返すこと', () => {
+    it('loadMemosStateFromDb 旧形式ファイルは revision 0 として読み込み保存済みメモ配列を返すこと', () => {
         fsMocks.readFileSync.mockReturnValue(JSON.stringify({
             memos: [{ id: 'memo-1', content: 'テスト' }]
         }));
 
+        expect(loadMemosStateFromDb('user-1')).toEqual({
+            memos: [{ id: 'memo-1', content: 'テスト' }],
+            revision: 0
+        });
         expect(loadMemosFromDb('user-1')).toEqual([{ id: 'memo-1', content: 'テスト' }]);
     });
 
-    it('ユーザーディレクトリがない場合は作成して保存すること', async () => {
+    it('saveMemosToDb ユーザーディレクトリがない場合は作成し revision 1 で保存すること', async () => {
+        const missingFile = Object.assign(new Error('ファイルがありません'), { code: 'ENOENT' });
+        fsMocks.readFileSync.mockImplementationOnce(() => { throw missingFile; });
         fsMocks.existsSync.mockReturnValue(false);
         const { safeWriteFileSync } = await import('../fs-helpers');
         const memos = [{ id: 'memo-1', content: 'テスト' }];
 
-        saveMemosToDb('user-1', memos);
+        const saved = saveMemosToDb('user-1', memos, { baseRevision: 0 });
 
+        expect(saved).toEqual({ revision: 1 });
         expect(fsMocks.mkdirSync).toHaveBeenCalledWith(expect.stringContaining('user-1'), { recursive: true });
         expect(safeWriteFileSync).toHaveBeenCalledWith(
             expect.stringContaining('memos.json'),
-            JSON.stringify({ memos }, null, 4)
+            JSON.stringify({ memos, revision: 1 }, null, 4)
         );
+    });
+
+    it('saveMemosToDb baseRevision不一致時は 409 競合エラーを投げ上書きしないこと', async () => {
+        const existing = [{ id: 'memo-1', content: '最新' }];
+        fsMocks.readFileSync.mockReturnValue(JSON.stringify({ memos: existing, revision: 3 }));
+        const { safeWriteFileSync } = await import('../fs-helpers');
+
+        expect(() => saveMemosToDb('user-1', [], { baseRevision: 2 })).toThrow(DataRevisionConflictError);
+        expect(safeWriteFileSync).not.toHaveBeenCalled();
+    });
+
+    it.each(['壊れた JSON', '{"memos":null}'])('saveMemosToDb・addMemoToDb 破損ファイル %s を revision 0 とみなして上書きしないこと', async (raw) => {
+        fsMocks.readFileSync.mockReturnValue(raw);
+        const { safeWriteFileSync } = await import('../fs-helpers');
+
+        expect(() => saveMemosToDb('user-1', [], { baseRevision: 0 })).toThrow();
+        expect(() => addMemoToDb('user-1', { content: '新規メモ' })).toThrow();
+        expect(safeWriteFileSync).not.toHaveBeenCalled();
+    });
+
+    it('addMemoToDb 重複メモ追加時は冪等に既存メモと revision を維持すること', async () => {
+        const existing = { id: 'memo-1', content: '買い物' };
+        fsMocks.readFileSync.mockReturnValue(JSON.stringify({ memos: [existing], revision: 4 }));
+        const { safeWriteFileSync } = await import('../fs-helpers');
+
+        const result = addMemoToDb('user-1', { content: ' 買い物 ' });
+
+        expect(result).toEqual({ memo: existing, duplicate: true, revision: 4 });
+        expect(safeWriteFileSync).not.toHaveBeenCalled();
+    });
+
+    it('updateMemoInDb・deleteMemoFromDb 個別操作ごとに revision を増分すること', async () => {
+        fsMocks.existsSync.mockReturnValue(true);
+        fsMocks.readFileSync.mockReturnValueOnce(JSON.stringify({
+            memos: [{ id: 'memo-1', content: '旧内容' }],
+            revision: 2
+        }));
+        const updated = updateMemoInDb('user-1', 'memo-1', { content: '新内容' });
+        expect(updated.revision).toBe(3);
+        expect(updated.memo.content).toBe('新内容');
+
+        fsMocks.readFileSync.mockReturnValueOnce(JSON.stringify({
+            memos: [{ id: 'memo-1', content: '新内容' }],
+            revision: 3
+        }));
+        const deleted = deleteMemoFromDb('user-1', 'memo-1');
+        expect(deleted.revision).toBe(4);
     });
 
     it.each([

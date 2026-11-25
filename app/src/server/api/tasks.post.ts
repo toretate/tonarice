@@ -1,12 +1,6 @@
 import { defineEventHandler, createError, readBody } from 'h3';
-import path from 'path';
-import fs from 'fs';
-import { USERS_DIR } from '../utils/paths';
-import { safeWriteFileSync } from '../utils/fs-helpers';
-
-function getUserTasksPath(userId: string): string {
-    return path.join(USERS_DIR, userId, 'tasks.json');
-}
+import { saveTasksToDb } from '../utils/tasks-service';
+import { DataRevisionConflictError } from '../utils/revision-conflict';
 
 export default defineEventHandler(async (event) => {
     try {
@@ -18,13 +12,6 @@ export default defineEventHandler(async (event) => {
         }
 
         const userId = event.context.user.id;
-        const tasksPath = getUserTasksPath(userId);
-        const userDir = path.dirname(tasksPath);
-
-        if (!fs.existsSync(userDir)) {
-            fs.mkdirSync(userDir, { recursive: true });
-        }
-
         const body = await readBody(event);
         const {
             categories,
@@ -33,8 +20,21 @@ export default defineEventHandler(async (event) => {
             notificationMinutes,
             completionGraceSeconds,
             defaultDurationHours,
-            muteNotificationsDuringMeetings
-        } = body;
+            muteNotificationsDuringMeetings,
+            baseRevision
+        } = body || {};
+
+        if (
+            typeof baseRevision !== 'number'
+            || !Number.isSafeInteger(baseRevision)
+            || baseRevision < 0
+        ) {
+            throw createError({
+                statusCode: 400,
+                statusMessage: 'baseRevision は 0 以上の整数で指定してください。'
+            });
+        }
+
         const parsedDefaultDurationHours = Number(defaultDurationHours);
 
         const dataToSave = {
@@ -49,10 +49,22 @@ export default defineEventHandler(async (event) => {
             muteNotificationsDuringMeetings: !!muteNotificationsDuringMeetings
         };
 
-        safeWriteFileSync(tasksPath, JSON.stringify(dataToSave, null, 4));
+        const saved = saveTasksToDb(userId, dataToSave, { baseRevision });
 
-        return { success: true };
+        return { success: true, revision: saved.revision };
     } catch (error: any) {
+        if (error instanceof DataRevisionConflictError) {
+            throw createError({
+                statusCode: 409,
+                statusMessage: error.message,
+                data: {
+                    conflict: true,
+                    currentRevision: error.currentRevision,
+                    ...(error.latestData as Record<string, unknown>)
+                }
+            });
+        }
+        if (error?.statusCode) throw error;
         console.error('[Server] Failed to save tasks:', error.message);
         throw createError({
             statusCode: 500,
