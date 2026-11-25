@@ -20,6 +20,7 @@ vi.mock('../../utils/auth-bypass', () => ({
 }));
 import handler from './cli-prompts.get';
 import postHandler from './cli-prompts.post';
+import { readLegacyMascotPromptsReadOnly } from '../../../../electron/ipc-handlers/legacy-mascot-prompts';
 
 const baseTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tonarice-cli-prompts-'));
 fixture.appRoot = path.join(baseTmp, 'app');
@@ -150,5 +151,72 @@ describe('CLI のマスコットプロンプトとアクセス制御', () => {
             context: { user: { id: 'userA' } },
             body: { mascotId: '../bad', prompts: {} }
         })).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('postHandler_記憶専用モードでmemoryのみ保存しconfiguredを確定させず他項目を維持する', async () => {
+        const dirA = createOwnedMascot('userA', 'm_auto');
+        const context = { user: { id: 'userA' } };
+
+        // 新規マスコットに memory のみ初回保存しても configured は false のまま維持されること
+        const first = await (postHandler as any)({
+            context,
+            body: { mascotId: 'm_auto', mode: 'memory', memory: '自動記憶1', expectedCurrentMemory: '' }
+        });
+        expect(first.success).toBe(true);
+        expect(first.configured).toBe(false);
+        expect(fs.existsSync(path.join(dirA, 'memory.md'))).toBe(true);
+        expect(fs.existsSync(path.join(dirA, 'soul.md'))).toBe(false);
+        expect((handler as any)({ context, query: { mascotId: 'm_auto' } })).toMatchObject({
+            configured: false,
+            prompts: { memory: '自動記憶1', soul: '' }
+        });
+
+        // 既存別項目がある状態で memory のみ更新しても別項目が保持されること
+        fs.writeFileSync(path.join(dirA, 'soul.md'), '並行編集された性格', 'utf8');
+        const second = await (postHandler as any)({
+            context,
+            body: { mascotId: 'm_auto', mode: 'memory', memory: '自動記憶2', expectedCurrentMemory: '自動記憶1' }
+        });
+        expect(second.configured).toBe(true);
+        expect(fs.readFileSync(path.join(dirA, 'soul.md'), 'utf8')).toBe('並行編集された性格');
+        expect(fs.readFileSync(path.join(dirA, 'memory.md'), 'utf8')).toBe('自動記憶2');
+
+        // 更新前から memory が変わっていた場合は 409 で拒否し新しい内容を優先すること
+        await expect((postHandler as any)({
+            context,
+            body: { mascotId: 'm_auto', mode: 'memory', memory: '古い自動要約', expectedCurrentMemory: '自動記憶1' }
+        })).rejects.toMatchObject({ statusCode: 409 });
+        expect(fs.readFileSync(path.join(dirA, 'memory.md'), 'utf8')).toBe('自動記憶2');
+
+        // 未所有マスコットへの memory 保存は 404 で拒否すること
+        await expect((postHandler as any)({
+            context: { user: { id: 'userB' } },
+            body: { mascotId: 'm_auto', mode: 'memory', memory: '不正書込', expectedCurrentMemory: '自動記憶2' }
+        })).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it('readLegacyMascotPromptsReadOnly_空ディレクトリや一部ファイルの参照前後でファイルを作成しない', () => {
+        const emptyDir = path.join(fixture.appRoot, 'mascots', 'empty_mascot');
+        fs.mkdirSync(emptyDir, { recursive: true });
+        expect(readLegacyMascotPromptsReadOnly(fixture.appRoot, 'empty_mascot')).toEqual({
+            found: false,
+            prompts: {}
+        });
+        expect(fs.readdirSync(emptyDir)).toEqual([]);
+
+        const partialDir = path.join(fixture.appRoot, 'mascots', 'partial_mascot');
+        fs.mkdirSync(partialDir, { recursive: true });
+        fs.writeFileSync(path.join(partialDir, 'soul.md'), '旧ソウル', 'utf8');
+        fs.writeFileSync(path.join(partialDir, 'user.md'), '', 'utf8');
+        const beforeFiles = fs.readdirSync(partialDir).sort();
+
+        const preview = readLegacyMascotPromptsReadOnly(fixture.appRoot, 'partial_mascot');
+        expect(preview).toEqual({
+            found: true,
+            prompts: { soul: '旧ソウル', user: '' }
+        });
+        expect(Object.prototype.hasOwnProperty.call(preview.prompts, 'memory')).toBe(false);
+        expect(fs.readdirSync(partialDir).sort()).toEqual(beforeFiles);
+        expect(fs.readFileSync(path.join(partialDir, 'soul.md'), 'utf8')).toBe('旧ソウル');
     });
 });

@@ -1,10 +1,14 @@
 import { createError, defineEventHandler, readBody } from 'h3';
+import { isAuthBypassAllowed } from '../../utils/auth-bypass';
 import {
     MASCOT_PROMPT_NAMES,
     MAX_PROMPT_LENGTH,
+    writeUserMascotMemory,
     writeUserMascotPrompts,
     type MascotPromptName
 } from '../../utils/mascot-prompts';
+
+const LOCAL_DEV_BYPASS_USER_ID = 'usr_local_dev_bypass';
 
 export default defineEventHandler(async event => {
     const userId = event.context.user?.id;
@@ -12,14 +16,41 @@ export default defineEventHandler(async event => {
 
     const body = await readBody(event);
     const mascotId = body?.mascotId;
+    if (typeof mascotId !== 'string' || !/^[a-zA-Z0-9_-]{1,200}$/.test(mascotId)) {
+        throw createError({ statusCode: 400, statusMessage: '入力が不正です。' });
+    }
+
+    // 自動要約からの長期記憶のみ保存経路（memory.md のみを更新し他項目には触れない）
+    if (body?.mode === 'memory') {
+        const memory = body.memory;
+        const expectedCurrentMemory = body.expectedCurrentMemory;
+        if (
+            typeof memory !== 'string'
+            || memory.length > MAX_PROMPT_LENGTH
+            || (expectedCurrentMemory !== undefined && (typeof expectedCurrentMemory !== 'string' || expectedCurrentMemory.length > MAX_PROMPT_LENGTH))
+        ) {
+            throw createError({ statusCode: 400, statusMessage: 'memory プロンプトが不正です。' });
+        }
+
+        const allowLegacyLocalFallback = isAuthBypassAllowed() && userId === LOCAL_DEV_BYPASS_USER_ID;
+        const result = writeUserMascotMemory(userId, mascotId, memory, {
+            expectedCurrentMemory,
+            allowLegacyLocalFallback
+        });
+        if (result.status === 'not_found') throw createError({ statusCode: 404 });
+        if (result.status === 'conflict') {
+            throw createError({
+                statusCode: 409,
+                statusMessage: '長期記憶が他の操作で更新されているため上書きしませんでした。',
+                data: { conflict: true, prompts: result.prompts, configured: result.configured }
+            });
+        }
+        return { success: true, memory: result.memory, prompts: result.prompts, configured: result.configured };
+    }
+
+    // 編集画面からの全項目保存経路
     const rawPrompts = body?.prompts;
-    if (
-        typeof mascotId !== 'string'
-        || !/^[a-zA-Z0-9_-]{1,200}$/.test(mascotId)
-        || !rawPrompts
-        || typeof rawPrompts !== 'object'
-        || Array.isArray(rawPrompts)
-    ) {
+    if (!rawPrompts || typeof rawPrompts !== 'object' || Array.isArray(rawPrompts)) {
         throw createError({ statusCode: 400, statusMessage: '入力が不正です。' });
     }
 
@@ -35,5 +66,5 @@ export default defineEventHandler(async event => {
     const saved = writeUserMascotPrompts(userId, mascotId, prompts);
     if (!saved) throw createError({ statusCode: 404 });
 
-    return { success: true, prompts: saved };
+    return { success: true, prompts: saved, configured: true };
 });

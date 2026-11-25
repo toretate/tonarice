@@ -126,18 +126,19 @@ Codex などの AI エージェントおよび開発者が、ターミナルか�
 ### 5.1 `ping`
 
 ```bash
-node cli/index.js ping [--url <origin>] [--timeout <ms>]
+node cli/index.js ping [--url <origin>] [--timeout <ms>] [--isolated --url http://localhost:<ポート>]
 ```
 
 - 既定値: `--timeout 5000`、`--url` は第 3.2 節の環境変数規則に従う。
-- `GET /api/ping` を呼び出し、`result` に `{ message: "pong", timestamp, mastra }` を返す。認証は不要。
+- `--isolated` を指定する場合はローカルの明示ポート付き `--url` が必須となり、`/api/ping` の応答に `isolated: true` が含まれない場合は終了コード `2` で拒否する。
+- `GET /api/ping` を呼び出し、`result` に `{ message: "pong", timestamp, mastra, isolated }` を返す。認証は不要。
 
 ### 5.2 `chat send`（`-p` / `--print`）
 
 ```bash
-node cli/index.js -p [--url <origin>] [--timeout <ms>]
-node cli/index.js --print [--url <origin>] [--timeout <ms>]
-node cli/index.js chat send [--url <origin>] [--timeout <ms>]
+node cli/index.js -p [--url <origin>] [--timeout <ms>] [--isolated --url http://localhost:<ポート>]
+node cli/index.js --print [--url <origin>] [--timeout <ms>] [--isolated --url http://localhost:<ポート>]
+node cli/index.js chat send [--url <origin>] [--timeout <ms>] [--isolated --url http://localhost:<ポート>]
 ```
 
 - 既定値: `--timeout 90000`、`--url` は第 3.2 節の環境変数規則に従う。
@@ -180,10 +181,11 @@ node cli/index.js chat send [--url <origin>] [--timeout <ms>]
 ### 5.3 `chat interactive`（対話モード）
 
 ```bash
-npm run cli [-- --engine <engine> --model <id> --lmstudio-endpoint <url> --system-prompt <text> --url <origin> --timeout <ms>]
+npm run cli [-- --engine <engine> --model <id> --lmstudio-endpoint <url> --system-prompt <text> --url <origin> --timeout <ms> --isolated]
 ```
 
 - 引数なしまたはオプションのみ指定した場合に対話モードで起動し、1 行ずつマスコットと会話できる。標準入力パイプによる非 TTY 実行にも対応する。
+- `--isolated` を指定する場合はローカルの明示ポート付き `--url` が必須となり、起動時および各送信・変更操作の直前に接続先の隔離状態（`/api/ping` の `isolated: true`）を検証する。
 - 人間が読むテキスト形式で出力する（機械向け JSON が必要な場合は `chat send` を使用する）。
 
 #### 対話コマンド一覧
@@ -212,7 +214,8 @@ npm run cli [-- --engine <engine> --model <id> --lmstudio-endpoint <url> --syste
 - 最初の送信前に GUI のアクティブマスコット ID を参照し、見つからなければ一覧の先頭を選択する（マスコット選択自体は CLI 内にのみ適用）。
 - 通常の対話では GUI と同様にグローバルのエンジン・モデルをマスコット固有設定より優先し、API キー、LM Studio 接続先、生成パラメーターを取得する。優先順位は「CLI 起動オプション / 環境変数 API キー ＞ CLI 内 `/model` 変更（選択中のみ） ＞ GUI グローバル設定 ＞ マスコット固有設定」。
 - マスコットのプロフィールおよび認証済みユーザーが所有するマスコットのプロンプトファイル（`/api/mascots/cli-prompts`）をシステムプロンプトへ組み込む。プロンプトはユーザー別保存先（`USERS_DIR/<userId>/mascots/<mascotId>/*.md`）を優先し、所有権（`mascot_config.json` の存在）がないマスコット ID は `404` で拒否する。複数ユーザー環境では共有の `APP_ROOT/mascots/` へフォールバックせず、単一ローカル開発バイパス（`ALLOW_AUTH_BYPASS=true` かつ `usr_local_dev_bypass`）かつ所有権確認済みの場合に限り未移行の `APP_ROOT/mascots/<mascotId>/*.md` を互換読み込みする。プロフィール・チャット設定は各マスコットの `config.yaml` に保存し、従来の `mascot_config.json` と互換読み込みを維持する。
-- GUI のプロンプト編集と対話も同じユーザー別プロンプトを読み込む。サーバー側に保存済みのプロンプトファイルがない場合、編集画面の「この端末の旧設定を読み込む」で内容を確認し、保存すると CLI と共有できる。空の設定を保存した場合も設定済みとして扱う。
+- GUI のプロンプト編集と対話も同じユーザー別プロンプトを読み込む。サーバー側に明示保存済みの共有設定（`memory.md` 以外のファイル）がなく、端末に旧設定が存在する場合、編集画面の「この端末の旧設定を読み込む」から副作用なし（ファイル・テンプレート自動作成なし）でプレビューし、確認後に保存すると CLI と共有できる。一部の項目のみ存在する旧設定を読み込んでもサーバー側の別項目は空欄で上書きしない。空の設定を明示保存した場合も設定済みとして扱う。
+- 通常会話の長期記憶自動更新（Memory Compaction）は `POST /api/mascots/cli-prompts` の記憶専用経路（`mode: "memory"`）で `memory.md` のみを更新し、並行編集された別項目や新しい記憶を上書きしない（`409 Conflict`）。共有設定が未確定かつ端末に未移行の旧設定が実在する場合のみ自動更新を抑止し、それ以外の新規・未設定マスコットでも自動更新を行う。シークレット会話では永続化しない。
 - GUI と同じ Mastra Memory を利用し、初期状態では最新の通常会話を選ぶ。生成成功時の発話はサーバーへ保存され、GUI 側で履歴を再読み込みすれば参照できる。
 - **非共有範囲**: GUI のブラウザー内ローカルストレージにのみ存在する「現在選択中の会話 ID」「ローカル専用プロンプト」「シークレット会話」は共有しない。
 - 対話モードでは TTS と AI ツールを無効とする。

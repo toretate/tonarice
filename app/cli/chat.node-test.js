@@ -113,4 +113,25 @@ describe('chat send', () => {
         assert.equal(result.output.error.code, 'invalid_input');
         assert.equal(JSON.stringify(result).includes('secret'), false);
     });
+
+    it('chatSend_隔離モードでは1送信につきpingを1回呼び非隔離ならWebSocketを作らない', async () => {
+        let pingCalls = 0;
+        let wsCreated = false;
+        class GuardSocket {
+            constructor() { wsCreated = true; }
+        }
+        await assert.rejects(
+            chatSend({ url: 'http://127.0.0.1:3010', timeout: 1000, isolated: true }, input, {
+                WebSocket: GuardSocket,
+                env: {},
+                fetch: async () => {
+                    pingCalls++;
+                    return Response.json({ success: true, message: 'pong', isolated: false });
+                }
+            }),
+            error => error.code === 'invalid_input' && error.exitCode === 2
+        );
+        assert.equal(pingCalls, 1);
+        assert.equal(wsCreated, false);
+    });
 });

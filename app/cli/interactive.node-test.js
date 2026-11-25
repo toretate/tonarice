@@ -5,6 +5,7 @@ import { once } from 'node:events';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { WebSocketServer } from 'ws';
+import { createMascotClient } from './mascots.js';
 import { interactive } from './interactive.js';
 import { parseArgs, CliError } from './main.js';
 import { chatSend } from './chat.js';
@@ -251,5 +252,31 @@ describe('対話モード', () => {
         controller.abort();
         await assert.rejects(pending, error => error.code === 'cancelled' && error.message.includes('不明'));
         assert.equal(controller.terminated, true);
+    });
+
+    it('interactive_隔離モードの変更操作直前に隔離状態を再確認し非隔離サーバーへのPOSTを拒否する', async () => {
+        let pingCalls = 0;
+        let postCalled = false;
+        const fetcher = async (url, init) => {
+            if (url.pathname === '/api/ping') {
+                pingCalls++;
+                return Response.json({ success: true, message: 'pong', isolated: false });
+            }
+            if (init?.method === 'POST') postCalled = true;
+            return Response.json({ success: true });
+        };
+        const options = parseArgs(['chat', 'interactive', '--isolated', '--url', 'http://127.0.0.1:3010']);
+        const client = createMascotClient(options, { fetch: fetcher, env: {} });
+        const errors = capture();
+        const code = await interactive(options, {
+            input: Readable.from(['/memo add テスト\n/exit\n']),
+            output: capture().stream,
+            errors: errors.stream,
+            client
+        });
+        assert.equal(code, 0);
+        assert.equal(pingCalls, 1);
+        assert.equal(postCalled, false);
+        assert.match(errors.value(), /隔離サーバーではありません/);
     });
 });

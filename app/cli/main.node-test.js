@@ -1,17 +1,55 @@
+import { EventEmitter } from 'node:events';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { chatSend } from './chat.js';
 import { CliError, parseArgs, resolveDefaultUrl, run } from './main.js';
 
 describe('CLI 接続先解決', () => {
-    it('run_隔離モードで通常サーバーへの発話を拒否する', async () => {
+    it('run_隔離モードで通常サーバーまたはisolated欠落への発話を拒否しWebSocketを作らない', async () => {
         const args = ['chat', 'send', '--isolated'];
         assert.throws(() => parseArgs(args, { PORT: '3010' }), /--url/);
-        const ping = async () => Response.json({ success: true, message: 'pong', isolated: false });
-        const result = await run([...args, '--url', 'http://localhost:3010'], ping, '{}', () => {
-            assert.fail('通常サーバーに発話を送信した');
-        });
-        assert.equal(result.exitCode, 2);
-        assert.match(result.output.error.message, /隔離サーバーではありません/);
+        for (const payload of [{ success: true, message: 'pong', isolated: false }, { success: true, message: 'pong' }]) {
+            let pingCalls = 0;
+            let wsCreated = false;
+            const fetcher = async (url) => {
+                pingCalls++;
+                assert.equal(url.href, 'http://localhost:3010/api/ping');
+                return Response.json(payload);
+            };
+            class GuardSocket {
+                constructor() { wsCreated = true; }
+            }
+            const send = (opts, value, deps) => chatSend(opts, value, { ...deps, WebSocket: GuardSocket, env: {} });
+            const result = await run([...args, '--url', 'http://localhost:3010'], fetcher, '{"message":"試験","engine":"lmstudio"}', send);
+            assert.equal(result.exitCode, 2);
+            assert.match(result.output.error.message, /隔離サーバーではありません/);
+            assert.equal(pingCalls, 1);
+            assert.equal(wsCreated, false);
+        }
+    });
+
+    it('run_隔離モードの1送信につき差し替えたfetchのみでpingを1回だけ実行して発話する', async () => {
+        let pingCalls = 0;
+        const fetcher = async (url) => {
+            pingCalls++;
+            assert.equal(url.href, 'http://127.0.0.1:3010/api/ping');
+            return Response.json({ success: true, message: 'pong', isolated: true });
+        };
+        class FakeSocket extends EventEmitter {
+            constructor() {
+                super();
+                queueMicrotask(() => this.emit('open'));
+            }
+            send() {
+                queueMicrotask(() => this.emit('message', JSON.stringify({ event: 'chat-response', data: { text: 'OK', emotion: 'neutral' } })));
+            }
+            terminate() {}
+        }
+        const send = (opts, value, deps) => chatSend(opts, value, { ...deps, WebSocket: FakeSocket, env: {} });
+        const result = await run(['chat', 'send', '--isolated', '--url', 'http://127.0.0.1:3010'], fetcher, '{"message":"試験","engine":"lmstudio"}', send);
+        assert.equal(result.exitCode, 0);
+        assert.equal(result.output.result.text, 'OK');
+        assert.equal(pingCalls, 1);
     });
 
     it('run_隔離状態を確認できた場合はpingの結果を返す', async () => {

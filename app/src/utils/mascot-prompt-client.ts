@@ -1,4 +1,11 @@
 export type MascotPrompts = Awaited<ReturnType<NonNullable<Window['electronAPI']>['getMascotPrompts']>>;
+export type MascotPromptKey = keyof MascotPrompts;
+export type LegacyMascotPromptsPreview = {
+    found: boolean;
+    prompts: Partial<MascotPrompts>;
+};
+
+const PROMPT_KEYS: readonly MascotPromptKey[] = ['identity', 'soul', 'user', 'agents', 'memory'];
 
 export async function loadMascotPrompts(mascotId: string): Promise<{ prompts: MascotPrompts; configured: boolean }> {
     const query = new URLSearchParams({ mascotId });
@@ -19,4 +26,74 @@ export async function saveMascotPrompts(mascotId: string, prompts: MascotPrompts
         body: JSON.stringify({ mascotId, prompts })
     });
     if (!response.ok) throw new Error('サーバーにプロンプトを保存できませんでした。');
+}
+
+/**
+ * 長期記憶（memory.md）のみをサーバーへ保存する。
+ * 並行更新により記憶が既に変わっていた場合（409）は上書きせず conflict: true を返す。
+ */
+export async function saveMascotMemory(
+    mascotId: string,
+    memory: string,
+    expectedCurrentMemory?: string
+): Promise<{ saved: boolean; conflict?: boolean }> {
+    const response = await fetch('/api/mascots/cli-prompts', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            mascotId,
+            mode: 'memory',
+            memory,
+            ...(expectedCurrentMemory !== undefined ? { expectedCurrentMemory } : {})
+        })
+    });
+    if (response.status === 409) {
+        return { saved: false, conflict: true };
+    }
+    if (!response.ok) throw new Error('サーバーに長期記憶を保存できませんでした。');
+    return { saved: true };
+}
+
+function readLegacyFromLocalStorage(mascotId: string): LegacyMascotPromptsPreview {
+    if (typeof localStorage === 'undefined') return { found: false, prompts: {} };
+    try {
+        const raw = localStorage.getItem(`desktop_ai_mascot_prompts_${mascotId}`);
+        if (raw === null) return { found: false, prompts: {} };
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            return { found: false, prompts: {} };
+        }
+        const prompts: Partial<MascotPrompts> = {};
+        let found = false;
+        for (const key of PROMPT_KEYS) {
+            if (Object.prototype.hasOwnProperty.call(parsed, key) && typeof parsed[key] === 'string') {
+                prompts[key] = parsed[key];
+                found = true;
+            }
+        }
+        return { found, prompts };
+    } catch {
+        return { found: false, prompts: {} };
+    }
+}
+
+/**
+ * この端末に存在する旧プロンプト設定を読み取り専用で参照する（ファイル作成・サーバー送信なし）。
+ */
+export async function previewLocalLegacyMascotPrompts(mascotId: string): Promise<LegacyMascotPromptsPreview> {
+    if (typeof window !== 'undefined' && typeof window.electronAPI?.previewLegacyMascotPrompts === 'function') {
+        const result = await window.electronAPI.previewLegacyMascotPrompts(mascotId);
+        if (!result || typeof result !== 'object') return { found: false, prompts: {} };
+        const prompts: Partial<MascotPrompts> = {};
+        let found = false;
+        for (const key of PROMPT_KEYS) {
+            if (result.prompts && Object.prototype.hasOwnProperty.call(result.prompts, key) && typeof result.prompts[key] === 'string') {
+                prompts[key] = result.prompts[key];
+                found = true;
+            }
+        }
+        return { found: result.found === true && found, prompts };
+    }
+    return readLegacyFromLocalStorage(mascotId);
 }

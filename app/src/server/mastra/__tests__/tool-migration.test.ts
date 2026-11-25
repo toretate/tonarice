@@ -87,17 +87,31 @@ describe('Mastraツール移植のテスト', () => {
         expect(onDataToolResult).not.toHaveBeenCalled();
     });
 
-    it('execute_メモ検索の通常ログに操作と件数だけを出すこと', async () => {
+    it.each([
+        { args: { query: '秘密の検索語' }, mode: 'キーワード' },
+        { args: { query: ' * ' }, mode: '単独の *' },
+        { args: { query: '*秘密の検索語*' }, mode: 'ワイルドカード' },
+        { args: { query: '*秘密の検索語*', literalQuery: true }, mode: 'リテラル' },
+        { args: { literalQuery: true }, mode: '省略または空欄' },
+        { args: { query: '', literalQuery: true }, mode: '省略または空欄' },
+        { args: { query: ' ', literalQuery: true }, mode: 'リテラル' },
+        { args: { query: ' ' }, mode: '省略または空欄' }
+    ])('execute_メモ検索の引数を委譲し通常ログで $mode と記録すること', async ({ args, mode }) => {
         const original = process.env.MASTRA_TOOL_DEBUG_CONTENT;
         delete process.env.MASTRA_TOOL_DEBUG_CONTENT;
         const info = vi.spyOn(console, 'info').mockImplementation(() => {});
         try {
             if (!mastraMemosTool.execute) throw new Error('メモツールがありません。');
-            await mastraMemosTool.execute({ action: 'search', query: '秘密の検索語' }, {
-                requestContext: createContext({ executeDataTool: async () => JSON.stringify({ success: true, count: 2, message: '秘密の結果' }) })
+            expect(mastraMemosTool.inputSchema).toHaveProperty('shape.literalQuery');
+            const input = { action: 'search' as const, ...args };
+            const executeDataTool = vi.fn().mockResolvedValue(JSON.stringify({ success: true, count: 2, message: '秘密の結果' }));
+            await mastraMemosTool.execute(input, {
+                requestContext: createContext({ executeDataTool })
             } as never);
+
+            expect(executeDataTool).toHaveBeenCalledWith('manageMemos', input);
             const logs = JSON.stringify(info.mock.calls);
-            expect(logs).toContain('操作: search');
+            expect(logs).toContain(`操作: search, 検索条件: ${mode}`);
             expect(logs).toContain('検索結果: 2件');
             expect(logs).not.toContain('秘密の検索語');
             expect(logs).not.toContain('秘密の結果');
@@ -252,9 +266,13 @@ describe('Mastraツール移植のテスト', () => {
         expect(result).toEqual({ success: false, error: 'データ管理ツールは利用できません。' });
     });
 
-    it('execute_アプリ起動では任意コマンドを入力として受け付けないこと', () => {
-        expect(mastraAppLauncherTool.inputSchema.safeParse({ appName: 'calc && whoami' }).success).toBe(false);
-        expect(mastraAppLauncherTool.inputSchema.safeParse({ appName: '電卓' }).success).toBe(true);
+    it('execute_アプリ起動では任意コマンドを入力として受け付けないこと', async () => {
+        const schema = mastraAppLauncherTool.inputSchema;
+        if (!schema) throw new Error('アプリ起動ツールの入力スキーマがありません。');
+        const invalid = await schema['~standard'].validate({ appName: 'calc && whoami' });
+        const valid = await schema['~standard'].validate({ appName: '電卓' });
+        expect(invalid.issues).toBeDefined();
+        expect(valid.issues).toBeUndefined();
     });
 
     it('execute_音量調整が無効ならPCを操作しないこと', async () => {

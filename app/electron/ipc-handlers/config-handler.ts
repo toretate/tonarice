@@ -8,6 +8,7 @@ import { getSettingsWindow } from '../window/settings-window';
 import { getIntegratedWindow } from '../window/integrated-window';
 import { getCompactWindow } from '../window/compact-window';
 import { resolveMascotPath } from '../../src/server/utils/paths';
+import { readLegacyMascotPromptsReadOnly } from './legacy-mascot-prompts';
 import { randomUUID } from 'node:crypto';
 
 // デフォルトラジオプロンプトのインポート
@@ -139,6 +140,13 @@ export function registerConfigHandlers(config: AppConfig) {
         if (settingsWin && !settingsWin.isDestroyed()) {
             settingsWin.webContents.send('config-updated', currentConfig);
         }
+    });
+
+    // 旧ローカルプロンプトを読み取り専用でプレビューするハンドラー（ファイル作成・初期化を行わない）
+    ipcMain.handle('preview-legacy-mascot-prompts', async (_event, mascotId: string) => {
+        const currentCwd = process.cwd();
+        const baseCwd = path.basename(currentCwd) === 'ui' ? path.dirname(currentCwd) : currentCwd;
+        return readLegacyMascotPromptsReadOnly(baseCwd, mascotId);
     });
 
     // マスコットの openclaw スタイルプロンプト（soul, identity, user, agents, memory）の読み込みハンドラー

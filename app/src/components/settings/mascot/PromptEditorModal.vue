@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 import Button from 'primevue/button';
-import { loadMascotPrompts, saveMascotPrompts, type MascotPrompts } from '../../../utils/mascot-prompt-client';
+import {
+    loadMascotPrompts,
+    previewLocalLegacyMascotPrompts,
+    saveMascotPrompts,
+    type MascotPrompts
+} from '../../../utils/mascot-prompt-client';
 import AppModalShell from '../../common/AppModalShell.vue';
 
 const props = defineProps<{
@@ -41,25 +46,37 @@ watch(() => [props.visible, props.mascotId] as const, async ([visible, mascotId]
     if (!visible || !mascotId) return;
     try {
         const result = await loadMascotPrompts(mascotId);
-        if (version !== loadVersion) return;
+        if (version !== loadVersion || !props.visible) return;
         showPrompts(result.prompts);
         loaded.value = true;
-        canImportLegacy.value = !result.configured && !!window.electronAPI?.getMascotPrompts;
+        if (!result.configured) {
+            const legacy = await previewLocalLegacyMascotPrompts(mascotId);
+            if (version !== loadVersion || !props.visible) return;
+            canImportLegacy.value = legacy.found;
+        }
     } catch {
-        if (version === loadVersion) alert('プロンプトを読み込めませんでした。');
+        if (version === loadVersion && props.visible) alert('プロンプトを読み込めませんでした。');
     }
 }, { immediate: true });
 
 async function importLegacyPrompts() {
-    const legacy = window.electronAPI;
-    if (!legacy || !canImportLegacy.value || !window.confirm('この端末にある旧設定が、現在のアカウントに移す内容であることを確認してください。読み込んだ内容は保存前に確認できます。')) return;
+    if (!canImportLegacy.value || !window.confirm('この端末にある旧設定が、現在のアカウントに移す内容であることを確認してください。読み込んだ内容は保存前に確認できます。')) return;
     const version = loadVersion;
     try {
-        const prompts = await legacy.getMascotPrompts(props.mascotId);
-        if (version !== loadVersion) return;
-        showPrompts(prompts);
+        const preview = await previewLocalLegacyMascotPrompts(props.mascotId);
+        if (version !== loadVersion || !props.visible) return;
+        if (!preview.found) {
+            alert('この端末に旧設定は見つかりませんでした。');
+            return;
+        }
+        // 旧設定に存在する項目だけを反映し、未存在の項目ではサーバー側の既存値を空欄で上書きしない。
+        if (Object.prototype.hasOwnProperty.call(preview.prompts, 'identity')) identity.value = preview.prompts.identity ?? '';
+        if (Object.prototype.hasOwnProperty.call(preview.prompts, 'soul')) soul.value = preview.prompts.soul ?? '';
+        if (Object.prototype.hasOwnProperty.call(preview.prompts, 'user')) userPrompt.value = preview.prompts.user ?? '';
+        if (Object.prototype.hasOwnProperty.call(preview.prompts, 'agents')) agents.value = preview.prompts.agents ?? '';
+        if (Object.prototype.hasOwnProperty.call(preview.prompts, 'memory')) memory.value = preview.prompts.memory ?? '';
     } catch {
-        alert('この端末の旧設定を読み込めませんでした。');
+        if (version === loadVersion && props.visible) alert('この端末の旧設定を読み込めませんでした。');
     }
 }
 

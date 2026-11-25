@@ -109,10 +109,11 @@ export async function assertIsolatedServer(options, fetcher = fetch) {
 export async function run(args, fetcher = fetch, input, chatSend) {
     try {
         const options = parseArgs(args);
-        const isolatedStatus = options.isolated ? await assertIsolatedServer(options, fetcher) : undefined;
         const result = options.command === 'ping'
-            ? isolatedStatus || await ping(options.url, options.timeout, fetcher)
-            : await chatSend(options, input);
+            ? (options.isolated
+                ? await assertIsolatedServer(options, fetcher)
+                : await ping(options.url, options.timeout, fetcher))
+            : await chatSend(options, input, { fetch: fetcher });
         return { exitCode: 0, output: { version: 1, ok: true, result } };
     } catch (error) {
         const known = error instanceof CliError;

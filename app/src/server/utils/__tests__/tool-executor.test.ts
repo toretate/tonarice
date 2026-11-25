@@ -37,12 +37,14 @@ describe('tool-executor.ts のテスト', () => {
     });
 
     it('executeTasksTool - delete アクションで渡された ID が deleteTaskFromDb にそのまま渡ること', async () => {
+        vi.mocked(tasksService.deleteTaskFromDb).mockReturnValue({ revision: 7 });
         const resultStr = await executeTasksTool('user_1', { action: 'delete', id: 'task_abc' });
         const result = JSON.parse(resultStr);
 
         expect(result.success).toBe(true);
         expect(result.action).toBe('delete');
         expect(result.id).toBe('task_abc');
+        expect(result.revision).toBe(7);
         expect(tasksService.deleteTaskFromDb).toHaveBeenCalledWith('user_1', 'task_abc');
     });
 
@@ -57,16 +59,18 @@ describe('tool-executor.ts のテスト', () => {
 
         expect(result.success).toBe(true);
         expect(result.message).toContain('[ID: memo_xyz]');
-        expect(memosService.searchMemosFromDb).toHaveBeenCalledWith('user_1', 'テスト');
+        expect(memosService.searchMemosFromDb).toHaveBeenCalledWith('user_1', 'テスト', undefined);
     });
 
     it('executeMemosTool - delete アクションで渡された ID が deleteMemoFromDb にそのまま渡ること', async () => {
+        vi.mocked(memosService.deleteMemoFromDb).mockReturnValue({ revision: 8 });
         const resultStr = await executeMemosTool('user_1', { action: 'delete', id: 'memo_xyz' });
         const result = JSON.parse(resultStr);
 
         expect(result.success).toBe(true);
         expect(result.action).toBe('delete');
         expect(result.id).toBe('memo_xyz');
+        expect(result.revision).toBe(8);
         expect(memosService.deleteMemoFromDb).toHaveBeenCalledWith('user_1', 'memo_xyz');
     });
 });

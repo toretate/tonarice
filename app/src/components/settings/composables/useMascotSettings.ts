@@ -232,7 +232,7 @@ export function useMascotSettings(
     });
 
     const loadMascotPrompts = async () => {
-        if (window.electronAPI && editingMascot.value && editingMascot.value.id) {
+        if (editingMascot.value && editingMascot.value.id) {
             try {
                 const { prompts: data } = await loadSharedMascotPrompts(editingMascot.value.id);
                 mascotPrompts.value = data;

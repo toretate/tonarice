@@ -126,6 +126,29 @@ describe('Tool Use - 各ツールの挙動テスト', () => {
         expect(vi.mocked(globalThis.fetch).mock.calls.every(([url]) => String(url).includes('geocoding-api.open-meteo.com'))).toBe(true);
     });
 
+    test('getWeather_LMStudio用パラメータスキーマがZod3互換で緯度経度都市名の制約と任意項目を維持すること', () => {
+        const schema = (weatherTool as { parametersSchema?: { safeParse: (value: unknown) => { success: boolean; data?: unknown } } }).parametersSchema;
+        expect(schema).toBeDefined();
+        // LM Studio SDK 用は Zod 3 互換スキーマ（_def を持ち、Zod 4 固有の _zod を持たない）であることを確認する。
+        expect('_def' in (schema as object)).toBe(true);
+        expect('_zod' in (schema as object)).toBe(false);
+
+        expect(schema!.safeParse({}).success).toBe(true);
+        expect(schema!.safeParse({ city: '  東京  ', latitude: 35.6895, longitude: 139.6917 })).toEqual({
+            success: true,
+            data: { city: '東京', latitude: 35.6895, longitude: 139.6917 }
+        });
+        expect(schema!.safeParse({ latitude: -90, longitude: -180 }).success).toBe(true);
+        expect(schema!.safeParse({ latitude: 90, longitude: 180 }).success).toBe(true);
+
+        expect(schema!.safeParse({ latitude: -90.1 }).success).toBe(false);
+        expect(schema!.safeParse({ latitude: 90.1 }).success).toBe(false);
+        expect(schema!.safeParse({ longitude: -180.1 }).success).toBe(false);
+        expect(schema!.safeParse({ longitude: 180.1 }).success).toBe(false);
+        expect(schema!.safeParse({ city: '   ' }).success).toBe(false);
+        expect(schema!.safeParse({ city: 'あ'.repeat(101) }).success).toBe(false);
+    });
+
     // 4. 音量調整ツール (adjustVolume)
     test('adjustVolume - 指定した音量レベルでPowerShellコマンドが実行され調整メッセージが返ること', async () => {
         const result = await volumeTool.implementation({ volume: 50 }, {} as any);

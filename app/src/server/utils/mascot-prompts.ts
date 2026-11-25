@@ -4,6 +4,7 @@ import { APP_ROOT, USERS_DIR } from './paths';
 import { safeWriteFileSync } from './fs-helpers';
 
 export const MASCOT_PROMPT_NAMES = ['identity', 'soul', 'user', 'agents', 'memory'] as const;
+const EXPLICIT_CONFIG_MARKER_NAMES = ['identity', 'soul', 'user', 'agents'] as const;
 export type MascotPromptName = typeof MASCOT_PROMPT_NAMES[number];
 export type MascotPrompts = Record<MascotPromptName, string>;
 
@@ -31,8 +32,7 @@ export function isOwnedMascot(userId: string, mascotId: string): boolean {
 /**
  * 認証済みユーザーが所有するマスコットの OpenClaw プロンプトを読み込む。
  * 所有していない場合は null を返す。
- * ユーザー別保存先（USERS_DIR/<userId>/mascots/<mascotId>/*.md）を優先し、
- * 単一ローカル開発ユーザー向けの未移行データ互換が明示許可された場合のみ APP_ROOT/mascots/<mascotId>/*.md へフォールバックする。
+ * configured は memory.md 単独では true にせず、従来の全項目明示保存（memory 以外のファイル存在）で判定する。
  */
 export function readUserMascotPrompts(
     userId: string,
@@ -57,16 +57,17 @@ export function readUserMascotPrompts(
 
     let configured = false;
     for (const name of MASCOT_PROMPT_NAMES) {
+        const isMarker = (EXPLICIT_CONFIG_MARKER_NAMES as readonly string[]).includes(name);
         const userFile = path.join(userDir, `${name}.md`);
         if (fs.existsSync(userFile)) {
-            configured = true;
+            if (isMarker) configured = true;
             prompts[name] = fs.readFileSync(userFile, 'utf8');
             continue;
         }
         if (allowLegacyFallback) {
             const legacyFile = path.join(legacyDir, `${name}.md`);
             if (isPathInside(path.join(APP_ROOT, 'mascots'), legacyFile) && fs.existsSync(legacyFile)) {
-                configured = true;
+                if (isMarker) configured = true;
                 prompts[name] = fs.readFileSync(legacyFile, 'utf8');
             }
         }
@@ -76,7 +77,7 @@ export function readUserMascotPrompts(
 }
 
 /**
- * 認証済みユーザーが所有するマスコットの OpenClaw プロンプトをユーザー別保存先へ保存する。
+ * 認証済みユーザーが所有するマスコットの OpenClaw プロンプト全項目をユーザー別保存先へ保存する。
  * 所有していない場合は null を返す。
  */
 export function writeUserMascotPrompts(
@@ -104,4 +105,44 @@ export function writeUserMascotPrompts(
     }
 
     return saved;
+}
+
+export type WriteMemoryResult =
+    | { status: 'not_found' }
+    | { status: 'conflict'; prompts: MascotPrompts; configured: boolean }
+    | { status: 'saved'; memory: string; prompts: MascotPrompts; configured: boolean };
+
+/**
+ * 長期記憶（memory.md）のみをユーザー別保存先へ保存する。
+ * 他のプロンプトファイルには触れず、expectedCurrentMemory が現在値と異なる場合は競合として上書きしない。
+ */
+export function writeUserMascotMemory(
+    userId: string,
+    mascotId: string,
+    memory: string,
+    options?: { expectedCurrentMemory?: string; allowLegacyLocalFallback?: boolean }
+): WriteMemoryResult {
+    const current = readUserMascotPrompts(userId, mascotId, {
+        allowLegacyLocalFallback: options?.allowLegacyLocalFallback
+    });
+    if (!current) {
+        return { status: 'not_found' };
+    }
+
+    if (
+        options?.expectedCurrentMemory !== undefined
+        && current.prompts.memory !== options.expectedCurrentMemory
+    ) {
+        return { status: 'conflict', prompts: current.prompts, configured: current.configured };
+    }
+
+    const userDir = path.join(USERS_DIR, userId, 'mascots', mascotId);
+    safeWriteFileSync(path.join(userDir, 'memory.md'), memory);
+
+    return {
+        status: 'saved',
+        memory,
+        prompts: { ...current.prompts, memory },
+        configured: current.configured
+    };
 }

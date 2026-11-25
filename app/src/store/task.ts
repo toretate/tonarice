@@ -42,6 +42,7 @@ export interface Task {
 }
 
 export const MEETING_CATEGORY_ID = 'meeting';
+let activeTaskStorageListener: ((e: StorageEvent) => void) | null = null;
 
 export const useTaskStore = defineStore('task', () => {
     // 状態管理
@@ -60,6 +61,8 @@ export const useTaskStore = defineStore('task', () => {
     const isLoaded = ref(false);
     const serverRevision = ref<number | null>(null);
     let suppressServerSync = 0;
+    let storageSyncRunning = false;
+    const pendingStorageKeys = new Set<string>();
 
     const persistLocalOnly = () => {
         if (typeof window === 'undefined') return;
@@ -824,23 +827,78 @@ export const useTaskStore = defineStore('task', () => {
     };
 
     // 他のウィンドウによる localStorage の変更を検知して自動で同期する
-    if (typeof window !== 'undefined') {
-        window.addEventListener('storage', (e) => {
-            if (
-                e.key === 'desktop-mascot-tasks' || 
-                e.key === 'desktop-mascot-categories' || 
-                e.key === 'desktop-mascot-active-category' ||
-                e.key === 'desktop-mascot-show-task-widget' ||
-                e.key === 'desktop-mascot-enable-notification' ||
-                e.key === 'desktop-mascot-notification-minutes' ||
-                e.key === 'desktop-mascot-default-duration-hours' ||
-                e.key === 'desktop-mascot-mute-during-meetings'
-            ) {
-                console.log('[TaskStore] Detected storage change from another window, reloading...');
-                isLoaded.value = false;
-                loadFromLocalStorage();
+    const SERVER_MANAGED_TASK_STORAGE_KEYS = new Set([
+        'desktop-mascot-tasks',
+        'desktop-mascot-categories',
+        'desktop-mascot-enable-notification',
+        'desktop-mascot-notification-minutes',
+        'desktop-mascot-completion-grace-seconds',
+        'desktop-mascot-default-duration-hours',
+        'desktop-mascot-mute-during-meetings'
+    ]);
+    const LOCAL_UI_TASK_STORAGE_KEYS = new Set([
+        'desktop-mascot-active-category',
+        'desktop-mascot-task-view',
+        'desktop-mascot-show-task-widget'
+    ]);
+
+    const syncFromStorageEvent = async (key: string) => {
+        if (!isLoaded.value) return;
+        pendingStorageKeys.add(key);
+        if (storageSyncRunning) return;
+        storageSyncRunning = true;
+        try {
+            while (pendingStorageKeys.size > 0) {
+                while (sync.isPending()) {
+                    await sync.settled();
+                }
+                const keys = Array.from(pendingStorageKeys);
+                pendingStorageKeys.clear();
+
+                const hasLocalUiKey = keys.some(item => LOCAL_UI_TASK_STORAGE_KEYS.has(item));
+                if (hasLocalUiKey) {
+                    runFromServer(() => {
+                        if (keys.includes('desktop-mascot-active-category')) {
+                            const savedActiveId = localStorage.getItem('desktop-mascot-active-category');
+                            if (savedActiveId) activeCategoryId.value = savedActiveId;
+                        }
+                        if (keys.includes('desktop-mascot-task-view')) {
+                            const savedView = localStorage.getItem('desktop-mascot-task-view');
+                            if (savedView === 'todo' || savedView === 'timeline' || savedView === 'completed') {
+                                currentView.value = savedView;
+                            }
+                        }
+                        if (keys.includes('desktop-mascot-show-task-widget')) {
+                            const savedShowWidget = localStorage.getItem('desktop-mascot-show-task-widget');
+                            if (savedShowWidget !== null) {
+                                showTaskWidget.value = savedShowWidget === 'true';
+                            }
+                        }
+                    });
+                }
+
+                if (keys.some(item => SERVER_MANAGED_TASK_STORAGE_KEYS.has(item))) {
+                    await reloadFromServer();
+                }
             }
-        });
+        } finally {
+            storageSyncRunning = false;
+        }
+    };
+
+    if (typeof window !== 'undefined') {
+        if (activeTaskStorageListener) {
+            window.removeEventListener('storage', activeTaskStorageListener);
+        }
+        activeTaskStorageListener = (e: StorageEvent) => {
+            if (
+                e.key
+                && (SERVER_MANAGED_TASK_STORAGE_KEYS.has(e.key) || LOCAL_UI_TASK_STORAGE_KEYS.has(e.key))
+            ) {
+                void syncFromStorageEvent(e.key);
+            }
+        };
+        window.addEventListener('storage', activeTaskStorageListener);
     }
 
     return {

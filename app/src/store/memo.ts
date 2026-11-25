@@ -19,12 +19,16 @@ export interface ServerMemoActionPayload {
     revision?: number;
 }
 
+let activeMemoStorageListener: ((e: StorageEvent) => void) | null = null;
+
 export const useMemoStore = defineStore('memo', () => {
     const memos = ref<Memo[]>([]);
     const showMemoWidget = ref<boolean>(false);
     const isLoaded = ref(false);
     const serverRevision = ref<number | null>(null);
     let suppressServerSync = 0;
+    let storageSyncRunning = false;
+    const pendingStorageKeys = new Set<string>();
 
     const persistLocalOnly = () => {
         if (typeof window === 'undefined') return;
@@ -249,13 +253,45 @@ export const useMemoStore = defineStore('memo', () => {
         memos.value = memos.value.filter(m => m.id !== id);
     };
 
-    if (typeof window !== 'undefined') {
-        window.addEventListener('storage', (e) => {
-            if (e.key === 'desktop-mascot-memos' || e.key === 'desktop-mascot-show-memo-widget') {
-                isLoaded.value = false;
-                loadFromLocalStorage();
+    const syncFromStorageEvent = async (key: string) => {
+        if (!isLoaded.value) return;
+        pendingStorageKeys.add(key);
+        if (storageSyncRunning) return;
+        storageSyncRunning = true;
+        try {
+            while (pendingStorageKeys.size > 0) {
+                while (sync.isPending()) {
+                    await sync.settled();
+                }
+                const keys = Array.from(pendingStorageKeys);
+                pendingStorageKeys.clear();
+                if (keys.includes('desktop-mascot-show-memo-widget')) {
+                    const savedShowWidget = localStorage.getItem('desktop-mascot-show-memo-widget');
+                    if (savedShowWidget !== null) {
+                        runFromServer(() => {
+                            showMemoWidget.value = savedShowWidget === 'true';
+                        });
+                    }
+                }
+                if (keys.includes('desktop-mascot-memos')) {
+                    await reloadFromServer();
+                }
             }
-        });
+        } finally {
+            storageSyncRunning = false;
+        }
+    };
+
+    if (typeof window !== 'undefined') {
+        if (activeMemoStorageListener) {
+            window.removeEventListener('storage', activeMemoStorageListener);
+        }
+        activeMemoStorageListener = (e: StorageEvent) => {
+            if (e.key === 'desktop-mascot-memos' || e.key === 'desktop-mascot-show-memo-widget') {
+                void syncFromStorageEvent(e.key);
+            }
+        };
+        window.addEventListener('storage', activeMemoStorageListener);
     }
 
     return {

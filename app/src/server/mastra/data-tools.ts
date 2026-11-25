@@ -1,7 +1,7 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { manageTasksToolShared } from '../../utils/task-tools-shared';
-import { manageMemos } from '../../utils/memo-tools-shared';
+import { manageMemos, memoLiteralQueryDescription, memoQueryDescription } from '../../utils/memo-tools-shared';
 import { observeTool } from './tool-observation';
 
 const taskInputSchema = z.object({
@@ -20,10 +20,21 @@ const memoInputSchema = z.object({
     action: z.enum(['add', 'search', 'update', 'delete']).describe('操作種別'),
     content: z.string().optional().describe('add時のメモ本文'),
     id: z.string().optional().describe('update・delete時に必須のメモID。本文を指定しない'),
-    query: z.string().optional().describe('search時の検索キーワード'),
+    query: z.string().optional().describe(memoQueryDescription),
+    literalQuery: z.boolean().optional().describe(memoLiteralQueryDescription),
     color: z.string().optional().describe('付箋色'),
     pinned: z.boolean().optional().describe('ピン留め')
 });
+
+function describeMemoSearch(input: Record<string, unknown>): string {
+    const rawQuery = typeof input.query === 'string' ? input.query : '';
+    const literal = input.literalQuery === true;
+    const query = literal ? rawQuery : rawQuery.trim();
+    if (!query) return '省略または空欄';
+    if (literal) return 'リテラル';
+    if (query === '*') return '単独の *';
+    return query.includes('*') ? 'ワイルドカード' : 'キーワード';
+}
 
 /**
  * ユーザー別DBの実行関数はWebSocketの認証済み接続から注入する。
@@ -40,7 +51,10 @@ async function executeDataTool(
         return { success: false, error: 'データ管理ツールは利用できません。' };
     }
     const action = ['add', 'search', 'update', 'delete'].includes(String(input.action)) ? String(input.action) : 'unknown';
-    console.info(`[MastraTool] ${name}の実行を開始 (操作: ${action})`);
+    const searchMode = name === 'manageMemos' && action === 'search'
+        ? `, 検索条件: ${describeMemoSearch(input)}`
+        : '';
+    console.info(`[MastraTool] ${name}の実行を開始 (操作: ${action}${searchMode})`);
     try {
         const parsed = await observeTool(requestContext, name, async () => {
             const output = await execute(name, input);
