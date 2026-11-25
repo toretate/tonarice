@@ -242,7 +242,7 @@ describe('useTaskStore', () => {
 
             expect(store.tasks.length).toBe(1);
             expect(store.tasks[0].id).toBe('keep');
-            expect(store.categories.length).toBe(1);
+            expect(store.categories.map(c => c.id)).toEqual(['c1', 'meeting']);
             // 修復のためサーバーへ書き戻す POST が行われること
             const postCalled = fetchMock.mock.calls.some(c => c[1] && c[1].method === 'POST');
             expect(postCalled).toBe(true);

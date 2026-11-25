@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import generateNofaceHandler from '../api/mascots/generate-noface.post';
 import packAtlasHandler from '../api/mascots/pack-atlas.post';
@@ -8,7 +9,7 @@ const { mockReadBody, mockGenerateNofaceImage, mockNormalizeNofaceImage, mockPac
     mockGenerateNofaceImage: vi.fn(),
     mockNormalizeNofaceImage: vi.fn(),
     mockPackTextureAtlas: vi.fn(),
-    mockResolveMascotPath: vi.fn((requestPath: string) => `C:\\mascots${requestPath.replaceAll('/', '\\')}`),
+    mockResolveMascotPath: vi.fn((requestPath: string) => path.join(path.resolve('/mascots'), ...requestPath.split('/').filter(Boolean))),
     mockMkdirSync: vi.fn(),
     mockWriteFileSync: vi.fn()
 }));

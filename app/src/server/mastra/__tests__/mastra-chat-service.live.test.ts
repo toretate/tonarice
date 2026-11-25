@@ -39,7 +39,7 @@ describe.skipIf(!liveTestEnabled)('MastraChatService.generateResponseの実接�
 
     it('generateResponse_Gemini実接続で確認文字列を返すこと', async () => {
         const geminiApiKey = getRequiredApiKey('GEMINI_API_KEY');
-        const geminiModelId = process.env.MASTRA_TEST_GEMINI_MODEL || 'gemini-3.5-flash-lite';
+        const geminiModelId = process.env.MASTRA_TEST_GEMINI_MODEL || 'gemini-flash-lite-latest';
         const google = createGoogleGenerativeAI({ apiKey: geminiApiKey });
 
         let geminiResponse: string;

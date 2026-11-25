@@ -342,14 +342,14 @@ describe('outfit切り替え時のちらつき防止テスト', () => {
             await flushPromises();
 
             expect(selectLocalImageMock).toHaveBeenCalled();
-            await vi.waitFor(() => expect(saveMascotImageMock).toHaveBeenCalled());
-            await flushPromises();
-
-            // 新しく追加された outfit の path がアップロード後のパスになっていること
-            const updatedMascot = configStore.mascots.find(m => m.id === 'mascot_test');
-            const newOutfit = updatedMascot?.assets.outfits.find((o: MascotAsset) => o.id.startsWith('outfit_') && o.id !== 'outfit_1' && o.id !== 'outfit_2');
-            expect(newOutfit).toBeTruthy();
-            expect(newOutfit?.path).toBe('/mascots/users/usr_local_dev_bypass/mascot_test/outfits/outfit_new.png');
+            await vi.waitFor(() => {
+                expect(saveMascotImageMock).toHaveBeenCalled();
+                // 新しく追加された outfit の path がアップロード後のパスになっていること
+                const updatedMascot = configStore.mascots.find(m => m.id === 'mascot_test');
+                const newOutfit = updatedMascot?.assets.outfits.find((o: MascotAsset) => o.id.startsWith('outfit_') && o.id !== 'outfit_1' && o.id !== 'outfit_2');
+                expect(newOutfit).toBeTruthy();
+                expect(newOutfit?.path).toBe('/mascots/users/usr_local_dev_bypass/mascot_test/outfits/outfit_new.png');
+            });
         });
 
         it('addOutfitImage_衣装インポート時にアップロードが失敗した場合、Base64パスがフォールバック格納されること', async () => {
@@ -395,14 +395,14 @@ describe('outfit切り替え時のちらつき防止テスト', () => {
             await flushPromises();
 
             expect(selectLocalImageMock).toHaveBeenCalled();
-            await vi.waitFor(() => expect(saveMascotImageMock).toHaveBeenCalled());
-            await flushPromises();
-
-            // アップロード失敗時、フォールバックで元の Base64 データが格納されていること
-            const updatedMascot = configStore.mascots.find(m => m.id === 'mascot_test');
-            const newOutfit = updatedMascot?.assets.outfits.find((o: MascotAsset) => o.path.startsWith('data:image/'));
-            expect(newOutfit).toBeTruthy();
-            expect(newOutfit?.path).toBe('data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==');
+            // アップロード失敗時のフォールバックでは FileReader による非同期変換が走るため、ストア反映まで待機する
+            await vi.waitFor(() => {
+                expect(saveMascotImageMock).toHaveBeenCalled();
+                const updatedMascot = configStore.mascots.find(m => m.id === 'mascot_test');
+                const newOutfit = updatedMascot?.assets.outfits.find((o: MascotAsset) => o.path.startsWith('data:image/'));
+                expect(newOutfit).toBeTruthy();
+                expect(newOutfit?.path).toBe('data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==');
+            });
         });
     });
 });

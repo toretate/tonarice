@@ -10,18 +10,26 @@ const {
     mockSetResponseHeader,
     mockSendNoContent,
     mockSendStream,
-    mockAuthenticateUserToken
-} = vi.hoisted(() => ({
-    mockExistsSync: vi.fn(),
-    mockStatSync: vi.fn(),
-    mockCreateReadStream: vi.fn(),
-    mockGetHeader: vi.fn(),
-    mockGetCookie: vi.fn(),
-    mockSetResponseHeader: vi.fn(),
-    mockSendNoContent: vi.fn(),
-    mockSendStream: vi.fn(),
-    mockAuthenticateUserToken: vi.fn()
-}));
+    mockAuthenticateUserToken,
+    mockUsersDir,
+    mockMascotFilePath
+} = await vi.hoisted(async () => {
+    const nodePath = await import('node:path');
+    const usersDir = nodePath.resolve('/storage/users');
+    return {
+        mockExistsSync: vi.fn(),
+        mockStatSync: vi.fn(),
+        mockCreateReadStream: vi.fn(),
+        mockGetHeader: vi.fn(),
+        mockGetCookie: vi.fn(),
+        mockSetResponseHeader: vi.fn(),
+        mockSendNoContent: vi.fn(),
+        mockSendStream: vi.fn(),
+        mockAuthenticateUserToken: vi.fn(),
+        mockUsersDir: usersDir,
+        mockMascotFilePath: nodePath.join(usersDir, 'owner', 'mascots', 'mascot_a', 'outfits', 'body.png')
+    };
+});
 
 vi.mock('fs', () => ({
     default: {
@@ -32,8 +40,8 @@ vi.mock('fs', () => ({
 }));
 
 vi.mock('../utils/paths', () => ({
-    USERS_DIR: 'C:\\storage\\users',
-    resolveMascotPath: () => 'C:\\storage\\users\\owner\\mascots\\mascot_a\\outfits\\body.png'
+    USERS_DIR: mockUsersDir,
+    resolveMascotPath: () => mockMascotFilePath
 }));
 
 vi.mock('../middleware/auth', () => ({
