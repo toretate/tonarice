@@ -15,6 +15,8 @@ permissions:
     contents: read
 
 env:
+    # 日本ローカル環境とタイムゾーンを揃える（日時表示テストの UTC 差異を防止）
+    TZ: Asia/Tokyo
     # Linux ランナーでは GPU 不要のため onnxruntime-node の CUDA バイナリ取得をスキップする
     npm_config_onnxruntime_node_install_cuda: 'skip'
 
