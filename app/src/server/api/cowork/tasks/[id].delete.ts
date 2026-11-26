@@ -1,10 +1,10 @@
 import { defineEventHandler, getRouterParam, sendNoContent } from 'h3';
 import { requireCoWorkUser, requireJson, requireTask } from '../../../cowork/http';
-import { getCoWorkRepository } from '../../../cowork/runtime';
+import { deleteCoWorkTask } from '../../../cowork/runtime';
 
-export default defineEventHandler(event => {
+export default defineEventHandler(async event => {
     const owner = requireCoWorkUser(event);
     requireJson(event);
-    requireTask(getCoWorkRepository().delete(owner, getRouterParam(event, 'id') ?? ''));
+    requireTask(await deleteCoWorkTask(owner, getRouterParam(event, 'id') ?? ''));
     return sendNoContent(event);
 });

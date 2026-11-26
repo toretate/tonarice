@@ -24,7 +24,7 @@ MastraをAIエージェントのオーケストレーション基盤として段
 - ブラウザのページ操作ツール（既存チャットには未実装）
 - Mastra Memoryの観察型記憶・意味検索と配布物の検証
 - Workflow、Studio、MCP、外部Observability
-- CoWork・要約・読み辞書など、対話以外で使う旧生成サービスの移行
+- 要約・読み辞書など、対話以外で使う旧生成サービスの移行
 
 ## 3. 実行アーキテクチャ
 
@@ -33,13 +33,15 @@ MastraをAIエージェントのオーケストレーション基盤として段
 - 独立したMastraサーバーや追加の待受ポートを作成しない。
 - Mastra関連コードは`app/src/server/mastra/`以下へ配置する。
 - MastraインスタンスとAgentは、最初に必要になった時点で一度だけ生成する。
+- Nitro の CoWork プラグインが Mastra background workers を起動し、終了時は CoWork Agent の実行を中断してから workers を停止する。
+- Mastra の永続ストレージは`MASCOT_STORAGE_DIR/mastra/runtime.db`を使う。CoWork のタスクと実行履歴は既存の`config.db`に保持する。
 - Nitroの`/api/ping`はMastra機能の有効状態と初期化状態を返す。
 
 ## 4. チャット経路
 
 - Gemini/OpenAI/LM Studioの対話チャットはMastraのみを使う。未対応エンジンはエラーとし、旧経路へ切り替えない。従来の環境変数`MASTRA_CHAT_ENABLED`は参照しない。
 - 互換用のLM StudioチャットHTTP APIもMastraを使い、従来の応答形式を維持する。他のAI処理は既存経路を使う。
-- CoWork の定期実行は Nitro のスケジューラから既存の `ChatAiService` を利用する。運用設定は [CoWork 仕様](ScheduledPromptTask.spec.md) を参照。
+- CoWork の定期実行と手動実行は Mastra scheduler と専用の threadless `cowork-agent` を使う。schedule lifecycle hook が CoWork DB のキュー・履歴と連携する。運用設定は [CoWork 仕様](ScheduledPromptTask.spec.md) を参照。
 - `toolsWeather`、`toolsWebSearch`、`toolsGpsLocation`、`toolsVolume`、`toolsAppLauncher`が明示的に`true`の発話だけ対応ツールを公開する。無効・未指定の場合は公開しない。
 - タスク・メモは認証済みWebSocket接続のユーザー別DB操作関数が利用できる場合だけ公開する。
 - 発話のツール設定が無効なら、エンジンや認証状態にかかわらずタスク・メモを含めすべてのツールを公開しない。
@@ -50,10 +52,11 @@ MastraをAIエージェントのオーケストレーション基盤として段
 ## 5. Agentとモデル
 
 - `@mastra/core`は1.83.0、`@mastra/memory`は1.41.1、`@mastra/libsql`は1.30.0、`@lmstudio/sdk`は2.1.0、AI SDKは7系を使用する。
-- Agent IDは`mascot-agent`とする。
+- Agent IDは通常会話の`mascot-agent`と、定期実行専用の`cowork-agent`とする。
+- CoWork Agentは会話用ツールとMemoryを持たず、サーバー環境の`COWORK_AI_ENGINE`・`COWORK_AI_MODEL`・資格情報から実行ごとにモデルを解決する。結果は CoWork の実行履歴に保存する。
 - 天気、Web検索、概算位置、音量、アプリ起動、タスク、メモのツールをリクエスト設定に応じてAgentへ動的に登録する。Workflowは登録しない。
 - 現行処理と同じく、最初は全文を返す`agent.generate()`を使用する。
-- モデルはAgentへ固定せず、実行ごとのRequest Contextから解決する。
+- 通常会話の`mascot-agent`のモデルは固定せず、実行ごとのRequest Contextから解決する。`cowork-agent`は前項の CoWork 用環境設定を各実行時に読む。
 - APIキー、認証トークン、LM Studioの資格情報をRequest Contextへ直接格納しない。
 - APIキーを使って生成したモデルオブジェクトをリクエスト単位で渡し、認証情報を持つモデルをリクエスト間でキャッシュしない。
 - OpenAIはResponses APIを使用する。制限付きキーには`api.responses.write`権限が必要である。

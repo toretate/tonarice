@@ -1,31 +1,26 @@
 import { defineNitroPlugin } from 'nitropack/runtime';
-import { getCoWorkRepository, runCoWorkOnce } from '../cowork/runtime';
+import { getCoWorkScope } from '../cowork/http';
+import { getCoWorkRepository } from '../cowork/runtime';
+import { dispatchNextCoWorkRun, reconcileCoWorkSchedules } from '../cowork/mastra-schedules';
+import { getMastraRuntime, stopMastraRuntime } from '../mastra/runtime';
 
-export default defineNitroPlugin((nitro) => {
-    const stopping = new AbortController();
-    let current: Promise<void> | undefined;
-    let nextPruneAt = 0;
-    const tick = () => {
-        if (current || stopping.signal.aborted) return;
-        current = Promise.resolve()
-            .then(() => {
-                if (stopping.signal.aborted) return;
-                const repository = getCoWorkRepository();
-                if (Date.now() >= nextPruneAt) {
-                    repository.pruneExpiredHistory();
-                    nextPruneAt = Date.now() + 3_600_000;
-                }
-                return runCoWorkOnce(repository, stopping.signal);
-            })
-            .catch(() => console.error('[CoWork] スケジュールを処理できませんでした。'))
-            .finally(() => { current = undefined; });
-    };
-    const timer = setInterval(tick, 2_000);
-    timer.unref();
-    tick();
+export default defineNitroPlugin(async nitro => {
+    const mastra = getMastraRuntime();
+    const repository = getCoWorkRepository();
+    for (const { owner } of repository.listAllTasks()) {
+        repository.registerOwnerScope(owner, getCoWorkScope(owner));
+    }
+
+    try {
+        await mastra.startWorkers();
+        await reconcileCoWorkSchedules(mastra, repository);
+        await dispatchNextCoWorkRun(mastra, repository);
+    } catch {
+        console.error('[CoWork] Mastra scheduler を初期化できませんでした。');
+    }
+
     nitro.hooks.hook('close', async () => {
-        clearInterval(timer);
-        stopping.abort();
-        await current;
+        stopMastraRuntime();
+        await mastra.stopWorkers({ drainTimeout: 5_000 });
     });
 });

@@ -147,14 +147,17 @@ CoWork を表示中のクライアントは初回表示と約10秒ごとに結�
 
 ### 6.2. サーバー稼働中の発火
 
-- Nitro の起動プラグインがリクエストの有無にかかわらず、起動時と約2秒ごとに実行対象を確認する。
-- 同じ SQLite DB を使うプロセス間で AI 実行を直列化する。定期実行の確保と次回日時の更新を同じトランザクションでコミットし、所有者・タスク・予定日時に一意制約を設ける。
-- 同じタスクが実行中または手動実行待ちの場合、期限に達した予定は `skipped` として記録する。別タスクの予定は空き次第処理する。
-- 手動実行を `queued` として永続化する。実行待ちまたは実行中に同じタスクを再度要求した場合は、既存の実行を返す。未開始の手動実行はサーバー再起動後に処理できる。
+- Nitro 起動プラグインが Mastra runtime の background workers を起動し、Mastra scheduler が保存済み schedule を発火する。CoWork 用の独自 interval/poller は持たない。
+- Mastra schedule storage にはタスクごとの one-off `runAt` を1件保持する。発火前の lifecycle hook が CoWork DB に実行を記録し、既存の schedule row を次の日時へ更新してから Agent を実行する。cron に丸めず、現在の作成時刻起点の間隔と IANA timezone 計算を維持する。
+- Mastra の worker は複数の due schedule を並行処理できる。CoWork DB の実行中ロックを使って AI 実行を1件に直列化し、同じタスクの重複は `skipped`、別タスクは `queued` として空き次第 Mastra `schedules.run()` 経由で実行する。
+- 実行中レコードの lease 期限と schedule dispatch 失敗後の queue は Mastra の共有 one-off recovery schedule で扱い、起動直後に前プロセスの lease がまだ有効だった場合も期限到来後に中断確定と queued run の再開を行う。CoWork 用の定期 poller は使わない。
+- 手動実行を `queued` として永続化し、Mastra `schedules.run()` から CoWork Agent を呼び出す。実行待ちまたは実行中に同じタスクを再度要求した場合は、既存の実行を返す。未開始の手動実行はサーバー再起動後に処理できる。
+- schedule metadata には生の利用者 ID を保存しない。所有者スコープの hash と task ID を記録し、CoWork API は認証済み利用者の scope に限定して task / history を返す。
+- Mastra schedule の publish が失敗したときは短い遅延を置いて再登録し、サーバー起動時にも CoWork task と Mastra schedule を照合して不整合を修復する。Mastra の publish 自体は best-effort とする。
 
 ### 6.3. サーバー停止中の取りこぼし
 
-サーバーの再起動後、保存済みの次回日時から現在までに1回以上の予定があるタスクは、最新の1回だけ補完実行する。
+サーバーの再起動後、保存済みの次回日時から現在までに1回以上の予定があるタスクは、最新の1回だけ補完実行する。起動時照合で過去の one-off schedule を未来の発火時刻へ再登録し、lifecycle hook が次回予定を進める。
 
 - 過去の全回を連続実行しない。
 - 補完実行は通常の定期実行として投稿し、予定実行日時を併記する。
@@ -164,8 +167,8 @@ CoWork を表示中のクライアントは初回表示と約10秒ごとに結�
 ### 6.4. 失敗時
 
 - AI の応答には60秒の制限を設ける。接続・認証・タイムアウトなどの失敗を実行履歴へ記録する。
-- 正常終了時は実行をキャンセルする。プロセスが強制終了した場合は、実行開始から90秒経過後に残った `running` を中断として記録する。確保済みの定期実行は再送しない。
-- AI 実行の自動リトライは行わない。
+- 正常終了時は実行を確定する。Nitro の終了処理では CoWork Agent に渡した abort signal を中断し、Mastra workers を停止する。停止開始後は次の queued run を起動せず、未開始分は再起動後に処理する。プロセスが強制終了した場合は、実行開始から90秒経過後に残った `running` を中断として記録する。実行開始が記録済みの発火は再送せず、発火記録前に失われた schedule は起動時 reconcile の catch-up 対象とする。
+- AI 実行の自動リトライは行わない。Mastra scheduler による schedule publication retry は AI 生成の retry とは分け、失敗 occurrence の再登録として扱う。
 - 失敗しても次回予定は通常どおり計算する。
 - 外部通信のログは既存の実装ルールに従い、秘密情報とプロンプト全文を平文ログへ出さない。
 
@@ -231,6 +234,7 @@ interface ScheduledPromptRun {
 ### 8.2. 運用と永続化
 
 - Nitro が `MASCOT_STORAGE_DIR` 配下の `config.db` に CoWork 専用テーブルを作る。標準の保存先はワークスペースの `storage/`。サーバー再起動後も同じデータディレクトリを使う。
+- Mastra scheduler の schedule domain は同じ保存先の `mastra/runtime.db` に保存し、CoWork タスクと実行履歴は `config.db` に保存する。起動時に両方を照合して、タスクに対応する one-off schedule を修復する。
 - 共有サーバー構成では Web・Electron・スマホを閉じてもサーバー稼働中は実行を継続する。Electron 同梱 Nitro 構成では同梱サーバーの稼働中に実行する。
 - 複数端末で共有する場合は同じ Nitro サーバーを利用する。別々の SQLite ファイルに接続したサーバーは独立した環境になる。
 - Web とスマホは接続先のサーバーでログインする。Electron は既定でローカルの Nitro に接続する。共有サーバーを使う場合は、Electron を起動する環境に `COWORK_SERVER_ORIGIN=https://サーバー名` を設定する。HTTP はループバックに限る。
@@ -248,7 +252,7 @@ interface ScheduledPromptRun {
 | `COWORK_AI_API_KEY` | Gemini または OpenAI のサーバー用 API キー |
 | `COWORK_LMSTUDIO_ENDPOINT` | Nitro から到達できる LM Studio の URL。既定値は `http://127.0.0.1:1234/v1` |
 
-LM Studio はモデルを読み込んで API サーバーを起動しておく。別ホストを使う場合は、Nitro のホストから到達可能なプライベートネットワークのアドレスを設定する。CoWork は既存の `ChatAiService` のテキスト生成をツール無効で呼び出す。
+CoWork 専用の Mastra Agent は threadless の `agent.generate()` で実行し、会話用ツールと Memory は使用しない。モデルは各実行時に環境設定から解決する。LM Studio はモデルを読み込んで API サーバーを起動しておく。別ホストを使う場合は、Nitro のホストから到達可能なプライベートネットワークのアドレスを設定する。
 
 ### 8.4. 旧デスクトップ版からの切り替え
 
