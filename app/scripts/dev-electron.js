@@ -1,12 +1,14 @@
 import { spawn, exec } from 'child_process';
 import fs from 'fs';
-import net from 'net';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { isDevServerListening, waitForDevServer } from './dev-electron-readiness.js';
+import { resolveNuxtCommand, terminateProcessTree } from './dev-nuxt-lifecycle.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
 const processFile = path.join(projectRoot, 'node_modules', '.cache', 'tonarice', 'dev-electron.json');
+const devServerUrl = new URL('http://localhost:3000/');
 
 function writeProcessFile() {
     fs.mkdirSync(path.dirname(processFile), { recursive: true });
@@ -35,42 +37,34 @@ function killProcess(childProcess) {
 }
 
 // Nuxt サーバーが起動しているか確認し、起動していなければ自動で立ち上げる
-async function ensureNuxt(url, timeout = 60000) {
+async function ensureNuxt(url) {
     let nuxtProcess = null;
-    
-    // ポートが既に使用されているか（fetchで何らかの応答、あるいはエラー以外が返るか）確認
-    try {
-        await fetch(url);
-        console.log('[DevElectron] Nuxt dev server is already running or port 3000 is occupied.');
-    } catch (e) {
-        // 接続できない場合（ECONNREFUSEDなど）のみ、新しく立ち上げる
+    const startup = new AbortController();
+    if (await isDevServerListening(url)) {
+        console.log('[DevElectron] Checking the server already listening on port 3000.');
+    } else {
         console.log('[DevElectron] Nuxt dev server is not running. Starting it now...');
-        nuxtProcess = spawn('npx', ['nuxt', 'dev'], {
+        const { command, args, useShell } = resolveNuxtCommand(projectRoot, []);
+        nuxtProcess = spawn(command, args, {
             cwd: projectRoot,
-            shell: true,
+            shell: useShell,
             stdio: 'inherit'
+        });
+        nuxtProcess.once('error', error => startup.abort(error));
+        nuxtProcess.once('exit', (code, signal) => {
+            startup.abort(new Error(`Nuxt 開発サーバーが終了しました (${signal ?? code})。`));
         });
     }
 
-    // 起動して 200 OK を返すのを待つ
-    const startTime = Date.now();
-    while (Date.now() - startTime < timeout) {
-        try {
-            const res = await fetch(url);
-            if (res.status === 200) {
-                return nuxtProcess;
-            }
-            console.log(`[DevElectron] Nuxt dev server status: ${res.status}. Waiting...`);
-        } catch (e) {
-            // 接続できない場合はリトライ
+    try {
+        await waitForDevServer(url, { childSignal: startup.signal });
+        return nuxtProcess;
+    } catch (error) {
+        if (nuxtProcess?.exitCode === null && nuxtProcess.signalCode === null) {
+            await terminateProcessTree(nuxtProcess.pid);
         }
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        throw error;
     }
-    
-    if (nuxtProcess) {
-        killProcess(nuxtProcess);
-    }
-    throw new Error(`Timeout waiting for Nuxt dev server at ${url}`);
 }
 
 async function start() {
@@ -78,10 +72,10 @@ async function start() {
     let nuxtProcess = null;
     console.log('[DevElectron] Checking Nuxt dev server status...');
     try {
-        nuxtProcess = await ensureNuxt('http://localhost:3000/');
+        nuxtProcess = await ensureNuxt(devServerUrl);
         console.log('[DevElectron] Nuxt dev server is ready! Building main process...');
-    } catch (e) {
-        console.error('[DevElectron] Nuxt dev server was not ready. Exiting.');
+    } catch (error) {
+        console.error(`[DevElectron] ${error.message}`);
         process.exit(1);
     }
 
@@ -102,7 +96,7 @@ async function start() {
             stdio: 'inherit',
             env: {
                 ...process.env,
-                VITE_DEV_SERVER_URL: 'http://localhost:3000/'
+                VITE_DEV_SERVER_URL: devServerUrl.href
             }
         });
 

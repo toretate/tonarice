@@ -68,7 +68,7 @@ export interface ScheduledPromptRun {
     scheduledAt: string;
     startedAt: string;
     finishedAt?: string;
-    status: 'running' | 'success' | 'failed' | 'skipped';
+    status: 'queued' | 'running' | 'success' | 'failed' | 'skipped';
     resultText?: string;
     errorCode?: string;
     errorMessage?: string;

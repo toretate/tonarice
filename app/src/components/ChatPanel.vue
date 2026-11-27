@@ -27,8 +27,10 @@ import { useResizableFrame } from '../composables/useResizableFrame';
 import WidgetFrame from './common/WidgetFrame.vue';
 import { useChatVisualViewport } from './chatpanel/useChatVisualViewport';
 import CoWorkPanel from './cowork/CoWorkPanel.vue';
+import { useCoWorkUnread } from './cowork/useCoWorkUnread';
 import type { ConversationKind } from '../types/scheduled-prompt-task';
 
+const emit = defineEmits<{ conversationKindChange: [kind: ConversationKind] }>();
 const inputText = ref('');
 const storedConversationKind = typeof window === 'undefined'
     ? null
@@ -36,8 +38,7 @@ const storedConversationKind = typeof window === 'undefined'
 const conversationKind = ref<ConversationKind>(
     storedConversationKind === 'cowork' ? 'cowork' : 'chat'
 );
-const coworkUnreadCount = ref(0);
-let unsubscribeScheduledPromptChanged: (() => void) | undefined;
+const { unread: coworkUnreadCount, reload: reloadCoWorkUnread } = useCoWorkUnread(conversationKind);
 const messageListRef = ref<any>(null);
 const showTaskManagement = ref(false);
 const showMemoManagement = ref(false);
@@ -52,10 +53,14 @@ const memoStore = useMemoStore();
 const musicStore = useMusicStore();
 
 watch(conversationKind, (kind) => {
+    emit('conversationKindChange', kind);
     if (typeof window !== 'undefined') {
         window.localStorage.setItem('tonarice-conversation-kind', kind);
     }
-    if (kind === 'cowork') coworkUnreadCount.value = 0;
+    if (kind === 'cowork') {
+        coworkUnreadCount.value = 0;
+        void reloadCoWorkUnread();
+    }
 });
 
 const handleConversationStorage = (event: StorageEvent) => {
@@ -698,7 +703,6 @@ onUnmounted(() => {
     }
     stopActiveTalkTimer();
     window.removeEventListener('storage', handleConversationStorage);
-    unsubscribeScheduledPromptChanged?.();
 });
 
 const focusWindow = () => {
@@ -708,12 +712,8 @@ const focusWindow = () => {
 };
 
 onMounted(() => {
+    emit('conversationKindChange', conversationKind.value);
     window.addEventListener('storage', handleConversationStorage);
-    unsubscribeScheduledPromptChanged = window.electronAPI?.onScheduledPromptChanged(() => {
-        if (conversationKind.value === 'chat') {
-            coworkUnreadCount.value++;
-        }
-    });
 });
 </script>
 

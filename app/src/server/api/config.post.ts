@@ -1,13 +1,9 @@
 import { defineEventHandler, readBody, createError } from 'h3';
 import fs from 'fs';
 import path from 'path';
-import { USERS_DIR } from '../utils/paths';
 import { safeWriteFileSync } from '../utils/fs-helpers';
 import { externalizeConfigBackgroundImages } from '../utils/config-background-images';
-
-function getUserConfigPath(userId: string): string {
-    return path.join(USERS_DIR, userId, 'user_config.json');
-}
+import { getUserConfigPath } from '../utils/user-config-path';
 
 export default defineEventHandler(async (event) => {
     try {

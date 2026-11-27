@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
+import { CoWorkApiError, requestCoWork, type CoWorkData } from './cowork-api';
+import { useCoWorkPolling } from './useCoWorkPolling';
+import CoWorkPairing from './CoWorkPairing.vue';
+import CoWorkSettings from './CoWorkSettings.vue';
+import { coworkImportMaxBytes } from '../../types/cowork-desktop';
 import type {
     ScheduleRule,
     ScheduledPromptRun,
@@ -11,12 +16,21 @@ const tasks = ref<ScheduledPromptTask[]>([]);
 const runs = ref<ScheduledPromptRun[]>([]);
 const loading = ref(true);
 const submitting = ref(false);
-const readOnly = ref(false);
+const scope = ref('');
+const account = ref('');
+const readOnly = computed(() => !scope.value);
 const errorMessage = ref('');
+const loadError = ref('');
+const needsLogin = ref(false);
+const importMessage = ref('');
 const showForm = ref(false);
 const editingId = ref<string | null>(null);
-const activeSection = ref<'overview' | 'schedule'>('overview');
-let unsubscribeChanged: (() => void) | undefined;
+const activeSection = ref<'overview' | 'schedule' | 'settings'>('overview');
+const desktopPairing = ref(false);
+onMounted(() => { desktopPairing.value = Boolean(window.electronAPI?.pairCoWork); });
+const pendingTaskIds = computed(() => new Set(runs.value
+    .filter(run => run.status === 'queued' || run.status === 'running')
+    .map(run => run.taskId)));
 
 const form = reactive({
     name: '',
@@ -26,6 +40,7 @@ const form = reactive({
     time: '09:00',
     minute: 0,
     weekdays: [1] as number[],
+    timeZone: '',
     enabled: true
 });
 
@@ -69,6 +84,7 @@ const formatSchedule = (schedule: ScheduleRule) => {
 const statusLabel = (status?: ScheduledPromptRun['status'] | ScheduledPromptTask['lastStatus']) => {
     if (!status) return '未実行';
     const labels: Record<NonNullable<typeof status>, string> = {
+        queued: '実行待ち',
         running: '実行中',
         success: '成功',
         failed: '失敗',
@@ -77,22 +93,26 @@ const statusLabel = (status?: ScheduledPromptRun['status'] | ScheduledPromptTask
     return labels[status];
 };
 
-const loadData = async () => {
-    if (!window.electronAPI) return;
+const loadData = useCoWorkPolling(async (signal) => {
     try {
-        const data = await window.electronAPI.getScheduledPromptData();
+        const data = await requestCoWork<CoWorkData>('', { signal });
+        if (signal.aborted) return;
+        if (scope.value && scope.value !== data.scope) clearData();
+        scope.value = data.scope;
+        account.value = data.account;
         tasks.value = data.tasks;
         runs.value = data.runs;
-        readOnly.value = data.readOnly;
-        errorMessage.value = '';
+        loadError.value = '';
+        needsLogin.value = false;
     } catch (error) {
-        errorMessage.value = error instanceof Error
-            ? error.message
-            : '定期実行タスクを読み込めませんでした。';
+        if (signal.aborted) return;
+        needsLogin.value = error instanceof CoWorkApiError && error.status === 401;
+        if (error instanceof CoWorkApiError && [401, 403].includes(error.status)) clearData();
+        loadError.value = error instanceof Error ? error.message : '定期実行タスクを読み込めませんでした。';
     } finally {
-        loading.value = false;
+        if (!signal.aborted) loading.value = false;
     }
-};
+});
 
 const resetForm = () => {
     editingId.value = null;
@@ -104,9 +124,21 @@ const resetForm = () => {
         time: '09:00',
         minute: 0,
         weekdays: [1],
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         enabled: true
     });
 };
+
+function clearData() {
+    scope.value = '';
+    account.value = '';
+    tasks.value = [];
+    runs.value = [];
+    errorMessage.value = '';
+    importMessage.value = '';
+    showForm.value = false;
+    resetForm();
+}
 
 const openCreateForm = () => {
     resetForm();
@@ -120,6 +152,7 @@ const openEditForm = (task: ScheduledPromptTask) => {
     form.name = task.name;
     form.prompt = task.prompt;
     form.scheduleType = task.schedule.type;
+    form.timeZone = task.timeZone;
     form.enabled = task.enabled;
     if (task.schedule.type === 'interval') {
         form.interval = task.schedule.intervalMinutes;
@@ -155,68 +188,80 @@ const buildSchedule = (): ScheduleRule => {
     }
 };
 
-const submitForm = async () => {
-    if (!window.electronAPI || submitting.value) return;
+const taskPath = (id: string) => `/tasks/${encodeURIComponent(id)}`;
+
+const mutate = async (operation: (currentScope: string) => Promise<void>) => {
+    const currentScope = scope.value;
+    if (!currentScope || submitting.value) return;
     submitting.value = true;
     errorMessage.value = '';
-    const input: ScheduledPromptTaskInput = {
-        name: form.name,
-        prompt: form.prompt,
-        schedule: buildSchedule(),
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        enabled: form.enabled
-    };
-
     try {
-        const plainInput = JSON.parse(JSON.stringify(input));
-        if (editingId.value) {
-            await window.electronAPI.updateScheduledPromptTask(editingId.value, plainInput);
-        } else {
-            await window.electronAPI.createScheduledPromptTask(plainInput);
-        }
-        showForm.value = false;
-        resetForm();
+        await operation(currentScope);
         await loadData();
     } catch (error) {
-        errorMessage.value = error instanceof Error
-            ? error.message
-            : '定期実行タスクを保存できませんでした。';
+        if (error instanceof CoWorkApiError && [401, 403, 409].includes(error.status)) {
+            clearData();
+            await loadData();
+        }
+        errorMessage.value = error instanceof Error ? error.message : '定期実行タスクを更新できませんでした。';
     } finally {
         submitting.value = false;
     }
 };
 
-const toggleEnabled = async (task: ScheduledPromptTask) => {
-    await window.electronAPI?.setScheduledPromptTaskEnabled(task.id, !task.enabled);
-    await loadData();
-};
+const submitForm = () => mutate(async currentScope => {
+    const input: ScheduledPromptTaskInput = {
+        name: form.name,
+        prompt: form.prompt,
+        schedule: buildSchedule(),
+        timeZone: form.timeZone,
+        enabled: form.enabled
+    };
+    const id = editingId.value;
+    await requestCoWork(id ? taskPath(id) : '/tasks', {
+        method: id ? 'PATCH' : 'POST', body: input, scope: currentScope
+    });
+    showForm.value = false;
+    resetForm();
+});
 
-const runNow = async (task: ScheduledPromptTask) => {
-    errorMessage.value = '';
-    try {
-        await window.electronAPI?.runScheduledPromptTaskNow(task.id);
-        await loadData();
-    } catch (error) {
-        errorMessage.value = error instanceof Error ? error.message : '実行に失敗しました。';
-    }
-};
-
-const deleteTask = async (task: ScheduledPromptTask) => {
-    if (!window.confirm(`「${task.name}」を削除しますか？実行結果は残ります。`)) return;
-    await window.electronAPI?.deleteScheduledPromptTask(task.id);
-    await loadData();
-};
-
-onMounted(() => {
-    void loadData();
-    unsubscribeChanged = window.electronAPI?.onScheduledPromptChanged(() => {
-        void loadData();
+const toggleEnabled = (task: ScheduledPromptTask) => mutate(async currentScope => {
+    await requestCoWork(taskPath(task.id), {
+        method: 'PATCH', body: { enabled: !task.enabled }, scope: currentScope
     });
 });
 
-onUnmounted(() => {
-    unsubscribeChanged?.();
+const runNow = (task: ScheduledPromptTask) => mutate(async currentScope => {
+    await requestCoWork(`${taskPath(task.id)}/run`, { method: 'POST', scope: currentScope });
 });
+
+const deleteTask = (task: ScheduledPromptTask) => {
+    if (!window.confirm(`「${task.name}」を削除しますか？実行結果は残ります。`)) return;
+    return mutate(async currentScope => {
+        await requestCoWork(taskPath(task.id), { method: 'DELETE', scope: currentScope });
+    });
+};
+
+const importLegacy = (event: Event) => {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file || !account.value) return;
+    importMessage.value = '';
+    if (file.size > coworkImportMaxBytes) {
+        errorMessage.value = '16 MB 以下のバックアップファイルを選択してください。';
+        return;
+    }
+    if (!window.confirm(`「${file.name}」を ${account.value} に取り込みますか？旧デスクトップ版の CoWork を終了してから続行してください。`)) return;
+    return mutate(async currentScope => {
+        const result = await requestCoWork<{ tasks: number; runs: number }>('/import', {
+            method: 'POST', body: file, scope: currentScope
+        });
+        if (scope.value === currentScope) {
+            importMessage.value = `タスク ${result.tasks} 件、実行履歴 ${result.runs} 件を取り込みました。`;
+        }
+    });
+};
 </script>
 
 <template>
@@ -259,6 +304,17 @@ onUnmounted(() => {
                     <span class="sidebar-label">スケジュール</span>
                     <span v-if="tasks.length > 0" class="nav-count">{{ tasks.length }}</span>
                 </button>
+                <button
+                    type="button"
+                    class="nav-item"
+                    aria-label="設定"
+                    :class="{ active: activeSection === 'settings' }"
+                    :aria-current="activeSection === 'settings' ? 'page' : undefined"
+                    @click="activeSection = 'settings'"
+                >
+                    <i class="pi pi-cog" aria-hidden="true"></i>
+                    <span class="sidebar-label">設定</span>
+                </button>
             </nav>
 
             <div class="sidebar-status">
@@ -268,15 +324,17 @@ onUnmounted(() => {
         </aside>
 
         <section class="cowork-content">
-            <p v-if="readOnly" class="notice">この環境では定期実行タスクを編集できません。</p>
-            <p class="live-message" aria-live="polite">{{ errorMessage }}</p>
+            <p v-if="loadError" class="notice" role="status">{{ loadError }}</p>
+            <a v-if="needsLogin && !desktopPairing" href="/api/auth/login">Google でログイン</a>
+            <CoWorkPairing v-if="activeSection !== 'schedule' && readOnly" :scope="scope" @paired="loadData" />
+            <p class="live-message" aria-live="polite">{{ errorMessage || importMessage }}</p>
 
             <template v-if="activeSection === 'overview'">
                 <header class="content-header">
                     <div>
                         <p class="section-context">CoWork</p>
                         <h2>作業をまとめて進める</h2>
-                        <p>定期的な確認や報告を、ひとつのワークスペースで管理します。</p>
+                        <p>定期タスクは、接続先のサーバーが稼働している間に実行されます。</p>
                     </div>
                 </header>
 
@@ -302,13 +360,16 @@ onUnmounted(() => {
                         <div>
                             <strong>{{ run.taskName }}</strong>
                             <p>{{ run.resultText || run.errorMessage || '処理中です。' }}</p>
+                            <button v-if="run.errorCode === 'AI_NOT_CONFIGURED'" type="button" class="text-button" @click="activeSection = 'settings'">
+                                AI 設定を開く
+                            </button>
                         </div>
                         <time :datetime="run.startedAt">{{ formatDateTime(run.startedAt) }}</time>
                     </article>
                 </section>
             </template>
 
-            <template v-else>
+            <template v-else-if="activeSection === 'schedule'">
                 <header class="content-header schedule-header">
                     <div>
                         <p class="section-context">⏱ スケジュール</p>
@@ -323,6 +384,14 @@ onUnmounted(() => {
                         タスクを作成
                     </button>
                 </header>
+
+                <CoWorkPairing :key="scope" :scope="scope" @paired="loadData" />
+
+                <details v-if="account">
+                    <summary>旧デスクトップ版のデータを取り込む</summary>
+                    <label for="cowork-import">scheduled-prompt-tasks.json（取込先 {{ account }}）</label>
+                    <input id="cowork-import" type="file" accept=".json,application/json" :disabled="submitting" @change="importLegacy">
+                </details>
 
                 <form v-if="showForm" class="task-form" @submit.prevent="submitForm">
                     <div class="form-heading">
@@ -411,7 +480,7 @@ onUnmounted(() => {
                         <div class="task-card-heading">
                             <div>
                                 <h4>{{ task.name }}</h4>
-                                <p>{{ formatSchedule(task.schedule) }}</p>
+                                <p>{{ formatSchedule(task.schedule) }}（{{ task.timeZone }}）</p>
                             </div>
                             <span class="status-label" :class="{ enabled: task.enabled }">{{ task.enabled ? '有効' : '無効' }}</span>
                         </div>
@@ -420,10 +489,10 @@ onUnmounted(() => {
                             <span><i class="pi pi-check-circle" aria-hidden="true"></i> 最終 {{ formatDateTime(task.lastRunAt) }}・{{ statusLabel(task.lastStatus) }}</span>
                         </div>
                         <div class="card-actions">
-                            <button type="button" @click="runNow(task)">今すぐ実行</button>
-                            <button type="button" @click="openEditForm(task)">編集</button>
-                            <button type="button" @click="toggleEnabled(task)">{{ task.enabled ? '無効化' : '有効化' }}</button>
-                            <button type="button" class="danger-button" @click="deleteTask(task)">削除</button>
+                            <button type="button" :disabled="submitting || pendingTaskIds.has(task.id)" @click="runNow(task)">今すぐ実行</button>
+                            <button type="button" :disabled="submitting" @click="openEditForm(task)">編集</button>
+                            <button type="button" :disabled="submitting" @click="toggleEnabled(task)">{{ task.enabled ? '無効化' : '有効化' }}</button>
+                            <button type="button" class="danger-button" :disabled="submitting" @click="deleteTask(task)">削除</button>
                         </div>
                     </article>
                 </section>
@@ -443,9 +512,13 @@ onUnmounted(() => {
                             <span class="run-status" :data-status="run.status">{{ statusLabel(run.status) }}</span>
                         </header>
                         <p class="result-text">{{ run.resultText || run.errorMessage || '処理中です。' }}</p>
+                        <button v-if="run.errorCode === 'AI_NOT_CONFIGURED'" type="button" class="text-button" @click="activeSection = 'settings'">
+                            AI 設定を開く
+                        </button>
                     </article>
                 </section>
             </template>
+            <CoWorkSettings v-else :scope="scope" @reload-account="loadData" />
         </section>
     </main>
 </template>
@@ -509,7 +582,7 @@ onUnmounted(() => {
     justify-content: flex-start;
 }
 
-.workspace-heading div {
+.workspace-copy {
     display: grid;
 }
 
@@ -1010,6 +1083,52 @@ fieldset {
 }
 
 @container chat-panel (max-width: 520px) {
+    .cowork-panel {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
+    }
+
+    .cowork-sidebar,
+    .cowork-sidebar:is(:hover, :focus-within) {
+        position: static;
+        inline-size: auto;
+        padding: 6px 8px;
+        border-inline-end: 0;
+        border-block-end: 1px solid var(--cowork-border);
+        box-shadow: none;
+    }
+
+    .cowork-sidebar :is(.workspace-heading, .new-task-button, .sidebar-status, .nav-count),
+    .cowork-sidebar:is(:hover, :focus-within) :is(.sidebar-status, .nav-count) {
+        display: none;
+    }
+
+    .cowork-sidebar nav {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .cowork-sidebar .nav-item,
+    .cowork-sidebar:is(:hover, :focus-within) .nav-item {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 3px;
+        inline-size: 100%;
+        min-inline-size: 0;
+        padding: 5px 2px;
+        place-items: center;
+        text-align: center;
+        white-space: normal;
+    }
+
+    .cowork-sidebar .sidebar-label {
+        display: inline;
+        font-size: 0.75rem;
+    }
+
+    .cowork-content {
+        grid-column: 1;
+        padding: 12px;
+    }
+
     .content-header,
     .task-card-heading,
     .result-card header {

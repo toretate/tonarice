@@ -1,5 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import authMiddleware from '../middleware/auth';
+import { findCoWorkDesktopOwner } from '../cowork/pairing';
+
+vi.mock('../cowork/pairing', () => ({ findCoWorkDesktopOwner: vi.fn() }));
+vi.mock('fs', async (original) => {
+    const fs = await original<typeof import('fs')>();
+    const isUsersFile = (path: unknown) => typeof path === 'string' && /[/\\]users\.json$/.test(path);
+    return {
+        ...fs,
+        existsSync: (path: Parameters<typeof fs.existsSync>[0]) => isUsersFile(path) || fs.existsSync(path),
+        readFileSync: (path: string, encoding: BufferEncoding) => isUsersFile(path)
+            ? JSON.stringify({ users: [{ id: 'paired-user', role: 'user', identities: [{ email: 'paired@example.test' }] }] })
+            : fs.readFileSync(path, encoding)
+    };
+});
 
 const { mockGetHeader, mockGetCookie } = vi.hoisted(() => ({
     mockGetHeader: vi.fn(),
@@ -69,7 +83,21 @@ describe('認証ミドルウェア', () => {
         await expect(authMiddleware(createEvent('/api/ping'))).resolves.toBeUndefined();
     });
 
-    it.each(['/api/auth/login', '/api/auth/callback', '/api/auth/callback?code=test-code'])(
+    it('認証ミドルウェア_デスクトップセッションを発行済みアカウントのCoWorkに限定する', async () => {
+        const token = `cowork_${'a'.repeat(43)}`;
+        mockGetHeader.mockReturnValue(`Bearer ${token}`);
+        vi.mocked(findCoWorkDesktopOwner).mockReturnValue('paired-user');
+        const event = createEvent('/api/cowork/tasks');
+        await expect(authMiddleware(event)).resolves.toBeUndefined();
+        expect(event.context.user.id).toBe('paired-user');
+        expect(findCoWorkDesktopOwner).toHaveBeenCalledWith(token);
+        await expect(authMiddleware(createEvent('/api/tasks'))).rejects.toMatchObject({ statusCode: 403 });
+        await expect(authMiddleware(createEvent('/api/cowork/pair'))).rejects.toMatchObject({ statusCode: 403 });
+        vi.mocked(findCoWorkDesktopOwner).mockReturnValue('deleted-user');
+        await expect(authMiddleware(createEvent('/api/cowork'))).rejects.toMatchObject({ statusCode: 401 });
+    });
+
+    it.each(['/api/auth/login', '/api/auth/callback', '/api/auth/callback?code=test-code', '/api/cowork/pair/claim'])(
         '認証ミドルウェア_%sは未認証でも許可すること',
         async (path) => {
             await expect(authMiddleware(createEvent(path))).resolves.toBeUndefined();

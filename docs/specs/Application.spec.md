@@ -9,6 +9,7 @@
 
 * デスクトップ実行環境は Electron 45 系。Web クライアントと API は Nuxt 4、Vue 3、Vite 8、TypeScript 6 を使用する。
 * 開発と Nuxt サーバーの実行には Node.js 26.13.1 以降の 26 LTS 系を使用する。
+* `npm run dev:electron` はローカルの Nuxt 開発サーバーを再利用し、起動していなければ立ち上げる。Nitro の `/api/ping` と画面 URL の応答を確認してから Electron を起動する。
 * マスコット描画は WebGL を利用してアニメーション処理などができるようにする
 * Electron が利用できる環境では、マスコット画面の背景透過のため Electron ベースのアプリケーションとする
 * マスコットとチャットウィンドウは背景透過処理や、半透明処理を実装する
@@ -190,7 +191,7 @@ ui/
 ## 3. AIエージェント基盤
 
 * Gemini/OpenAI/LM Studioの対話チャットはNitroサーバープロセス内のMastraを使用する。
-* CoWorkの定期実行、要約、読み辞書などのAI処理は既存のVercel AI SDK経路を使用する。
+* CoWork の定期実行は Nitro API サーバーが担当する。要約や読み辞書と同様に、AI 生成には既存の Vercel AI SDK 経路を使用する。[CoWork 仕様](ScheduledPromptTask.spec.md)
 * MastraランタイムをElectronメインプロセスやRendererへ配置しない。
 * 旧チャット経路および機能フラグによる切り戻しは廃止する。切り戻しには前のリリースを使用する。
 * 詳細は`docs/specs/MastraIntegration.spec.md`に定める。

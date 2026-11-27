@@ -5,10 +5,7 @@ import { USERS_DIR, PROJECT_ROOT } from '../utils/paths';
 import { safeWriteFileSync } from '../utils/fs-helpers';
 import { createInitialConfig } from '../../config/config-template';
 import { externalizeConfigBackgroundImages } from '../utils/config-background-images';
-
-function getUserConfigPath(userId: string): string {
-    return path.join(USERS_DIR, userId, 'user_config.json');
-}
+import { getUserConfigPath } from '../utils/user-config-path';
 
 function getOldUserConfigPath(userId: string): string {
     return path.join(USERS_DIR, userId, 'config.json');
