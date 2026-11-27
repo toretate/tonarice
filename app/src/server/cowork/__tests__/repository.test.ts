@@ -44,47 +44,50 @@ describe('CoWorkRepository', () => {
         expect(repo.update(owners.second, task.id, { enabled: false }, created)).toBeUndefined();
         expect(repo.enqueue(owners.second, task.id, created)).toBeUndefined();
         expect(repo.delete(owners.second, task.id, created)).toBe(false);
-        expect(repo.claim(created)?.owner).toBe(owners.first);
-        repo.complete(owners.second, run!.id, { status: 'success', resultText: '他のユーザー' }, created);
+        expect(repo.claimNextQueuedRun(created)?.owner).toBe(owners.first);
+        expect(repo.finishRunning(owners.second, run!.id, { status: 'success', resultText: '他のユーザー' }, created)).toBe(false);
         expect(repo.list(owners.first, created).runs[0]?.status).toBe('running');
-        repo.complete(owners.first, run!.id, { status: 'success', resultText: '完了' }, created);
+        expect(repo.finishRunning(owners.first, run!.id, { status: 'success', resultText: '完了' }, created)).toBe(true);
         expect(repo.activity(owners.first, created)).toEqual([run!.id]);
         expect(repo.activity(owners.second, created)).toEqual([]);
     });
 
-    it('claim_複数の接続と再起動で同じ予定を再取得しない', () => {
+    it('prepareScheduled_複数の接続と再起動で同じ予定を再取得しない', () => {
         directory = mkdtempSync(join(tmpdir(), 'cowork-db-'));
         const path = join(directory, 'cowork.sqlite');
         const first = repository(path);
         const second = repository(path);
         const task = first.create(owners.first, input, created);
-        const claim = first.claim(at(15));
+        const claim = first.prepareScheduled(owners.first, task.id, task.nextRunAt, at(15));
+        expect(claim?.execute).toBe(true);
         expect(claim?.run).toMatchObject({ taskId: task.id, trigger: 'scheduled', scheduledAt: at(15).toISOString() });
-        expect(second.claim(at(15))).toBeUndefined();
+        expect(second.prepareScheduled(owners.first, task.id, task.nextRunAt, at(15))).toBeUndefined();
         expect(second.list(owners.first, at(15)).tasks[0]?.nextRunAt).toBe(at(30).toISOString());
 
         for (const db of databases) db.close();
         const restarted = repository(path);
-        expect(restarted.claim(at(15, executionLease - 1))).toBeUndefined();
-        expect(restarted.claim(at(15, executionLease))).toBeUndefined();
+        expect(restarted.recoverExpiredRuns(at(15, executionLease - 1))).toBe(0);
+        expect(restarted.recoverExpiredRuns(at(15, executionLease))).toBe(1);
+        expect(restarted.prepareScheduled(owners.first, task.id, task.nextRunAt, at(15, executionLease))).toBeUndefined();
         expect(restarted.list(owners.first, at(16)).runs).toMatchObject([
-            { id: claim?.run.id, status: 'failed', errorCode: 'INTERRUPTED' }
+            { id: claim?.run?.id, status: 'failed', errorCode: 'INTERRUPTED' }
         ]);
-        expect(restarted.claim(at(30))?.run.scheduledAt).toBe(at(30).toISOString());
+        const next = at(30);
+        expect(restarted.prepareScheduled(owners.first, task.id, next.toISOString(), next)?.run?.scheduledAt).toBe(next.toISOString());
     });
 
-    it('claim_取りこぼした直近の予定だけを実行する', () => {
+    it('prepareScheduled_取りこぼした直近の予定だけを実行する', () => {
         const repo = repository();
         const task = repo.create(owners.first, input, created);
-        expect(repo.claim(at(60, 30_000))?.run.scheduledAt).toBe(at(60).toISOString());
+        expect(repo.prepareScheduled(owners.first, task.id, task.nextRunAt, at(60, 30_000))?.run?.scheduledAt).toBe(at(60).toISOString());
         expect(repo.list(owners.first, at(60)).tasks[0]).toMatchObject({ id: task.id, nextRunAt: at(75).toISOString() });
     });
 
-    it('claim_期限を過ぎた予定はスキップし次回の時刻を保存する', () => {
+    it('prepareScheduled_期限を過ぎた予定はスキップし次回の時刻を保存する', () => {
         const repo = repository();
-        repo.create(owners.first, { ...input, schedule: { type: 'daily', intervalDays: 30, time: '10:00' } }, created);
+        const task = repo.create(owners.first, { ...input, schedule: { type: 'daily', intervalDays: 30, time: '10:00' } }, created);
         const now = at(40 * 24 * 60);
-        expect(repo.claim(now)).toBeUndefined();
+        expect(repo.prepareScheduled(owners.first, task.id, task.nextRunAt, now)?.execute).toBe(false);
         const data = repo.list(owners.first, now);
         expect(data.runs).toMatchObject([{ status: 'skipped', errorCode: 'CATCH_UP_EXPIRED' }]);
         expect(data.tasks[0]?.nextRunAt).toBe(at(60 * 24 * 60).toISOString());
@@ -95,8 +98,8 @@ describe('CoWorkRepository', () => {
         const task = repo.create(owners.first, input, created);
         const first = repo.enqueue(owners.first, task.id, at(14));
         expect(repo.enqueue(owners.first, task.id, at(14))).toEqual(first);
-        expect(repo.claim(at(14, 58_000))?.run.id).toBe(first?.id);
-        expect(repo.claim(at(15))).toBeUndefined();
+        expect(repo.claimQueuedRun(owners.first, first!.id, at(14, 58_000))?.run.id).toBe(first?.id);
+        expect(repo.prepareScheduled(owners.first, task.id, task.nextRunAt, at(15))?.execute).toBe(false);
         expect(repo.list(owners.first, at(15)).runs).toMatchObject([
             { status: 'skipped', errorCode: 'TASK_BUSY' },
             { status: 'running', id: first?.id }
@@ -108,7 +111,7 @@ describe('CoWorkRepository', () => {
         const task = repo.create(owners.first, input, created);
         const run = repo.enqueue(owners.first, task.id, created);
         expect(repo.delete(owners.first, task.id, at(1))).toBe(true);
-        expect(repo.claim(at(1))).toBeUndefined();
+        expect(repo.claimNextQueuedRun(at(1))).toBeUndefined();
         expect(repo.list(owners.first, at(1))).toMatchObject({
             tasks: [], runs: [{ id: run?.id, status: 'skipped', errorCode: 'TASK_DELETED' }]
         });
@@ -117,11 +120,11 @@ describe('CoWorkRepository', () => {
     it('importLegacy_期限切れ予定を再実行せず再取込で削除済みタスクを復活させない', () => {
         const source = repository();
         const task = source.create(owners.first, input, created);
-        source.claim(at(15));
+        source.prepareScheduled(owners.first, task.id, task.nextRunAt, at(15));
         const legacy = legacyStoreSchema.parse(source.list(owners.first, at(15)));
         const destination = repository();
         expect(destination.importLegacy(owners.first, legacy, at(75))).toEqual({ tasks: 1, runs: 1 });
-        expect(destination.claim(at(75))).toBeUndefined();
+        expect(destination.claimNextQueuedRun(at(75))).toBeUndefined();
         expect(destination.list(owners.first, at(75))).toMatchObject({
             tasks: [{ id: task.id, nextRunAt: at(90).toISOString() }],
             runs: [{ status: 'failed', errorCode: 'INTERRUPTED' }]

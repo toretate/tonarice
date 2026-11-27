@@ -231,24 +231,19 @@ export class CoWorkRepository {
             }
 
             const queued = this.newRun(task, 'scheduled', dueAt, now.toISOString());
-            const running = this.db.prepare<[], { id: string }>(
-                "SELECT id FROM cowork_runs WHERE status = 'running' LIMIT 1"
-            ).get();
-            if (running) {
+            if (this.hasRunningRun()) {
                 this.saveRun(owner, queued);
                 return { task: updatedTask, run: queued, execute: false };
             }
 
-            const started = this.startRun(owner, updatedTask, queued, now);
+            const started = this.startScheduledRun(owner, updatedTask, queued, now);
             return { task: updatedTask, run: started?.run, execute: started !== undefined };
         }).immediate();
     }
 
     claimQueuedRun(owner: string, id: string, now = new Date()) {
         return this.db.transaction(() => {
-            if (this.db.prepare<[], { id: string }>(
-                "SELECT id FROM cowork_runs WHERE status = 'running' LIMIT 1"
-            ).get()) return undefined;
+            if (this.hasRunningRun()) return undefined;
 
             const row = this.db.prepare<[string, string], RunRow>(`
                 SELECT owner, data, lease_until FROM cowork_runs
@@ -256,24 +251,15 @@ export class CoWorkRepository {
             `).get(owner, id);
             if (!row) return undefined;
             const run = JSON.parse(row.data) as ScheduledPromptRun;
-            const task = this.findTask(owner, run.taskId);
-            if (!task || (run.trigger === 'scheduled' && !task.enabled)) {
-                this.finishRun(owner, run, {
-                    status: 'skipped',
-                    errorCode: task ? 'TASK_DISABLED' : 'TASK_DELETED',
-                    errorMessage: task ? '実行開始前にタスクが無効になりました。' : '実行開始前にタスクが削除されました。'
-                }, now);
-                return undefined;
-            }
+            const task = this.getRunnableTask(owner, run, now);
+            if (!task) return undefined;
             return this.startQueuedRun(owner, task, run, now);
         }).immediate();
     }
 
     claimNextQueuedRun(now = new Date()) {
         return this.db.transaction(() => {
-            if (this.db.prepare<[], { id: string }>(
-                "SELECT id FROM cowork_runs WHERE status = 'running' LIMIT 1"
-            ).get()) return undefined;
+            if (this.hasRunningRun()) return undefined;
 
             for (;;) {
                 const row = this.db.prepare<[], RunRow>(`
@@ -282,25 +268,11 @@ export class CoWorkRepository {
                 `).get();
                 if (!row) return undefined;
                 const run = JSON.parse(row.data) as ScheduledPromptRun;
-                const task = this.findTask(row.owner, run.taskId);
-                if (!task || (run.trigger === 'scheduled' && !task.enabled)) {
-                    this.finishRun(row.owner, run, {
-                        status: 'skipped',
-                        errorCode: task ? 'TASK_DISABLED' : 'TASK_DELETED',
-                        errorMessage: task ? '実行開始前にタスクが無効になりました。' : '実行開始前にタスクが削除されました。'
-                    }, now);
-                    continue;
-                }
+                const task = this.getRunnableTask(row.owner, run, now);
+                if (!task) continue;
                 return this.startQueuedRun(row.owner, task, run, now);
             }
         }).immediate();
-    }
-
-    private findRunning(owner: string, id: string) {
-        const row = this.db.prepare<[string, string], TaskRow>(`
-            SELECT data FROM cowork_runs WHERE owner = ? AND id = ? AND status = 'running'
-        `).get(owner, id);
-        return row ? JSON.parse(row.data) as ScheduledPromptRun : undefined;
     }
 
     finishRunning(owner: string, id: string, outcome: Outcome, now = new Date()) {
@@ -316,15 +288,7 @@ export class CoWorkRepository {
         return this.db.transaction(() => {
             const run = this.findRunning(owner, id);
             if (!run) return;
-            const task = this.findTask(owner, run.taskId);
-            if (!task || (run.trigger === 'scheduled' && !task.enabled)) {
-                this.finishRun(owner, run, {
-                    status: 'skipped',
-                    errorCode: task ? 'TASK_DISABLED' : 'TASK_DELETED',
-                    errorMessage: task ? '実行開始前にタスクが無効になりました。' : '実行開始前にタスクが削除されました。'
-                }, now);
-                return;
-            }
+            if (!this.getRunnableTask(owner, run, now)) return;
             this.saveRun(owner, { ...run, status: 'queued' });
         }).immediate();
     }
@@ -365,64 +329,6 @@ export class CoWorkRepository {
         }).immediate();
     }
 
-    pruneExpiredHistory(now = new Date()) {
-        this.db.prepare(`
-            DELETE FROM cowork_runs WHERE finished_at IS NOT NULL AND started_at < ?
-        `).run(new Date(now.getTime() - historyAge).toISOString());
-    }
-
-    claim(now = new Date()): { owner: string; task: ScheduledPromptTask; run: ScheduledPromptRun } | undefined {
-        return this.db.transaction(() => {
-            const at = now.toISOString();
-            const running = this.db.prepare<[], RunRow>(
-                "SELECT owner, data, lease_until FROM cowork_runs WHERE status = 'running'"
-            ).get();
-            if (running) {
-                const run = JSON.parse(running.data) as ScheduledPromptRun;
-                if (running.lease_until && running.lease_until > at) {
-                    this.skipOverlap(running.owner, run, now);
-                    return undefined;
-                }
-                this.finishRun(running.owner, run, interrupted, now);
-            }
-
-            const queued = this.db.prepare<[], RunRow>(`
-                SELECT owner, data, lease_until FROM cowork_runs
-                WHERE status = 'queued' ORDER BY scheduled_at, rowid LIMIT 1
-            `).get();
-            const due = this.db.prepare<[string], TaskRow>(`
-                SELECT owner, data FROM cowork_tasks WHERE due_at <= ?
-                ORDER BY due_at, rowid LIMIT 1
-            `).get(at);
-            const dueTask = due && JSON.parse(due.data) as ScheduledPromptTask;
-            const queuedRun = queued && JSON.parse(queued.data) as ScheduledPromptRun;
-            if (queued && queuedRun && (!dueTask || queuedRun.scheduledAt < dueTask.nextRunAt)) {
-                const task = this.findTask(queued.owner, queuedRun.taskId);
-                if (task) return this.startQueuedRun(queued.owner, task, queuedRun, now);
-            }
-            if (!due || !dueTask) return undefined;
-            const dueAt = this.advanceTask(due.owner, dueTask, now);
-            if (now.getTime() - Date.parse(dueAt) > catchUpAge) {
-                this.skipRun(due.owner, dueTask, dueAt, now, 'CATCH_UP_EXPIRED', '7日より古い予定のため実行しませんでした。');
-                return undefined;
-            }
-            if (this.findPending(due.owner, dueTask.id)) {
-                this.skipRun(due.owner, dueTask, dueAt, now, 'TASK_BUSY', '同じタスクの実行が予約済みのためスキップしました。');
-                return undefined;
-            }
-            return this.startRun(due.owner, dueTask, this.newRun(dueTask, 'scheduled', dueAt, at), now);
-        }).immediate();
-    }
-
-    complete(owner: string, id: string, outcome: Outcome, now = new Date()) {
-        return this.db.transaction(() => {
-            const run = this.findRunning(owner, id);
-            if (!run) return;
-            this.skipOverlap(owner, run, now);
-            this.finishRun(owner, run, outcome, now);
-        }).immediate();
-    }
-
     importLegacy(owner: string, source: LegacyStore, now = new Date()) {
         return this.db.transaction(() => {
             const at = now.toISOString();
@@ -444,6 +350,31 @@ export class CoWorkRepository {
             this.prune(owner, now);
             return { tasks, runs };
         }).immediate();
+    }
+
+    private hasRunningRun() {
+        return Boolean(this.db.prepare<[], { id: string }>(
+            "SELECT id FROM cowork_runs WHERE status = 'running' LIMIT 1"
+        ).get());
+    }
+
+    private getRunnableTask(owner: string, run: ScheduledPromptRun, now: Date) {
+        const task = this.findTask(owner, run.taskId);
+        if (task && (run.trigger !== 'scheduled' || task.enabled)) return task;
+
+        this.finishRun(owner, run, {
+            status: 'skipped',
+            errorCode: task ? 'TASK_DISABLED' : 'TASK_DELETED',
+            errorMessage: task ? '実行開始前にタスクが無効になりました。' : '実行開始前にタスクが削除されました。'
+        }, now);
+        return undefined;
+    }
+
+    private findRunning(owner: string, id: string) {
+        const row = this.db.prepare<[string, string], TaskRow>(`
+            SELECT data FROM cowork_runs WHERE owner = ? AND id = ? AND status = 'running'
+        `).get(owner, id);
+        return row ? JSON.parse(row.data) as ScheduledPromptRun : undefined;
     }
 
     private findTask(owner: string, id: string) {
@@ -471,6 +402,7 @@ export class CoWorkRepository {
     }
 
     private saveTask(owner: string, task: ScheduledPromptTask) {
+        // 旧バージョンに戻した場合も既存の予定を取得できるよう due_at を更新する。
         this.db.prepare(`
             INSERT INTO cowork_tasks(owner, id, due_at, data) VALUES (?, ?, ?, ?)
             ON CONFLICT(owner, id) DO UPDATE SET due_at = excluded.due_at, data = excluded.data
@@ -503,15 +435,9 @@ export class CoWorkRepository {
             run.finishedAt ?? null, run.status, leaseUntil, JSON.stringify(run));
     }
 
-    private advanceTask(owner: string, task: ScheduledPromptTask, now: Date) {
-        const { dueAt, nextAt } = advanceSchedule(task, now);
-        this.saveTask(owner, { ...task, nextRunAt: nextAt, updatedAt: now.toISOString() });
-        return dueAt;
-    }
-
-    private startRun(owner: string, task: ScheduledPromptTask, queued: ScheduledPromptRun, now: Date) {
+    private startScheduledRun(owner: string, task: ScheduledPromptTask, queued: ScheduledPromptRun, now: Date) {
         const run = { ...queued, taskName: task.name, startedAt: now.toISOString(), status: 'running' as const };
-        const result = this.saveRun(owner, run, new Date(now.getTime() + executionLease).toISOString(), run.trigger === 'scheduled');
+        const result = this.saveRun(owner, run, new Date(now.getTime() + executionLease).toISOString(), true);
         if (result.changes) return { owner, task, run };
     }
 
@@ -523,13 +449,6 @@ export class CoWorkRepository {
             WHERE owner = ? AND id = ? AND status = 'queued'
         `).run(run.startedAt, new Date(now.getTime() + executionLease).toISOString(), JSON.stringify(run), owner, run.id);
         if (result.changes) return { owner, task, run };
-    }
-
-    private skipOverlap(owner: string, run: ScheduledPromptRun, now: Date) {
-        const task = this.findTask(owner, run.taskId);
-        if (!task?.enabled || task.nextRunAt > now.toISOString()) return;
-        const dueAt = this.advanceTask(owner, task, now);
-        this.skipRun(owner, task, dueAt, now, 'TASK_BUSY', '同じタスクが実行中のためスキップしました。');
     }
 
     private skipRun(owner: string, task: ScheduledPromptTask, dueAt: string, now: Date, errorCode: string, errorMessage: string) {

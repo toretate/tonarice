@@ -1,23 +1,21 @@
 import { createApp, createRouter, eventHandler, getHeader, toWebHandler } from 'h3';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import list from '../../api/cowork/index.get';
-import create from '../../api/cowork/tasks/index.post';
-import update from '../../api/cowork/tasks/[id].patch';
-import remove from '../../api/cowork/tasks/[id].delete';
-import run from '../../api/cowork/tasks/[id]/run.post';
-import importLegacy from '../../api/cowork/import.post';
 import pair from '../../api/cowork/pair.post';
 import claim from '../../api/cowork/pair/claim.post';
+import { getMastraRuntime, getMastraShutdownSignal } from '../../mastra/runtime';
 import { getDB } from '../../utils/db';
 import { findCoWorkDesktopOwner } from '../pairing';
-import { getCoWorkRepository } from '../runtime';
-import { CoWorkRepository } from '../repository';
+import { createMastraScheduleFixture } from './mastra-fixture';
 
-vi.mock('../runtime', () => ({ getCoWorkRepository: vi.fn() }));
+vi.mock('../../mastra/runtime', () => ({
+    getMastraRuntime: vi.fn(),
+    getMastraShutdownSignal: vi.fn()
+}));
 vi.mock('../../utils/db', () => ({ getDB: vi.fn() }));
 let db: Database.Database;
 let handler: ReturnType<typeof toWebHandler>;
+let schedules: ReturnType<typeof createMastraScheduleFixture>['schedules'];
 
 const input = {
     name: '確認',
@@ -39,17 +37,30 @@ function request(path: string, method = 'GET', user?: string, body?: unknown, ex
     }));
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+    // ハンドラの読み込み直しで CoWork のリポジトリをテストごとの DB に接続する。
+    vi.resetModules();
     db = new Database(':memory:');
     vi.mocked(getDB).mockReturnValue(db);
-    vi.mocked(getCoWorkRepository).mockReturnValue(new CoWorkRepository(db));
+    const fixture = createMastraScheduleFixture();
+    schedules = fixture.schedules;
+    vi.mocked(getMastraRuntime).mockReturnValue(fixture.mastra);
+    vi.mocked(getMastraShutdownSignal).mockReturnValue(new AbortController().signal);
+    const [list, create, update, remove, run, importLegacy] = await Promise.all([
+        import('../../api/cowork/index.get'),
+        import('../../api/cowork/tasks/index.post'),
+        import('../../api/cowork/tasks/[id].patch'),
+        import('../../api/cowork/tasks/[id].delete'),
+        import('../../api/cowork/tasks/[id]/run.post'),
+        import('../../api/cowork/import.post')
+    ]);
     const router = createRouter()
-        .get('/api/cowork', list)
-        .post('/api/cowork/tasks', create)
-        .patch('/api/cowork/tasks/:id', update)
-        .delete('/api/cowork/tasks/:id', remove)
-        .post('/api/cowork/tasks/:id/run', run)
-        .post('/api/cowork/import', importLegacy)
+        .get('/api/cowork', list.default)
+        .post('/api/cowork/tasks', create.default)
+        .patch('/api/cowork/tasks/:id', update.default)
+        .delete('/api/cowork/tasks/:id', remove.default)
+        .post('/api/cowork/tasks/:id/run', run.default)
+        .post('/api/cowork/import', importLegacy.default)
         .post('/api/cowork/pair', pair)
         .post('/api/cowork/pair/claim', claim);
 
@@ -82,8 +93,9 @@ describe('CoWork API', () => {
         expect(listed.headers.get('cache-control')).toBe('no-store');
         expect(await listed.json()).toMatchObject({
             tasks: [{ id: task.id, enabled: false }],
-            runs: [{ status: 'queued', taskId: task.id }]
+            runs: [{ status: 'running', taskId: task.id }]
         });
+        expect(schedules.run).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^agent_cowork-/));
         expect((await request(path, 'DELETE', 'first')).status).toBe(204);
     });
 

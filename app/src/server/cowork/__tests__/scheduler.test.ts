@@ -1,17 +1,16 @@
-import type { Mastra } from '@mastra/core/mastra';
-import type { AgentSchedule, ScheduleTriggerInfo } from '@mastra/core/schedules';
+import type { ScheduleTriggerInfo } from '@mastra/core/schedules';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { COWORK_AGENT_ID } from '../../mastra/cowork-agent';
 import {
-    createCoWorkScheduleHooks,
     dispatchNextCoWorkRun,
-    ensureCoWorkSchedule,
-    removeCoWorkTaskSchedule,
     requeueUndeliveredCoWorkRun,
     runCoWorkTaskNow
-} from '../mastra-schedules';
+} from '../mastra-queue';
+import { createCoWorkScheduleHooks } from '../mastra-schedule-hooks';
+import { ensureCoWorkSchedule, removeCoWorkTaskSchedule } from '../mastra-schedules';
 import { CoWorkRepository } from '../repository';
+import { createMastraScheduleFixture } from './mastra-fixture';
 
 const owner = 'test-user';
 const input = {
@@ -26,26 +25,7 @@ function fixture() {
     const repo = new CoWorkRepository(db);
     const stopping = new AbortController();
     const hooks = createCoWorkScheduleHooks(repo, stopping.signal);
-    const rows = new Map<string, AgentSchedule>();
-    const schedules = {
-        get: vi.fn(async (id: string) => rows.get(id) ?? null),
-        list: vi.fn(async ({ status }: { status: string }) => [...rows.values()].filter(row => row.status === status)),
-        create: vi.fn(async (input: AgentSchedule & { runAt: Date }) => {
-            const row = { ...input, id: input.id.startsWith('agent_') ? input.id : 'agent_' + input.id, runAt: +input.runAt };
-            rows.set(row.id, row);
-            return row;
-        }),
-        update: vi.fn(async (id: string, patch: Partial<AgentSchedule> & { runAt?: Date }) => {
-            const row = rows.get(id);
-            if (!row) throw new Error('スケジュールが見つかりません。');
-            const updated = { ...row, ...patch, runAt: patch.runAt === undefined ? row.runAt : +patch.runAt };
-            rows.set(id, updated);
-            return updated;
-        }),
-        delete: vi.fn(async (id: string) => { rows.delete(id); }),
-        run: vi.fn(async (_id: string) => {})
-    };
-    const mastra = { schedules, __shuttingDown: false } as unknown as Mastra;
+    const { rows, schedules, mastra } = createMastraScheduleFixture();
     const createTask = (name: string) => repo.create(owner, { ...input, name });
     const context = (id: string, kind: ScheduleTriggerInfo['kind'] = 'manual') => ({
         mastra,

@@ -5,7 +5,8 @@ import { LibSQLStore } from '@mastra/libsql';
 import { Mastra } from '@mastra/core/mastra';
 import { createMascotAgent, MASCOT_AGENT_ID } from './mascot-agent';
 import { createCoWorkAgent } from './cowork-agent';
-import { createCoWorkScheduleHooks } from '../cowork/mastra-schedules';
+import { recoverCoWorkSchedulePublication } from '../cowork/mastra-queue';
+import { createCoWorkScheduleHooks } from '../cowork/mastra-schedule-hooks';
 import { CoWorkRepository } from '../cowork/repository';
 import { getDB } from '../utils/db';
 import { STORAGE_DIR } from '../utils/paths';
@@ -44,8 +45,7 @@ export function getMastraRuntime(): Mastra {
                 onError: (_error, { scheduleId }) => {
                     const current = runtime;
                     if (current) {
-                        void import('../cowork/mastra-schedules')
-                            .then(({ recoverCoWorkSchedulePublication }) => recoverCoWorkSchedulePublication(current, coworkRepository, scheduleId, signal))
+                        void recoverCoWorkSchedulePublication(current, coworkRepository, scheduleId, signal)
                             .catch(() => console.warn('[CoWork] Mastra schedule の再試行を設定できませんでした。'));
                     }
                 }

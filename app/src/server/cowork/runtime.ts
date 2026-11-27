@@ -1,7 +1,8 @@
 import type { ScheduledPromptTaskInput } from '../../types/scheduled-prompt-task';
 import { getMastraRuntime, getMastraShutdownSignal } from '../mastra/runtime';
 import { getDB } from '../utils/db';
-import { ensureCoWorkSchedule, importCoWorkTasks, removeCoWorkTaskSchedule, runCoWorkTaskNow } from './mastra-schedules';
+import { runCoWorkTaskNow } from './mastra-queue';
+import { ensureCoWorkSchedule, importCoWorkTasks, removeCoWorkTaskSchedule } from './mastra-schedules';
 import { CoWorkRepository } from './repository';
 
 let repository: CoWorkRepository | undefined;
