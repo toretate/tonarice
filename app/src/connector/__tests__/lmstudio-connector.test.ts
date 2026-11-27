@@ -4,20 +4,36 @@ import { getSdkEndpoint, LmStudioConnector } from '../lmstudio-connector';
 
 const USE_REAL_LMSTUDIO = process.env.USE_REAL_LMSTUDIO === 'true';
 
-// LMStudioClient のモック化
+const lmstudioMockState = vi.hoisted(() => ({
+    nextResponseText: 'こんにちは！テストレスポンスです。',
+    lastInputMessages: [] as any[],
+    lastSystemPrompt: '',
+    mockAct: vi.fn(),
+    mockModel: vi.fn(),
+    mockListDownloaded: vi.fn()
+}));
+
+// LMStudioClient / Chat のモック化
 vi.mock('@lmstudio/sdk', async (importOriginal) => {
     const original = await importOriginal<typeof import('@lmstudio/sdk')>();
     if (process.env.USE_REAL_LMSTUDIO === 'true') {
         return original;
     }
 
-    const mockRespond = vi.fn().mockResolvedValue({
-        content: 'こんにちは！テストレスポンスです。'
-    } as any);
-    const mockModel = vi.fn().mockResolvedValue({
-        respond: mockRespond
+    lmstudioMockState.mockAct.mockImplementation(async (chatInstance: any, _tools: any, options: any) => {
+        const text = lmstudioMockState.nextResponseText;
+        options?.onMessage?.({
+            getRole: () => 'assistant',
+            getText: () => text,
+            getToolCallRequests: () => []
+        });
     });
-    const mockListDownloaded = vi.fn().mockResolvedValue([
+
+    lmstudioMockState.mockModel.mockResolvedValue({
+        act: lmstudioMockState.mockAct
+    });
+
+    lmstudioMockState.mockListDownloaded.mockResolvedValue([
         {
             type: 'llm',
             modelKey: 'mock-model-1',
@@ -33,19 +49,41 @@ vi.mock('@lmstudio/sdk', async (importOriginal) => {
         }
     ]);
 
-    const LMStudioClientMock = vi.fn().mockImplementation(() => {
+    const LMStudioClientMock = vi.fn().mockImplementation(function () {
         return {
             llm: {
-                model: mockModel
+                model: lmstudioMockState.mockModel
             },
             system: {
-                listDownloadedModels: mockListDownloaded
+                listDownloadedModels: lmstudioMockState.mockListDownloaded
             }
         };
     });
 
+    const ChatMock = {
+        from: vi.fn((messages: any[]) => {
+            lmstudioMockState.lastInputMessages = messages;
+            const entries: any[] = messages.map((msg) => ({
+                getRole: () => msg.role,
+                getText: () => typeof msg.content === 'string' ? msg.content : '',
+                getToolCallRequests: () => []
+            }));
+            return {
+                replaceSystemPrompt: vi.fn((prompt: string) => {
+                    lmstudioMockState.lastSystemPrompt = prompt;
+                }),
+                append: vi.fn((msg: any) => {
+                    entries.push(msg);
+                }),
+                getMessagesArray: vi.fn(() => entries)
+            };
+        })
+    };
+
     return {
-        LMStudioClient: LMStudioClientMock
+        ...original,
+        LMStudioClient: LMStudioClientMock,
+        Chat: ChatMock
     };
 });
 
@@ -80,13 +118,15 @@ describe('LmStudioConnector', () => {
     beforeEach(async () => {
         if (!USE_REAL_LMSTUDIO) {
             vi.clearAllMocks();
+            lmstudioMockState.nextResponseText = 'こんにちは！テストレスポンスです。';
+            lmstudioMockState.lastInputMessages = [];
+            lmstudioMockState.lastSystemPrompt = '';
         }
     });
 
     test('generateResponse - 正常なパラメータでテキスト応答が生成されること', async () => {
         if (USE_REAL_LMSTUDIO) return; // 結合テスト用は別で実行するためスキップ
 
-        const { LMStudioClient } = await import('@lmstudio/sdk');
         const result = await LmStudioConnector.generateResponse({
             message: 'こんにちは',
             systemPrompt: 'あなたは親切なAIです。',
@@ -95,28 +135,19 @@ describe('LmStudioConnector', () => {
         });
 
         expect(result).toBe('こんにちは！テストレスポンスです。');
-
-        const clientInstance = vi.mocked(LMStudioClient).mock.results[0].value;
-        expect(clientInstance.llm.model).toHaveBeenCalledWith('mock-model-1');
-
-        const mockModelInstance = await clientInstance.llm.model.mock.results[0].value;
-        expect(mockModelInstance.respond).toHaveBeenCalledWith([
-            { role: 'system', content: 'あなたは親切なAIです。' },
+        expect(lmstudioMockState.mockModel).toHaveBeenCalledWith('mock-model-1');
+        expect(lmstudioMockState.lastSystemPrompt).toContain('あなたは親切なAIです。');
+        expect(lmstudioMockState.lastInputMessages).toEqual([
             { role: 'user', content: 'こんにちは' }
         ]);
+        expect(lmstudioMockState.mockAct).toHaveBeenCalledTimes(1);
     });
 
     test('generateResponse - 思考プロセスやタグがクレンジングされること', async () => {
         if (USE_REAL_LMSTUDIO) return;
 
-        const { LMStudioClient } = await import('@lmstudio/sdk');
-        const clientInstance = new LMStudioClient({ baseUrl: 'ws://localhost:1234' });
-        const mockModelInstance = await clientInstance.llm.model('mock-model-1');
-
         // レスポンスに <think> タグが含まれる場合のモック設定
-        vi.mocked(mockModelInstance.respond).mockResolvedValueOnce({
-            content: '<think>内部の思考プロセスです。</think>こんにちは！'
-        } as any);
+        lmstudioMockState.nextResponseText = '<think>内部の思考プロセスです。</think>こんにちは！';
 
         const result1 = await LmStudioConnector.generateResponse({
             message: 'テスト',
@@ -127,9 +158,7 @@ describe('LmStudioConnector', () => {
         expect(result1).toBe('こんにちは！');
 
         // レスポンスに <thought> タグが含まれる場合のモック設定
-        vi.mocked(mockModelInstance.respond).mockResolvedValueOnce({
-            content: '<thought>思考中...</thought>お答えします。'
-        } as any);
+        lmstudioMockState.nextResponseText = '<thought>思考中...</thought>お答えします。';
 
         const result2 = await LmStudioConnector.generateResponse({
             message: 'テスト',
@@ -140,9 +169,7 @@ describe('LmStudioConnector', () => {
         expect(result2).toBe('お答えします。');
 
         // レスポンスに Thinking Process: が含まれる場合のモック設定
-        vi.mocked(mockModelInstance.respond).mockResolvedValueOnce({
-            content: 'Thinking Process: \n1. 解析\n2. 回答生成\n\nこんにちは！'
-        } as any);
+        lmstudioMockState.nextResponseText = 'Thinking Process: \n1. 解析\n2. 回答生成\n\nこんにちは！';
 
         const result3 = await LmStudioConnector.generateResponse({
             message: 'テスト',
@@ -156,7 +183,6 @@ describe('LmStudioConnector', () => {
     test('generateResponse - 履歴が正しくマッピングされること', async () => {
         if (USE_REAL_LMSTUDIO) return;
 
-        const { LMStudioClient } = await import('@lmstudio/sdk');
         const history = [
             { sender: 'assistant', text: '最初の無視されるべき会話' },
             { sender: 'user', text: 'ユーザーの最初の会話' },
@@ -171,11 +197,8 @@ describe('LmStudioConnector', () => {
             history
         });
 
-        const clientInstance = vi.mocked(LMStudioClient).mock.results[0].value;
-        const mockModelInstance = await clientInstance.llm.model.mock.results[0].value;
-
-        expect(mockModelInstance.respond).toHaveBeenCalledWith([
-            { role: 'system', content: 'システム' },
+        expect(lmstudioMockState.lastSystemPrompt).toContain('システム');
+        expect(lmstudioMockState.lastInputMessages).toEqual([
             { role: 'user', content: 'ユーザーの最初の会話' },
             { role: 'assistant', content: 'アシスタントの返答' },
             { role: 'user', content: '次のメッセージ' }
@@ -185,7 +208,6 @@ describe('LmStudioConnector', () => {
     test('generateResponse - テキスト添付ファイルがデコードされてメッセージに追加されること', async () => {
         if (USE_REAL_LMSTUDIO) return;
 
-        const { LMStudioClient } = await import('@lmstudio/sdk');
         const textBase64 = Buffer.from('添付テキストの内容です。').toString('base64');
         const attachments = [
             {
@@ -203,10 +225,7 @@ describe('LmStudioConnector', () => {
             attachments
         });
 
-        const clientInstance = vi.mocked(LMStudioClient).mock.results[0].value;
-        const mockModelInstance = await clientInstance.llm.model.mock.results[0].value;
-
-        expect(mockModelInstance.respond).toHaveBeenCalledWith([
+        expect(lmstudioMockState.lastInputMessages).toEqual([
             {
                 role: 'user',
                 content: 'こんにちは\n\n--- 添付ファイル: test.txt ---\n添付テキストの内容です。\n---'
@@ -217,7 +236,6 @@ describe('LmStudioConnector', () => {
     test('generateResponse - 画像添付がある場合にマルチモーダル形式のペイロードが生成されること', async () => {
         if (USE_REAL_LMSTUDIO) return;
 
-        const { LMStudioClient } = await import('@lmstudio/sdk');
         const imageBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
         const attachments = [
             {
@@ -235,10 +253,7 @@ describe('LmStudioConnector', () => {
             attachments
         });
 
-        const clientInstance = vi.mocked(LMStudioClient).mock.results[0].value;
-        const mockModelInstance = await clientInstance.llm.model.mock.results[0].value;
-
-        expect(mockModelInstance.respond).toHaveBeenCalledWith([
+        expect(lmstudioMockState.lastInputMessages).toEqual([
             {
                 role: 'user',
                 content: [

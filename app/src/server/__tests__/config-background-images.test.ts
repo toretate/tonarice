@@ -2,9 +2,12 @@ import fs from 'fs';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { testUsersDir } = vi.hoisted(() => ({
-    testUsersDir: `${process.cwd()}\\src\\server\\__tests__\\tmp-config-background-users`
-}));
+const { testUsersDir } = await vi.hoisted(async () => {
+    const nodePath = await import('node:path');
+    return {
+        testUsersDir: nodePath.join(process.cwd(), 'src', 'server', '__tests__', 'tmp-config-background-users')
+    };
+});
 
 vi.mock('../utils/paths', () => ({
     USERS_DIR: testUsersDir

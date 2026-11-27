@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const electronMocks = vi.hoisted(() => ({
@@ -8,7 +9,7 @@ const electronMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('electron', () => ({
-    app: { getPath: vi.fn(() => 'C:\\user-data') },
+    app: { getPath: vi.fn(() => path.resolve('/user-data')) },
     BrowserWindow: { fromWebContents: vi.fn(() => ({})) },
     dialog: {
         showOpenDialog: vi.fn(async () => ({
@@ -57,7 +58,7 @@ describe('music-folder-handler', () => {
     it('別ウィンドウでフォルダを変更・削除しても既存の音楽URLを維持すること', async () => {
         const { registerMusicFolderHandlers } = await import('../music-folder-handler');
         registerMusicFolderHandlers();
-        electronMocks.dialogResults.push('C:\\MusicA', 'C:\\MusicB');
+        electronMocks.dialogResults.push(path.resolve('/MusicA'), path.resolve('/MusicB'));
 
         const selectFolder = electronMocks.ipcHandlers.get('select-music-folder');
         const clearFolder = electronMocks.ipcHandlers.get('clear-last-music-folder');

@@ -89,6 +89,17 @@ export default defineConfig({
         exclude: ['@tonarice/expression-alignment'],
     },
     test: {
-        exclude: [...configDefaults.exclude, '**/*.browser.test.ts'],
+        exclude: [
+            ...configDefaults.exclude,
+            '**/*.browser.test.ts',
+            // CI 環境では外部 AI サービス・実機接続を要するテストを除外する
+            ...(process.env.CI === 'true'
+                ? [
+                    '**/chat-ai-service-real.test.ts',
+                    '**/verify-standard-path.test.ts',
+                    '**/*.live.test.ts',
+                ]
+                : []),
+        ],
     },
 });

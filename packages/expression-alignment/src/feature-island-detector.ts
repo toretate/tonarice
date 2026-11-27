@@ -140,13 +140,13 @@ export function detectEyeCenters(sprite: RasterImage): EyeCenters | null {
 
     // 3. 目候補フィルタリング
     // - 面積 15〜1200（旧コメント「1000」は誤記 → 実値 1200 を採用）
-    // - Y 座標がコンテンツ領域の 15%〜75% の範囲
+    // - Y 座標がコンテンツ領域の 15%〜65% の範囲（下部の首・襟・服の影を除外）
     const eyeCandidates = islands.filter(
         (isl) =>
             isl.area >= 15 &&
             isl.area <= 1200 &&
             isl.centerY > labelStartY * 0.15 &&
-            isl.centerY < labelStartY * 0.75
+            isl.centerY < labelStartY * 0.65
     );
 
     // 4. 最良ペア探索（スコア最大化）
@@ -173,7 +173,16 @@ export function detectEyeCenters(sprite: RasterImage): EyeCenters | null {
             const areaRatio = Math.min(left.area, right.area) / Math.max(left.area, right.area);
             if (areaRatio < 0.15) continue;
 
-            const score = (left.area + right.area) * (1.0 - vertDiff / (labelStartY * 0.15 + 1));
+            // 画像中央付近の対称な目ペアを優先する（外縁の髪や服の大きな影による誤検出を防止）
+            const pairMidX = (left.centerX + right.centerX) / 2;
+            const centerScore = Math.max(0.1, 1.0 - Math.abs(pairMidX - W / 2) / (W * 0.5));
+            const pairDistScore = Math.max(0.1, 1.0 - Math.abs(horizDist - W * 0.38) / (W * 0.4));
+            const score =
+                (left.area + right.area) *
+                areaRatio *
+                centerScore *
+                pairDistScore *
+                (1.0 - vertDiff / (labelStartY * 0.15 + 1));
             if (score > bestScore) {
                 bestScore = score;
                 bestLeft = left;
