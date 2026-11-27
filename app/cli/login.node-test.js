@@ -12,7 +12,7 @@ describe('CLIログイン', () => {
         let text = '';
         const token = await login({ url: 'http://127.0.0.1:3000', timeout: 500 }, { write(value) { text += value; } }, {
             fetch: async (url, request) => {
-                if (url.pathname.endsWith('/start')) return Response.json({ state, verifier, expiresIn: 60 });
+                if (url.pathname.endsWith('/start')) return Response.json({ state, verifier, confirmationCode: 'abcd1234', expiresIn: 60 });
                 assert.deepEqual(JSON.parse(request.body), { state, verifier });
                 return Response.json(++count === 1 ? { status: 'pending' } : { status: 'complete', token: 'private-token' });
             },

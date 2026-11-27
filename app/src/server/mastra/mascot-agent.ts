@@ -24,7 +24,7 @@ export function createMascotAgent(): Agent<
 > {
     return new Agent({
         id: MASCOT_AGENT_ID,
-        name: 'Tonarice Mascot Agent',
+        name: 'tonarice Mascot Agent',
         instructions: 'あなたはデスクトップマスコットとしてユーザーと対話します。',
         model: ({ requestContext }) => {
             const resolvedModel = requestContext.get('resolvedModel');

@@ -17,3 +17,23 @@ export function broadcastToUser(userId: string, event: string, data: unknown): v
         try { peer.send(payload); } catch { /* 切断済み接続は次の操作を妨げない。 */ }
     }
 }
+
+const sessionConnections = new Map<string, Set<() => void>>();
+
+export function trackSessionConnection(sessionId: string, disconnect: () => void): () => void {
+    const connections = sessionConnections.get(sessionId) ?? new Set<() => void>();
+    sessionConnections.set(sessionId, connections);
+    connections.add(disconnect);
+    return () => {
+        connections.delete(disconnect);
+        if (connections.size === 0 && sessionConnections.get(sessionId) === connections) {
+            sessionConnections.delete(sessionId);
+        }
+    };
+}
+
+export function disconnectSession(sessionId: string): void {
+    const connections = sessionConnections.get(sessionId);
+    sessionConnections.delete(sessionId);
+    for (const disconnect of connections ?? []) disconnect();
+}

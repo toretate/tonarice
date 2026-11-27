@@ -1,8 +1,8 @@
-import { defineEventHandler, createError, sendStream, sendNoContent, setResponseHeader, getHeader, getCookie } from 'h3';
+import { defineEventHandler, createError, sendStream, sendNoContent, setResponseHeader, getHeader, toWebRequest } from 'h3';
 import fs from 'fs';
 import path from 'path';
 import { resolveMascotPath, USERS_DIR } from '../../utils/paths';
-import { authenticateUserToken } from '../../middleware/auth';
+import { requireBetterAuthSession } from '../../utils/better-auth-runtime';
 import { isAuthBypassAllowed } from '../../utils/auth-bypass';
 
 const MIME_TYPES: Record<string, string> = {
@@ -76,32 +76,8 @@ export default defineEventHandler(async (event) => {
         if (isAuthBypassAllowed()) {
             loginUserId = 'usr_local_dev_bypass';
         } else {
-            // 2. トークン認証
-            let token = '';
-            const authHeader = getHeader(event, 'authorization');
-            if (authHeader && authHeader.startsWith('Bearer ')) {
-                token = authHeader.split(' ')[1];
-            }
-            if (!token) {
-                token = getCookie(event, 'session_token') || '';
-            }
-
-            if (!token) {
-                throw createError({
-                    statusCode: 401,
-                    message: '未認証です。ログインしてからもう一度お試しください。',
-                });
-            }
-
-            try {
-                const user = await authenticateUserToken(token);
-                loginUserId = user.id;
-            } catch (authError: any) {
-                throw createError({
-                    statusCode: 401,
-                    message: `認証に失敗しました: ${authError.message}`,
-                });
-            }
+            const { user } = await requireBetterAuthSession(toWebRequest(event).headers);
+            loginUserId = user.id;
         }
 
         // 所有者とログインユーザーの一致を確認
@@ -135,7 +111,7 @@ export default defineEventHandler(async (event) => {
     const lastModified = stat.mtime.toUTCString();
 
     setResponseHeader(event, 'Content-Type', contentType);
-    setResponseHeader(event, 'Cache-Control', 'no-cache');
+    setResponseHeader(event, 'Cache-Control', 'private, no-cache');
     setResponseHeader(event, 'ETag', etag);
     setResponseHeader(event, 'Last-Modified', lastModified);
 

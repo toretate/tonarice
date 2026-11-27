@@ -19,7 +19,7 @@ vi.mock('../utils/tool-executor', () => ({
     executeTasksTool: serviceMocks.executeTasks
 }));
 vi.mock('../utils/tasks-service', () => ({ updateTaskInDb: vi.fn() }));
-vi.mock('../middleware/auth', () => ({ authenticateUserToken: vi.fn() }));
+vi.mock('../utils/better-auth-runtime', () => ({ requireBetterAuthSession: vi.fn() }));
 vi.mock('../mastra/tool-approval', () => ({ requestToolApproval: vi.fn().mockResolvedValue(true), respondToolApproval: vi.fn() }));
 vi.mock('../mastra/mutation-claim', () => ({ claimMutation: vi.fn().mockReturnValue(true) }));
 

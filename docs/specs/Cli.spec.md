@@ -56,7 +56,7 @@ Codex などの AI エージェントおよび開発者が、ターミナルか�
 | `TONARICE_AI_API_KEY` | CLI | すべてのエンジンで最優先に使用する AI API キー |
 | `OPENAI_API_KEY` | CLI | `engine: "openai"` かつ `TONARICE_AI_API_KEY` 未指定時に使用 |
 | `GEMINI_API_KEY` | CLI | `engine: "gemini"` かつ `TONARICE_AI_API_KEY` 未指定時に使用 |
-| `TONARICE_SESSION_TOKEN` | CLI | 既存の Google ID トークン。HTTP では Bearer、WebSocket では Cookie (`session_token`) として送信 |
+| `TONARICE_SESSION_TOKEN` | CLI | 署名済みの Better Auth セッショントークン。HTTP と WebSocket の両方で Bearer として送信 |
 | `MASCOT_STORAGE_DIR` | サーバー | ユーザーデータ保存先ディレクトリ。別 workspace の GUI データを共有する場合に指定 |
 | `ALLOW_AUTH_BYPASS` | サーバー | `true` の場合、ローカル開発ユーザー（`usr_local_dev_bypass`）で認証バイパス |
 
@@ -193,7 +193,7 @@ npm run cli [-- --engine <engine> --model <id> --lmstudio-endpoint <url> --syste
 | コマンド | 動作 |
 | --- | --- |
 | `/help` | 利用可能なコマンド一覧を表示 |
-| `/login` | ブラウザーで Google ログインを開き、1 回限り有効（5 分期限・検証値付き）の認証トークンをメモリ内へ取得。アカウント混在防止のため会話文脈とマスコット選択を初期化 |
+| `/login` | CLI に表示される確認コードをブラウザーで入力し、Google 認証後に1回限りの受け渡し（5分期限・検証値付き）で Better Auth セッショントークンをメモリに取得。アカウント混在防止のため会話文脈とマスコット選択を初期化 |
 | `/mascot` | マスコット一覧を表示。番号で選択、`c` で新規作成、`p` で選択中マスコットの性格編集（複数行入力 → `/save` で保存、`/empty` で空保存、`/cancel` または Esc で破棄。保存失敗時は入力保持） |
 | `/model` | 選択中マスコットの現在のエンジン・モデルを表示し、番号とモデル ID 手入力で更新（`/cancel` / Esc で中止） |
 | `/history` | Mastra Memory に保存された通常会話一覧を表示・選択し、直近 10 件を表示（プライベート会話中は通常会話へ戻るよう案内） |

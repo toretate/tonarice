@@ -33,7 +33,7 @@ function resolveCoWorkModel(owner: string) {
 function getCoWorkAgentConfig(shutdownSignal: AbortSignal) {
     return {
         id: COWORK_AGENT_ID,
-        name: 'Tonarice CoWork Agent',
+        name: 'tonarice CoWork Agent',
         instructions: () => {
             const now = new Date().toLocaleString('ja-JP', {
                 year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit'

@@ -1,22 +1,24 @@
-import { defineEventHandler, sendRedirect, createError, getQuery } from 'h3';
-import { resolveGoogleRedirectUri } from '../../utils/auth-redirect-uri';
+import { defineEventHandler, getQuery } from 'h3';
+import { beginGoogleLogin, parseLoginState } from '../../utils/better-auth-login';
 
-export default defineEventHandler((event) => {
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    const redirectUri = resolveGoogleRedirectUri(event);
-
-    if (!clientId) {
-        throw createError({
-            statusCode: 500,
-            statusMessage: 'サーバーエラー: GOOGLE_CLIENT_ID が設定されていません。'
-        });
-    }
-
-    const scope = 'openid email profile';
+export default defineEventHandler(event => {
     const state = getQuery(event).cli_state;
-    if (state !== undefined && (typeof state !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(state))) throw createError({ statusCode: 400 });
-    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}${state ? `&state=${encodeURIComponent(state)}` : ''}`;
+    if (state === undefined) return beginGoogleLogin();
 
-    console.log('[Auth] Googleログインへリダイレクトします');
-    return sendRedirect(event, authUrl);
+    const value = parseLoginState(state);
+    return new Response(`<!doctype html><html lang="ja"><meta charset="utf-8">
+        <title>tonarice のログイン</title><h1>tonarice のログイン</h1>
+        <p>ログインを開始したデスクトップアプリまたは CLI に表示された確認コードを入力してください。</p>
+        <form method="post" action="/api/auth/login">
+            <input type="hidden" name="state" value="${value}">
+            <label>確認コード <input name="confirmationCode" required maxlength="8" autocomplete="off"></label>
+            <button type="submit">Google で続行</button>
+        </form></html>`, {
+        headers: {
+            'content-type': 'text/html; charset=utf-8',
+            'cache-control': 'no-store',
+            'referrer-policy': 'no-referrer',
+            'content-security-policy': "default-src 'none'; form-action 'self'; frame-ancestors 'none'"
+        }
+    });
 });

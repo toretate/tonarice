@@ -27,10 +27,11 @@ export async function login(options, output, dependencies = {}) {
         try { return await response.json(); } catch { throw new CliError('invalid_response', 'ログイン応答の形式が不正です。', 6); }
     };
     const start = await request('/api/auth/cli/start', {});
-    if (!/^[A-Za-z0-9_-]{43}$/.test(start?.state) || !/^[A-Za-z0-9_-]{43}$/.test(start?.verifier) || !Number.isInteger(start.expiresIn) || start.expiresIn < 1 || start.expiresIn > 300) throw new CliError('invalid_response', 'ログイン応答の形式が不正です。', 6);
+    if (!/^[A-Za-z0-9_-]{43}$/.test(start?.state) || !/^[A-Za-z0-9_-]{43}$/.test(start?.verifier) || !/^[A-Za-z0-9_-]{8}$/.test(start?.confirmationCode) || !Number.isInteger(start.expiresIn) || start.expiresIn < 1 || start.expiresIn > 300) throw new CliError('invalid_response', 'ログイン応答の形式が不正です。', 6);
     const loginUrl = new URL('/api/auth/login', origin);
     loginUrl.searchParams.set('cli_state', start.state);
     output.write(`ブラウザーでログインしてください: ${loginUrl}\n`);
+    output.write(`確認コード: ${start.confirmationCode}\n`);
     try { (dependencies.openBrowser || openBrowser)(loginUrl.toString()); } catch { /* URLを手動で開ける。 */ }
     const deadline = Date.now() + start.expiresIn * 1000;
     while (Date.now() < deadline) {

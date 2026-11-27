@@ -5,7 +5,7 @@ import { VoiceAiService } from '../utils/voice-ai-service';
 import { splitSentences } from '../utils/sentence-splitter';
 import { sanitizeForIrodoriTTS } from '../utils/irodori-sanitizer';
 import { filterDialogue } from '../utils/dialogue-filter';
-import { authenticateUserToken } from '../middleware/auth';
+import { requireBetterAuthSession } from '../utils/better-auth-runtime';
 import { normalizeTextForTts, stripResidualAsterisks } from '../utils/tts-normalizer';
 import { PROJECT_ROOT, USERS_DIR } from '../utils/paths';
 import { executeMemosTool, executeTasksTool } from '../utils/tool-executor';
@@ -18,7 +18,7 @@ import { getMastraChatErrorMessage } from '../mastra/chat-route';
 import { openChatMemoryTurn } from '../mastra/chat-memory-turn';
 import { requestToolApproval, respondToolApproval } from '../mastra/tool-approval';
 import { claimMutation } from '../mastra/mutation-claim';
-import { addUserConnection, removeUserConnection, broadcastToUser } from '../utils/user-connections';
+import { addUserConnection, removeUserConnection, broadcastToUser, trackSessionConnection } from '../utils/user-connections';
 import { GenerationBudget } from '../mastra/generation-budget';
 
 
@@ -129,55 +129,49 @@ function notifyDataToolResult(
     }
 }
 
-// Cookieを手動でパースするヘルパー関数
-function parseCookies(cookieHeader: string | undefined): Record<string, string> {
-    const list: Record<string, string> = {};
-    if (!cookieHeader) return list;
-    cookieHeader.split(';').forEach(cookie => {
-        const parts = cookie.split('=');
-        const key = parts.shift()?.trim();
-        if (key) {
-            list[key] = decodeURIComponent(parts.join('='));
-        }
-    });
-    return list;
-}
 
 export default defineWebSocketHandler({
     async open(peer) {
         console.log('[WS] Client connecting via Nitro...');
         
-        const requestUrl = peer.request.url || '';
-        const urlObj = new URL(requestUrl, 'http://localhost');
-        
-        // 1. クエリパラメータから token を取得
-        let token = urlObj.searchParams.get('token') || '';
-
-        // 2. Cookie から取得
-        if (!token) {
-            const cookieHeader = peer.request.headers.get('cookie') || '';
-            const cookies = parseCookies(cookieHeader);
-            token = cookies['session_token'] || '';
-        }
-
         let userId = 'anonymous';
         try {
             if (isAuthBypassAllowed()) {
                 userId = 'usr_local_dev_bypass';
                 console.warn(`[WS] ALLOW_AUTH_BYPASS=true のため認証をバイパスします。User ID: ${userId}`);
             } else {
-                if (!token) {
-                    console.log('[WS] Authentication failed: No token provided');
-                    peer.close(4001, 'Unauthorized: Token is required');
+                const origin = peer.request.headers.get('origin');
+                const allowedOrigin = process.env.BETTER_AUTH_URL && new URL(process.env.BETTER_AUTH_URL).origin;
+                if (origin && origin !== allowedOrigin) {
+                    peer.close(4003, '接続元が許可されていません。');
                     return;
                 }
-                const user = await authenticateUserToken(token);
+                const { user, session } = await requireBetterAuthSession(peer.request.headers);
+                const disconnect = () => {
+                    removeUserConnection(user.id, peer);
+                    abortMastraRequests(peer);
+                    peer.close(4001, 'セッションが無効です。');
+                };
+                const untrack = trackSessionConnection(session.id, disconnect);
+                const timer = setInterval(async () => {
+                    try {
+                        const current = await requireBetterAuthSession(peer.request.headers);
+                        if (current.user.id === user.id && current.session.id === session.id) return;
+                    } catch { /* 失効・期限切れとして接続を終了する。 */ }
+                    clearInterval(timer);
+                    disconnect();
+                }, 30_000);
+                timer.unref();
+                peer.context.releaseSession = () => {
+                    clearInterval(timer);
+                    untrack();
+                };
                 console.log(`[WS] Authentication successful for user: ${user.id}`);
                 userId = user.id;
             }
         } catch (authError: any) {
             console.error('[WS] Authentication failed:', authError.message);
-            peer.close(4003, `Forbidden: ${authError.message}`);
+            peer.close(authError.statusCode === 403 ? 4003 : 4001, '認証に失敗しました。');
             return;
         }
 
@@ -189,6 +183,15 @@ export default defineWebSocketHandler({
 
     async message(peer, msg) {
         const userId = getPeerUserId(peer);
+        if (!isAuthBypassAllowed()) {
+            try {
+                const { user } = await requireBetterAuthSession(peer.request.headers);
+                if (user.id !== userId) throw new Error('ユーザーが一致しません。');
+            } catch {
+                peer.close(4001, 'セッションが無効です。');
+                return;
+            }
+        }
         try {
             const rawMessage = msg.text();
             const parsed = JSON.parse(rawMessage);
@@ -479,6 +482,8 @@ export default defineWebSocketHandler({
     },
 
     close(peer, details) {
+        const release = peer.context.releaseSession;
+        if (typeof release === 'function') release();
         const userId = getPeerUserId(peer);
         abortMastraRequests(peer);
         console.log(`[WS] Client disconnected (User: ${userId}, Details: ${JSON.stringify(details)})`);

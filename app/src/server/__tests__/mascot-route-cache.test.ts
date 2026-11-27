@@ -6,11 +6,11 @@ const {
     mockStatSync,
     mockCreateReadStream,
     mockGetHeader,
-    mockGetCookie,
+    mockToWebRequest,
     mockSetResponseHeader,
     mockSendNoContent,
     mockSendStream,
-    mockAuthenticateUserToken,
+    mockRequireBetterAuthSession,
     mockUsersDir,
     mockMascotFilePath
 } = await vi.hoisted(async () => {
@@ -21,11 +21,11 @@ const {
         mockStatSync: vi.fn(),
         mockCreateReadStream: vi.fn(),
         mockGetHeader: vi.fn(),
-        mockGetCookie: vi.fn(),
+        mockToWebRequest: vi.fn(),
         mockSetResponseHeader: vi.fn(),
         mockSendNoContent: vi.fn(),
         mockSendStream: vi.fn(),
-        mockAuthenticateUserToken: vi.fn(),
+        mockRequireBetterAuthSession: vi.fn(),
         mockUsersDir: usersDir,
         mockMascotFilePath: nodePath.join(usersDir, 'owner', 'mascots', 'mascot_a', 'outfits', 'body.png')
     };
@@ -44,8 +44,8 @@ vi.mock('../utils/paths', () => ({
     resolveMascotPath: () => mockMascotFilePath
 }));
 
-vi.mock('../middleware/auth', () => ({
-    authenticateUserToken: mockAuthenticateUserToken
+vi.mock('../utils/better-auth-runtime', () => ({
+    requireBetterAuthSession: mockRequireBetterAuthSession
 }));
 
 vi.mock('h3', async (importOriginal) => {
@@ -53,7 +53,7 @@ vi.mock('h3', async (importOriginal) => {
     return {
         ...actual,
         getHeader: mockGetHeader,
-        getCookie: mockGetCookie,
+        toWebRequest: mockToWebRequest,
         setResponseHeader: mockSetResponseHeader,
         sendNoContent: mockSendNoContent,
         sendStream: mockSendStream
@@ -70,8 +70,9 @@ describe('マスコット画像配信キャッシュ', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        mockRequireBetterAuthSession.mockRejectedValue({ statusCode: 401 });
         process.env.ALLOW_AUTH_BYPASS = 'false';
-        mockGetCookie.mockReturnValue('');
+        mockToWebRequest.mockReturnValue(new Request('http://localhost/mascots/test'));
         mockExistsSync.mockReturnValue(true);
         mockStatSync.mockReturnValue({
             isDirectory: () => false,
@@ -118,12 +119,12 @@ describe('マスコット画像配信キャッシュ', () => {
             if (name === 'if-none-match') return 'W/"64-3e8"';
             return undefined;
         });
-        mockAuthenticateUserToken.mockResolvedValue({ id: 'owner' });
+        mockRequireBetterAuthSession.mockResolvedValue({ user: { id: 'owner' } });
 
         const result = await mascotRouteHandler(createRemoteEvent());
 
         expect(result).toEqual({ statusCode: 304 });
-        expect(mockAuthenticateUserToken).toHaveBeenCalledWith('valid-token');
+        expect(mockRequireBetterAuthSession).toHaveBeenCalledWith(expect.any(Headers));
         expect(mockSendNoContent).toHaveBeenCalledWith(expect.anything(), 304);
         expect(mockSendStream).not.toHaveBeenCalled();
     });

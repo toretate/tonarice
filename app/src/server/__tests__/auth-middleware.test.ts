@@ -3,8 +3,8 @@ import authMiddleware from '../middleware/auth';
 import { findCoWorkDesktopOwner } from '../cowork/pairing';
 
 vi.mock('../cowork/pairing', () => ({ findCoWorkDesktopOwner: vi.fn() }));
-vi.mock('fs', async (original) => {
-    const fs = await original<typeof import('fs')>();
+vi.mock('node:fs', async (original) => {
+    const fs = await original<typeof import('node:fs')>();
     const isUsersFile = (path: unknown) => typeof path === 'string' && /[/\\]users\.json$/.test(path);
     return {
         ...fs,
@@ -15,9 +15,9 @@ vi.mock('fs', async (original) => {
     };
 });
 
-const { mockGetHeader, mockGetCookie } = vi.hoisted(() => ({
+const { mockGetHeader, mockToWebRequest } = vi.hoisted(() => ({
     mockGetHeader: vi.fn(),
-    mockGetCookie: vi.fn()
+    mockToWebRequest: vi.fn()
 }));
 
 vi.mock('h3', async (importOriginal) => {
@@ -25,7 +25,7 @@ vi.mock('h3', async (importOriginal) => {
     return {
         ...actual,
         getHeader: mockGetHeader,
-        getCookie: mockGetCookie
+        toWebRequest: mockToWebRequest
     };
 });
 
@@ -48,7 +48,7 @@ describe('認証ミドルウェア', () => {
         vi.clearAllMocks();
         delete process.env.ALLOW_AUTH_BYPASS;
         mockGetHeader.mockReturnValue(undefined);
-        mockGetCookie.mockReturnValue(undefined);
+        mockToWebRequest.mockReturnValue(new Request('http://localhost/api/tts'));
     });
 
     afterEach(() => {
@@ -75,7 +75,7 @@ describe('認証ミドルウェア', () => {
     it('認証ミドルウェア_ALLOW_AUTH_BYPASSが未設定で認証情報がない場合は未認証メッセージ付き401を返すこと', async () => {
         await expect(authMiddleware(createEvent())).rejects.toMatchObject({
             statusCode: 401,
-            message: '未認証です。ログインしてからもう一度お試しください。'
+            message: 'ログインが必要です。'
         });
     });
 

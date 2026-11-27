@@ -42,11 +42,9 @@
 新規のスケジューラ／認証基盤は原則作らず、以下の**既存経路を拡張**する。
 
 ### 2.1. Google OAuth（現状は「ログイン専用」）
-- ログイン開始 `app/src/server/api/auth/login.get.ts`：`scope='openid email profile'` のみ。`response_type=code`。
-- コールバック `app/src/server/api/auth/callback.get.ts`：`code` を `oauth2.googleapis.com/token` で交換し、**`id_token` のみ**を利用。⚠️ `access_token` / `refresh_token` は**取得も保存もしていない**。`access_type=offline` も指定していない。
-- 検証 `app/src/server/utils/auth-service.ts`：`id_token` を JWKS で署名検証（`verifyGoogleIdToken`）。Calendar API 呼び出しには使えない。
-- 環境変数：`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI`（既定 `http://localhost:3000/api/auth/callback`）。
-- ⚠️ **`googleapis` SDK は未導入**。Google との通信は既存どおり素の `https`/`fetch`（`auth-service.ts`, `app/electron/ipc-handlers/google-handler.ts`）で行っている。→ Calendar も**素の REST 呼び出し**で実装し、コードベース様式とバンドルサイズを維持する（§11-5）。
+- Google ログインは Better Auth が処理する。ログイン用の OAuth スコープは `openid email profile`。Google のアクセストークンやリフレッシュトークンは認証 DB に保存しない。
+- 認証の設定とコールバック URI は [システム構成仕様](../../system_configuration.md) を参照する。
+- Calendar API に必要な認可、トークンの取得・保存・更新は Calendar 連携側で実装する。
 
 > ⇒ Calendar 連携には「**読み取りスコープの追加**」「**アクセストークン（＋リフレッシュトークン）の取得・保存・更新**」が新規に必要。ここが最大の作業（§10 フェーズ0）。
 

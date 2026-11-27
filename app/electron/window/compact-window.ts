@@ -70,7 +70,7 @@ export function createCompactWindow(): BrowserWindow {
         frame: true,
         alwaysOnTop: configData.alwaysOnTop,
         resizable: true,
-        title: 'Desktop AI Mascot - コンパクトモード',
+        title: 'tonarice - コンパクトモード',
         webPreferences: {
             preload: path.join(__dirname, 'preload.cjs'),
             contextIsolation: true,
