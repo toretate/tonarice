@@ -1,5 +1,5 @@
 import type { ScheduledPromptTaskInput } from '../../types/scheduled-prompt-task';
-import { getMastraRuntime } from '../mastra/runtime';
+import { getMastraRuntime, getMastraShutdownSignal } from '../mastra/runtime';
 import { getDB } from '../utils/db';
 import { ensureCoWorkSchedule, importCoWorkTasks, removeCoWorkTaskSchedule, runCoWorkTaskNow } from './mastra-schedules';
 import { CoWorkRepository } from './repository';
@@ -58,7 +58,7 @@ export async function deleteCoWorkTask(owner: string, id: string) {
 }
 
 export async function runCoWorkTask(owner: string, id: string) {
-    return runCoWorkTaskNow(getMastraRuntime(), getCoWorkRepository(), owner, id);
+    return runCoWorkTaskNow(getMastraRuntime(), getCoWorkRepository(), owner, id, getMastraShutdownSignal());
 }
 
 export async function importLegacyCoWorkTasks(

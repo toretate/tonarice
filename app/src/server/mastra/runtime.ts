@@ -30,6 +30,7 @@ export function getMastraRuntime(): Mastra {
             url: pathToFileURL(join(directory, 'runtime.db')).href
         });
         shutdownController = new AbortController();
+        const signal = shutdownController.signal;
         const coworkRepository = new CoWorkRepository(getDB());
         const coworkAgent = createCoWorkAgent(shutdownController.signal);
         runtime = new Mastra({
@@ -44,12 +45,12 @@ export function getMastraRuntime(): Mastra {
                     const current = runtime;
                     if (current) {
                         void import('../cowork/mastra-schedules')
-                            .then(({ recoverCoWorkSchedulePublication }) => recoverCoWorkSchedulePublication(current, coworkRepository, scheduleId))
+                            .then(({ recoverCoWorkSchedulePublication }) => recoverCoWorkSchedulePublication(current, coworkRepository, scheduleId, signal))
                             .catch(() => console.warn('[CoWork] Mastra schedule の再試行を設定できませんでした。'));
                     }
                 }
             },
-            schedules: createCoWorkScheduleHooks(coworkRepository, shutdownController.signal)
+            schedules: createCoWorkScheduleHooks(coworkRepository, signal)
         });
     }
     return runtime;
@@ -75,4 +76,9 @@ export function resetMastraRuntimeForTest(): void {
 
 export function stopMastraRuntime(): void {
     shutdownController?.abort();
+}
+
+export function getMastraShutdownSignal(): AbortSignal {
+    getMastraRuntime();
+    return shutdownController!.signal;
 }

@@ -1,94 +1,144 @@
+import type { Mastra } from '@mastra/core/mastra';
+import type { AgentSchedule, ScheduleTriggerInfo } from '@mastra/core/schedules';
 import Database from 'better-sqlite3';
-import type { NitroApp } from 'nitropack/types';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import plugin from '../../plugins/cowork-scheduler';
-import { ChatAiService } from '../../utils/chat-ai-service';
-import { getDB } from '../../utils/db';
-import { getCoWorkRepository } from '../runtime';
-import { executionTimeout } from '../schedule';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { COWORK_AGENT_ID } from '../../mastra/cowork-agent';
+import {
+    createCoWorkScheduleHooks,
+    dispatchNextCoWorkRun,
+    ensureCoWorkSchedule,
+    removeCoWorkTaskSchedule,
+    requeueUndeliveredCoWorkRun,
+    runCoWorkTaskNow
+} from '../mastra-schedules';
+import { CoWorkRepository } from '../repository';
 
-vi.mock('nitropack/runtime', () => ({ defineNitroPlugin: (value: unknown) => value }));
-vi.mock('../../utils/chat-ai-service', () => ({ ChatAiService: { generateResponse: vi.fn() } }));
-vi.mock('../../utils/db', () => ({ getDB: vi.fn() }));
-
-let db: Database.Database;
-let close: (() => Promise<void>) | undefined;
-
-const start = () => {
-    plugin({
-        hooks: { hook: (_name: string, callback: () => Promise<void>) => { close = callback; } }
-    } as unknown as NitroApp);
+const owner = 'test-user';
+const input = {
+    prompt: '実行してください。',
+    enabled: true,
+    timeZone: 'Asia/Tokyo',
+    schedule: { type: 'interval', intervalMinutes: 15 } as const
 };
 
-beforeAll(() => {
-    db = new Database(':memory:');
-    vi.mocked(getDB).mockReturnValue(db);
-});
-afterAll(() => db.close());
+function fixture() {
+    const db = new Database(':memory:');
+    const repo = new CoWorkRepository(db);
+    const stopping = new AbortController();
+    const hooks = createCoWorkScheduleHooks(repo, stopping.signal);
+    const rows = new Map<string, AgentSchedule>();
+    const schedules = {
+        get: vi.fn(async (id: string) => rows.get(id) ?? null),
+        list: vi.fn(async ({ status }: { status: string }) => [...rows.values()].filter(row => row.status === status)),
+        create: vi.fn(async (input: AgentSchedule & { runAt: Date }) => {
+            const row = { ...input, id: input.id.startsWith('agent_') ? input.id : 'agent_' + input.id, runAt: +input.runAt };
+            rows.set(row.id, row);
+            return row;
+        }),
+        update: vi.fn(async (id: string, patch: Partial<AgentSchedule> & { runAt?: Date }) => {
+            const row = rows.get(id);
+            if (!row) throw new Error('スケジュールが見つかりません。');
+            const updated = { ...row, ...patch, runAt: patch.runAt === undefined ? row.runAt : +patch.runAt };
+            rows.set(id, updated);
+            return updated;
+        }),
+        delete: vi.fn(async (id: string) => { rows.delete(id); }),
+        run: vi.fn(async (_id: string) => {})
+    };
+    const mastra = { schedules, __shuttingDown: false } as unknown as Mastra;
+    const createTask = (name: string) => repo.create(owner, { ...input, name });
+    const context = (id: string, kind: ScheduleTriggerInfo['kind'] = 'manual') => ({
+        mastra,
+        agentId: COWORK_AGENT_ID,
+        schedule: { id, agentId: COWORK_AGENT_ID, ...rows.get(id) },
+        trigger: { kind, firedAt: new Date() }
+    });
+    return { db, repo, stopping, hooks, schedules, mastra, createTask, context };
+}
 
-beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-11-25T01:00:00.000Z'));
-    vi.stubEnv('COWORK_AI_ENGINE', 'gemini');
-    vi.stubEnv('COWORK_AI_MODEL', 'test-model');
-    vi.stubEnv('COWORK_AI_API_KEY', 'test-key');
-    vi.mocked(ChatAiService.generateResponse).mockReset();
-});
+let f: ReturnType<typeof fixture>;
+beforeEach(() => { f = fixture(); });
+afterEach(() => { f.db.close(); });
 
-afterEach(async () => {
-    await close?.();
-    close = undefined;
-    vi.useRealTimers();
-    vi.unstubAllEnvs();
-});
-
-describe('CoWork scheduler', () => {
-    it('Nitro 起動_クライアントのアクセスがなくても予定の到達後に実行する', async () => {
-        vi.mocked(ChatAiService.generateResponse).mockResolvedValue('実行結果');
-        const repo = getCoWorkRepository();
-        repo.create('user', {
-            name: '確認', prompt: 'サーバーで実行してください。', enabled: true,
-            timeZone: 'Asia/Tokyo', schedule: { type: 'interval', intervalMinutes: 15 }
-        }, new Date(Date.now() - 15 * 60_000 + 1_000));
-        start();
-        await vi.advanceTimersByTimeAsync(0);
-        expect(ChatAiService.generateResponse).not.toHaveBeenCalled();
-        await vi.advanceTimersByTimeAsync(2_000);
-        expect(ChatAiService.generateResponse).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-            message: 'サーバーで実行してください。', model: 'test-model',
-            maxRetries: 0, logContent: false, toolUseEnabled: false
-        }));
-        expect(repo.list('user').runs[0]).toMatchObject({ status: 'success', resultText: '実行結果' });
+describe('CoWork の Mastra スケジュール', () => {
+    it('prepare_発火後に次回予定を登録して生成結果を保存する', async () => {
+        const task = f.repo.create(owner, { ...input, name: '定期実行' }, new Date(Date.now() - 900_000));
+        const schedule = await ensureCoWorkSchedule(f.mastra, f.repo, owner, task);
+        const ctx = f.context(schedule!.id, 'once');
+        ctx.trigger.firedAt = new Date(schedule!.runAt!);
+        const effective = await f.hooks.prepare!(ctx);
+        expect(effective?.prompt).toBe(task.prompt);
+        expect(f.repo.get(owner, task.id)?.nextRunAt).not.toBe(task.nextRunAt);
+        await f.hooks.onFinish!({ ...ctx, outcome: 'succeeded', effective: { prompt: task.prompt }, result: { text: '完了' } });
+        expect(f.repo.list(owner).runs[0]).toMatchObject({ status: 'success', resultText: '完了' });
     });
 
-    it('Nitro 終了_未完了の実行を中断し二重に要求しない', async () => {
-        vi.mocked(ChatAiService.generateResponse).mockImplementation(() => new Promise(() => {}));
-        const repo = getCoWorkRepository();
-        const task = repo.create('stop-user', {
-            name: '停止', prompt: '停止テスト', enabled: false,
-            timeZone: 'Asia/Tokyo', schedule: { type: 'interval', intervalMinutes: 15 }
-        });
-        repo.enqueue('stop-user', task.id);
-        start();
-        await vi.advanceTimersByTimeAsync(2_000);
-        expect(ChatAiService.generateResponse).toHaveBeenCalledTimes(1);
-        await close?.();
-        await vi.advanceTimersByTimeAsync(executionTimeout);
-        expect(ChatAiService.generateResponse).toHaveBeenCalledTimes(1);
-        expect(repo.list('stop-user').runs[0]).toMatchObject({ status: 'failed', errorCode: 'INTERRUPTED' });
+    it('prepare_配送後に削除されたタスクをスキップして次の実行に進む', async () => {
+        const deleted = f.createTask('削除対象');
+        const next = f.createTask('後続');
+        const run = await runCoWorkTaskNow(f.mastra, f.repo, owner, deleted.id, f.stopping.signal);
+        const scheduleId = f.repo.getScheduleId(owner, deleted.id)!;
+        const queued = f.repo.enqueue(owner, next.id)!;
+        f.repo.delete(owner, deleted.id);
+        await removeCoWorkTaskSchedule(f.mastra, f.repo, owner, deleted.id);
+
+        const ctx = f.context(scheduleId);
+        expect(await f.hooks.prepare!(ctx)).toBeNull();
+        await f.hooks.onFinish!({ ...ctx, outcome: 'skipped', effective: { prompt: deleted.prompt } });
+
+        expect(f.repo.getRun(owner, run!.id)).toMatchObject({ status: 'skipped', errorCode: 'TASK_DELETED' });
+        expect(f.repo.getRun(owner, queued.id)?.status).toBe('running');
+        expect(f.schedules.run).toHaveBeenCalledTimes(2);
     });
 
-    it('AI 実行_時間切れを履歴へ保存し同じ回を再要求しない', async () => {
-        vi.mocked(ChatAiService.generateResponse).mockImplementation(() => new Promise(() => {}));
-        const repo = getCoWorkRepository();
-        const task = repo.create('timeout-user', {
-            name: 'タイムアウト', prompt: 'タイムアウトテスト', enabled: false,
-            timeZone: 'Asia/Tokyo', schedule: { type: 'interval', intervalMinutes: 15 }
-        });
-        repo.enqueue('timeout-user', task.id);
-        start();
-        await vi.advanceTimersByTimeAsync(executionTimeout + 2_000);
-        expect(ChatAiService.generateResponse).toHaveBeenCalledTimes(1);
-        expect(repo.list('timeout-user').runs[0]).toMatchObject({ status: 'failed', errorCode: 'TIMEOUT' });
+    it('dispatchNextCoWorkRun_配送に失敗しても後続の待ち行列を進める', async () => {
+        const failed = f.repo.enqueue(owner, f.createTask('配送失敗').id)!;
+        const next = f.repo.enqueue(owner, f.createTask('後続').id)!;
+        f.schedules.run.mockRejectedValueOnce(new Error('配送失敗'));
+
+        await dispatchNextCoWorkRun(f.mastra, f.repo, f.stopping.signal);
+
+        expect(f.repo.getRun(owner, failed.id)).toMatchObject({ status: 'failed', errorCode: 'SCHEDULE_FAILED' });
+        expect(f.repo.getRun(owner, next.id)?.status).toBe('running');
+        expect(f.schedules.run).toHaveBeenCalledTimes(2);
+    });
+
+    it('onAbort_停止時に現在の実行だけを中断し次の配送や再登録を行わない', async () => {
+        const task = f.createTask('現在');
+        const run = await runCoWorkTaskNow(f.mastra, f.repo, owner, task.id, f.stopping.signal);
+        const ctx = f.context(f.repo.getScheduleId(owner, task.id)!);
+        expect(await f.hooks.prepare!(ctx)).toEqual({ prompt: task.prompt });
+        const queued = f.repo.enqueue(owner, f.createTask('後続').id)!;
+        f.stopping.abort();
+        f.schedules.update.mockClear();
+
+        await f.hooks.onAbort!({ ...ctx, runId: 'agent-run', effective: { prompt: task.prompt } });
+
+        expect(f.repo.getRun(owner, run!.id)).toMatchObject({ status: 'failed', errorCode: 'INTERRUPTED' });
+        expect(f.repo.getRun(owner, queued.id)?.status).toBe('queued');
+        expect(f.schedules.run).toHaveBeenCalledTimes(1);
+        expect(f.schedules.update).not.toHaveBeenCalled();
+    });
+
+    it('requeueUndeliveredCoWorkRun_停止時に配送済みで未開始の実行を待ち行列へ戻す', async () => {
+        const task = f.createTask('未開始');
+        const run = await runCoWorkTaskNow(f.mastra, f.repo, owner, task.id, f.stopping.signal);
+        f.stopping.abort();
+        requeueUndeliveredCoWorkRun(f.mastra, f.repo);
+
+        expect(await f.hooks.prepare!(f.context(f.repo.getScheduleId(owner, task.id)!))).toBeNull();
+        expect(f.repo.getRun(owner, run!.id)?.status).toBe('queued');
+    });
+
+    it('onError_モデルの時間切れを該当する実行に記録する', async () => {
+        const task = f.createTask('時間切れ');
+        const run = await runCoWorkTaskNow(f.mastra, f.repo, owner, task.id, f.stopping.signal);
+        const ctx = f.context(f.repo.getScheduleId(owner, task.id)!);
+        await f.hooks.prepare!(ctx);
+        const error = new Error('時間切れ');
+        error.name = 'MastraTimeoutError';
+        await f.hooks.onError!({ ...ctx, phase: 'run', error });
+
+        expect(f.repo.getRun(owner, run!.id)).toMatchObject({ status: 'failed', errorCode: 'TIMEOUT' });
     });
 });

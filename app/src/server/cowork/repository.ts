@@ -296,20 +296,36 @@ export class CoWorkRepository {
         }).immediate();
     }
 
-    runningForTask(owner: string, taskId: string) {
-        const row = this.db.prepare<[string, string], RunRow>(`
-            SELECT owner, data, lease_until FROM cowork_runs
-            WHERE owner = ? AND task_id = ? AND status = 'running' LIMIT 1
-        `).get(owner, taskId);
+    private findRunning(owner: string, id: string) {
+        const row = this.db.prepare<[string, string], TaskRow>(`
+            SELECT data FROM cowork_runs WHERE owner = ? AND id = ? AND status = 'running'
+        `).get(owner, id);
         return row ? JSON.parse(row.data) as ScheduledPromptRun : undefined;
     }
 
-    finishRunningForTask(owner: string, taskId: string, outcome: Outcome, now = new Date()) {
+    finishRunning(owner: string, id: string, outcome: Outcome, now = new Date()) {
         return this.db.transaction(() => {
-            const run = this.runningForTask(owner, taskId);
-            if (!run) return undefined;
+            const run = this.findRunning(owner, id);
+            if (!run) return false;
             this.finishRun(owner, run, outcome, now);
-            return { ...run, ...outcome, finishedAt: now.toISOString() };
+            return true;
+        }).immediate();
+    }
+
+    requeueUnstartedRun(owner: string, id: string, now = new Date()) {
+        return this.db.transaction(() => {
+            const run = this.findRunning(owner, id);
+            if (!run) return;
+            const task = this.findTask(owner, run.taskId);
+            if (!task || (run.trigger === 'scheduled' && !task.enabled)) {
+                this.finishRun(owner, run, {
+                    status: 'skipped',
+                    errorCode: task ? 'TASK_DISABLED' : 'TASK_DELETED',
+                    errorMessage: task ? '実行開始前にタスクが無効になりました。' : '実行開始前にタスクが削除されました。'
+                }, now);
+                return;
+            }
+            this.saveRun(owner, { ...run, status: 'queued' });
         }).immediate();
     }
 
@@ -400,12 +416,8 @@ export class CoWorkRepository {
 
     complete(owner: string, id: string, outcome: Outcome, now = new Date()) {
         return this.db.transaction(() => {
-            const row = this.db.prepare<[string, string], RunRow>(`
-                SELECT data, lease_until FROM cowork_runs
-                WHERE owner = ? AND id = ? AND status = 'running'
-            `).get(owner, id);
-            if (!row) return;
-            const run = JSON.parse(row.data) as ScheduledPromptRun;
+            const run = this.findRunning(owner, id);
+            if (!run) return;
             this.skipOverlap(owner, run, now);
             this.finishRun(owner, run, outcome, now);
         }).immediate();
