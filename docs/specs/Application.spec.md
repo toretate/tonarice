@@ -9,6 +9,7 @@
 
 * デスクトップ実行環境は Electron 45 系。Web クライアントと API は Nuxt 4、Vue 3、Vite 8、TypeScript 6 を使用する。
 * 開発と Nuxt サーバーの実行には Node.js 26.13.1 以降の 26 LTS 系を使用する。
+* `npm run dev:electron` はローカルの Nuxt 開発サーバーを再利用し、起動していなければ立ち上げる。Nitro の `/api/ping` と画面 URL の応答を確認してから Electron を起動する。
 * マスコット描画は WebGL を利用してアニメーション処理などができるようにする
 * Electron が利用できる環境では、マスコット画面の背景透過のため Electron ベースのアプリケーションとする
 * マスコットとチャットウィンドウは背景透過処理や、半透明処理を実装する
