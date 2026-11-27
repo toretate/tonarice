@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { CoWorkApiError, requestCoWork, type CoWorkData } from './cowork-api';
 import { useCoWorkPolling } from './useCoWorkPolling';
 import CoWorkPairing from './CoWorkPairing.vue';
+import CoWorkSettings from './CoWorkSettings.vue';
 import { coworkImportMaxBytes } from '../../types/cowork-desktop';
 import type {
     ScheduleRule,
@@ -24,7 +25,7 @@ const needsLogin = ref(false);
 const importMessage = ref('');
 const showForm = ref(false);
 const editingId = ref<string | null>(null);
-const activeSection = ref<'overview' | 'schedule'>('overview');
+const activeSection = ref<'overview' | 'schedule' | 'settings'>('overview');
 const desktopPairing = ref(false);
 onMounted(() => { desktopPairing.value = Boolean(window.electronAPI?.pairCoWork); });
 const pendingTaskIds = computed(() => new Set(runs.value
@@ -303,6 +304,17 @@ const importLegacy = (event: Event) => {
                     <span class="sidebar-label">スケジュール</span>
                     <span v-if="tasks.length > 0" class="nav-count">{{ tasks.length }}</span>
                 </button>
+                <button
+                    type="button"
+                    class="nav-item"
+                    aria-label="設定"
+                    :class="{ active: activeSection === 'settings' }"
+                    :aria-current="activeSection === 'settings' ? 'page' : undefined"
+                    @click="activeSection = 'settings'"
+                >
+                    <i class="pi pi-cog" aria-hidden="true"></i>
+                    <span class="sidebar-label">設定</span>
+                </button>
             </nav>
 
             <div class="sidebar-status">
@@ -314,7 +326,7 @@ const importLegacy = (event: Event) => {
         <section class="cowork-content">
             <p v-if="loadError" class="notice" role="status">{{ loadError }}</p>
             <a v-if="needsLogin && !desktopPairing" href="/api/auth/login">Google でログイン</a>
-            <CoWorkPairing v-if="activeSection === 'overview' && readOnly" :scope="scope" @paired="loadData" />
+            <CoWorkPairing v-if="activeSection !== 'schedule' && readOnly" :scope="scope" @paired="loadData" />
             <p class="live-message" aria-live="polite">{{ errorMessage || importMessage }}</p>
 
             <template v-if="activeSection === 'overview'">
@@ -348,13 +360,16 @@ const importLegacy = (event: Event) => {
                         <div>
                             <strong>{{ run.taskName }}</strong>
                             <p>{{ run.resultText || run.errorMessage || '処理中です。' }}</p>
+                            <button v-if="run.errorCode === 'AI_NOT_CONFIGURED'" type="button" class="text-button" @click="activeSection = 'settings'">
+                                AI 設定を開く
+                            </button>
                         </div>
                         <time :datetime="run.startedAt">{{ formatDateTime(run.startedAt) }}</time>
                     </article>
                 </section>
             </template>
 
-            <template v-else>
+            <template v-else-if="activeSection === 'schedule'">
                 <header class="content-header schedule-header">
                     <div>
                         <p class="section-context">⏱ スケジュール</p>
@@ -497,9 +512,13 @@ const importLegacy = (event: Event) => {
                             <span class="run-status" :data-status="run.status">{{ statusLabel(run.status) }}</span>
                         </header>
                         <p class="result-text">{{ run.resultText || run.errorMessage || '処理中です。' }}</p>
+                        <button v-if="run.errorCode === 'AI_NOT_CONFIGURED'" type="button" class="text-button" @click="activeSection = 'settings'">
+                            AI 設定を開く
+                        </button>
                     </article>
                 </section>
             </template>
+            <CoWorkSettings v-else :scope="scope" @reload-account="loadData" />
         </section>
     </main>
 </template>
@@ -563,7 +582,7 @@ const importLegacy = (event: Event) => {
     justify-content: flex-start;
 }
 
-.workspace-heading div {
+.workspace-copy {
     display: grid;
 }
 
@@ -1064,6 +1083,52 @@ fieldset {
 }
 
 @container chat-panel (max-width: 520px) {
+    .cowork-panel {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
+    }
+
+    .cowork-sidebar,
+    .cowork-sidebar:is(:hover, :focus-within) {
+        position: static;
+        inline-size: auto;
+        padding: 6px 8px;
+        border-inline-end: 0;
+        border-block-end: 1px solid var(--cowork-border);
+        box-shadow: none;
+    }
+
+    .cowork-sidebar :is(.workspace-heading, .new-task-button, .sidebar-status, .nav-count),
+    .cowork-sidebar:is(:hover, :focus-within) :is(.sidebar-status, .nav-count) {
+        display: none;
+    }
+
+    .cowork-sidebar nav {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .cowork-sidebar .nav-item,
+    .cowork-sidebar:is(:hover, :focus-within) .nav-item {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 3px;
+        inline-size: 100%;
+        min-inline-size: 0;
+        padding: 5px 2px;
+        place-items: center;
+        text-align: center;
+        white-space: normal;
+    }
+
+    .cowork-sidebar .sidebar-label {
+        display: inline;
+        font-size: 0.75rem;
+    }
+
+    .cowork-content {
+        grid-column: 1;
+        padding: 12px;
+    }
+
     .content-header,
     .task-card-heading,
     .result-card header {

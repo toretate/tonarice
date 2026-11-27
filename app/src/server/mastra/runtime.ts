@@ -33,7 +33,7 @@ export function getMastraRuntime(): Mastra {
         shutdownController = new AbortController();
         const signal = shutdownController.signal;
         const coworkRepository = new CoWorkRepository(getDB());
-        const coworkAgent = createCoWorkAgent(shutdownController.signal);
+        const coworkAgent = createCoWorkAgent(signal, coworkRepository);
         runtime = new Mastra({
             agents: {
                 [MASCOT_AGENT_ID]: createMascotAgent(),

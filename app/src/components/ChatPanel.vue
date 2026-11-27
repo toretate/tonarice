@@ -30,6 +30,7 @@ import CoWorkPanel from './cowork/CoWorkPanel.vue';
 import { useCoWorkUnread } from './cowork/useCoWorkUnread';
 import type { ConversationKind } from '../types/scheduled-prompt-task';
 
+const emit = defineEmits<{ conversationKindChange: [kind: ConversationKind] }>();
 const inputText = ref('');
 const storedConversationKind = typeof window === 'undefined'
     ? null
@@ -52,6 +53,7 @@ const memoStore = useMemoStore();
 const musicStore = useMusicStore();
 
 watch(conversationKind, (kind) => {
+    emit('conversationKindChange', kind);
     if (typeof window !== 'undefined') {
         window.localStorage.setItem('tonarice-conversation-kind', kind);
     }
@@ -710,6 +712,7 @@ const focusWindow = () => {
 };
 
 onMounted(() => {
+    emit('conversationKindChange', conversationKind.value);
     window.addEventListener('storage', handleConversationStorage);
 });
 </script>

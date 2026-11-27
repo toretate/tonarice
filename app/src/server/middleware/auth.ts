@@ -175,6 +175,7 @@ export default defineEventHandler(async (event) => {
     // デスクトップ接続用の短期セッションは CoWork のデータ操作に限定する。
     if (token.startsWith('cowork_')) {
         const allowed = url === '/api/cowork' || url === '/api/cowork/activity' || url === '/api/cowork/import' ||
+            url === '/api/cowork/settings' || url === '/api/cowork/models' ||
             url === '/api/cowork/tasks' || url.startsWith('/api/cowork/tasks/');
         if (!allowed || !authHeader?.startsWith('Bearer ')) throw createError({ statusCode: 403 });
         const owner = findCoWorkDesktopOwner(token);

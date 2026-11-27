@@ -87,7 +87,10 @@ describe('CoWork の Mastra スケジュール', () => {
         const task = f.createTask('現在');
         const run = await runCoWorkTaskNow(f.mastra, f.repo, owner, task.id, f.stopping.signal);
         const ctx = f.context(f.repo.getScheduleId(owner, task.id)!);
-        expect(await f.hooks.prepare!(ctx)).toEqual({ prompt: task.prompt });
+        expect(await f.hooks.prepare!(ctx)).toMatchObject({
+            prompt: task.prompt,
+            providerOptions: { tonariceCowork: { runId: run?.id } }
+        });
         const queued = f.repo.enqueue(owner, f.createTask('後続').id)!;
         f.stopping.abort();
         f.schedules.update.mockClear();

@@ -1,8 +1,11 @@
-import { Agent } from '@mastra/core/agent';
+import { Agent, type AgentExecutionOptionsBase } from '@mastra/core/agent';
+import { resolveCoWorkAiSettings } from '../cowork/ai-settings';
+import type { CoWorkRepository } from '../cowork/repository';
 import { resolveMastraChatModel } from './model-resolver';
 import { executionTimeout } from '../cowork/schedule';
 
 export const COWORK_AGENT_ID = 'cowork-agent';
+const runOption = 'tonariceCowork';
 
 export class CoWorkAgentConfigError extends Error {
     constructor() {
@@ -11,11 +14,24 @@ export class CoWorkAgentConfigError extends Error {
     }
 }
 
-/**
- * CoWork 定期実行専用Agentを生成する。各回のモデルを環境設定から解決し、会話用ツールは公開しない。
- */
-export function createCoWorkAgent(shutdownSignal: AbortSignal) {
-    return new Agent({
+export function prepareCoWorkAgentInput(prompt: string, runId: string) {
+    return { prompt, providerOptions: { [runOption]: { runId } } };
+}
+
+function resolveCoWorkModel(owner: string) {
+    try {
+        const { engine, model, apiKey, lmstudioEndpoint } = resolveCoWorkAiSettings(owner);
+        if (engine && model && (engine === 'lmstudio' || apiKey)) {
+            return resolveMastraChatModel({ engine, model, apiKey, lmstudioEndpoint }).resolvedModel as never;
+        }
+    } catch {
+        // モデルの初期化エラーに資格情報が含まれないよう、固定のエラーに置き換える。
+    }
+    throw new CoWorkAgentConfigError();
+}
+
+function getCoWorkAgentConfig(shutdownSignal: AbortSignal) {
+    return {
         id: COWORK_AGENT_ID,
         name: 'Tonarice CoWork Agent',
         instructions: () => {
@@ -29,20 +45,7 @@ export function createCoWorkAgent(shutdownSignal: AbortSignal) {
             ].join('\n');
         },
         model: () => {
-            const engine = process.env.COWORK_AI_ENGINE?.trim();
-            const model = process.env.COWORK_AI_MODEL?.trim();
-            const apiKey = process.env.COWORK_AI_API_KEY?.trim() || '';
-            const lmstudioEndpoint = process.env.COWORK_LMSTUDIO_ENDPOINT?.trim() || 'http://127.0.0.1:1234/v1';
-            if (!model || (engine !== 'gemini' && engine !== 'openai' && engine !== 'lmstudio')
-                || (engine !== 'lmstudio' && !apiKey)) {
-                throw new CoWorkAgentConfigError();
-            }
-
-            try {
-                return resolveMastraChatModel({ engine, model, apiKey, lmstudioEndpoint }).resolvedModel as never;
-            } catch {
-                throw new CoWorkAgentConfigError();
-            }
+            throw new CoWorkAgentConfigError();
         },
         defaultOptions: {
             abortSignal: shutdownSignal,
@@ -52,5 +55,33 @@ export function createCoWorkAgent(shutdownSignal: AbortSignal) {
             }
         },
         maxRetries: 0
-    });
+    };
+}
+
+class CoWorkAgent extends Agent {
+    constructor(shutdownSignal: AbortSignal, private readonly repository: Pick<CoWorkRepository, 'activeRunLease'>) {
+        super(getCoWorkAgentConfig(shutdownSignal));
+    }
+
+    // Mastra のスケジュール worker は providerOptions を渡す。実行 ID を照合してから、
+    // この呼び出し専用のモデルを選び、内部用の値を providerOptions から取り除く。
+    override generate = (async (messages: Parameters<Agent['generate']>[0], options: AgentExecutionOptionsBase<unknown> = {}) => {
+        const { [runOption]: dispatch, ...providerOptions } = options.providerOptions ?? {};
+        const activeRun = this.repository.activeRunLease();
+        if (!dispatch || typeof dispatch !== 'object' || !('runId' in dispatch)
+            || !activeRun || dispatch.runId !== activeRun.id || Date.parse(activeRun.lease_until) <= Date.now()) {
+            throw new Error('CoWork の実行を確認できませんでした。');
+        }
+
+        return super.generate(messages, {
+            ...options,
+            providerOptions,
+            model: () => resolveCoWorkModel(activeRun.owner)
+        });
+    }) as Agent['generate'];
+}
+
+/** CoWork 定期実行専用 Agent を生成する。 */
+export function createCoWorkAgent(shutdownSignal: AbortSignal, repository: Pick<CoWorkRepository, 'activeRunLease'>) {
+    return new CoWorkAgent(shutdownSignal, repository);
 }

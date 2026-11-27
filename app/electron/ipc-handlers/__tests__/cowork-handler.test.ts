@@ -18,5 +18,11 @@ describe('CoWork Electron IPC', () => {
         expect(isCoWorkRequestAllowed({ path, method: 'GET' })).toBe(false);
         expect(isCoWorkRequestAllowed({ path: '/../auth/status', method: 'GET' })).toBe(false);
         expect(isCoWorkRequestAllowed({ path: '/pair', method: 'POST' })).toBe(false);
+        expect(isCoWorkRequestAllowed({ path: '/settings', method: 'GET' })).toBe(true);
+        expect(isCoWorkRequestAllowed({ path: '/settings', method: 'PUT' })).toBe(true);
+        expect(isCoWorkRequestAllowed({ path: '/settings', method: 'DELETE' })).toBe(true);
+        expect(isCoWorkRequestAllowed({ path: '/settings', method: 'POST' })).toBe(false);
+        expect(isCoWorkRequestAllowed({ path: '/models', method: 'POST' })).toBe(true);
+        expect(isCoWorkRequestAllowed({ path: '/models', method: 'GET' })).toBe(false);
     });
 });

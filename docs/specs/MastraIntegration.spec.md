@@ -53,10 +53,10 @@ MastraをAIエージェントのオーケストレーション基盤として段
 
 - `@mastra/core`は1.83.0、`@mastra/memory`は1.41.1、`@mastra/libsql`は1.30.0、`@lmstudio/sdk`は2.1.0、AI SDKは7系を使用する。
 - Agent IDは通常会話の`mascot-agent`と、定期実行専用の`cowork-agent`とする。
-- CoWork Agentは会話用ツールとMemoryを持たず、サーバー環境の`COWORK_AI_ENGINE`・`COWORK_AI_MODEL`・資格情報から実行ごとにモデルを解決する。結果は CoWork の実行履歴に保存する。
+- CoWork Agentは会話用ツールとMemoryを持たない。タスク所有者の CoWork 設定を優先してモデルを選び、各実行でその所有者のメイン設定に登録されたキーを優先して使用する。結果は CoWork の実行履歴に保存する。
 - 天気、Web検索、概算位置、音量、アプリ起動、タスク、メモのツールをリクエスト設定に応じてAgentへ動的に登録する。Workflowは登録しない。
 - 現行処理と同じく、最初は全文を返す`agent.generate()`を使用する。
-- 通常会話の`mascot-agent`のモデルは固定せず、実行ごとのRequest Contextから解決する。`cowork-agent`は前項の CoWork 用環境設定を各実行時に読む。
+- 通常会話の`mascot-agent`のモデルは固定せず、実行ごとのRequest Contextから解決する。
 - APIキー、認証トークン、LM Studioの資格情報をRequest Contextへ直接格納しない。
 - APIキーを使って生成したモデルオブジェクトをリクエスト単位で渡し、認証情報を持つモデルをリクエスト間でキャッシュしない。
 - OpenAIはResponses APIを使用する。制限付きキーには`api.responses.write`権限が必要である。

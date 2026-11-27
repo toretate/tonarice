@@ -31,7 +31,10 @@ export function requireJson(event: H3Event) {
     }
 }
 
-export async function readCoWorkBody<T>(event: H3Event, schema: ZodType<T>, limit = 128 * 1024): Promise<T> {
+export async function readCoWorkBody<T>(
+    event: H3Event, schema: ZodType<T>, limit = 128 * 1024,
+    invalidMessage = '定期実行データの入力内容を確認してください。'
+): Promise<T> {
     requireJson(event);
     const tooLarge = () => createError({ statusCode: 413, message: 'データのサイズが上限を超えています。' });
     if (Number(getHeader(event, 'content-length')) > limit) throw tooLarge();
@@ -62,7 +65,7 @@ export async function readCoWorkBody<T>(event: H3Event, schema: ZodType<T>, limi
         throw createError({ statusCode: 400, message: 'JSON の形式が正しくありません。' });
     }
     const parsed = schema.safeParse(raw);
-    if (!parsed.success) throw createError({ statusCode: 400, message: '定期実行データの入力内容を確認してください。' });
+    if (!parsed.success) throw createError({ statusCode: 400, message: invalidMessage });
     return parsed.data;
 }
 

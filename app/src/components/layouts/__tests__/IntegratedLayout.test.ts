@@ -60,6 +60,35 @@ describe('IntegratedLayout.vue - 統合ウィンドウのテスト', () => {
 
     afterEach(() => vi.unstubAllGlobals());
 
+    it('IntegratedLayout_会話種別の切り替えで全幅表示にしチャットの分割幅を復元する', async () => {
+        const configStore = useConfigStore();
+        configStore.isLoaded = true;
+        configStore.windowMode = 'integrated';
+        configStore.integratedChatRatio = 0.42;
+        const key = 'tonarice-conversation-kind';
+        const previous = window.localStorage.getItem(key);
+        window.localStorage.setItem(key, 'chat');
+        const wrapper = mount(IntegratedLayout);
+
+        try {
+            const layout = wrapper.get('.integrated-container');
+            const chat = wrapper.get<HTMLElement>('.chat-section').element;
+            const mode = wrapper.get('#conversation-kind');
+            expect(layout.classes()).not.toContain('is-cowork');
+
+            await mode.setValue('cowork');
+            expect(layout.classes()).toContain('is-cowork');
+
+            await mode.setValue('chat');
+            expect(layout.classes()).not.toContain('is-cowork');
+            expect(chat.style.getPropertyValue('--integrated-chat-size')).toBe('42.00%');
+        } finally {
+            wrapper.unmount();
+            if (previous === null) window.localStorage.removeItem(key);
+            else window.localStorage.setItem(key, previous);
+        }
+    });
+
     it('loadHistory_履歴取得失敗時の再試行ボタンから復帰すること', async () => {
         const configStore = useConfigStore();
         configStore.isLoaded = true;

@@ -1,7 +1,7 @@
 import type { Mastra } from '@mastra/core/mastra';
 import type { ScheduleHooks, ScheduleTriggerInfo } from '@mastra/core/schedules';
 import type { ScheduledPromptRun } from '../../types/scheduled-prompt-task';
-import { COWORK_AGENT_ID } from '../mastra/cowork-agent';
+import { COWORK_AGENT_ID, prepareCoWorkAgentInput } from '../mastra/cowork-agent';
 import {
     acceptCoWorkDispatch, type ClaimedRun, dispatchNextCoWorkRun, ensureQueueRecoverySchedule,
     queueRecoveryScheduleId, recoverCoWorkQueueLease, recoverCoWorkSchedulePublication
@@ -13,11 +13,7 @@ import { cleanCoWorkResult } from './result';
 type RunOutcome = Parameters<CoWorkRepository['finishRunning']>[2];
 
 function logRunStart(trigger: ScheduledPromptRun['trigger']) {
-    console.info('[CoWork] AI 実行を開始します。', {
-        engine: process.env.COWORK_AI_ENGINE?.trim() || 'unknown',
-        model: process.env.COWORK_AI_MODEL?.trim() || 'unknown',
-        trigger
-    });
+    console.info('[CoWork] AI 実行を開始します。', { trigger });
 }
 
 async function completeRun(mastra: Mastra, repo: CoWorkRepository, claim: ClaimedRun, outcome: RunOutcome, signal: AbortSignal) {
@@ -71,7 +67,7 @@ export function createCoWorkScheduleHooks(repo: CoWorkRepository, signal: AbortS
                 if (!accepted) return null;
                 runsByTrigger.set(trigger, accepted.claim);
                 logRunStart(accepted.claim.run.trigger);
-                return { prompt: accepted.prompt };
+                return prepareCoWorkAgentInput(accepted.prompt, accepted.claim.run.id);
             }
             const identity = resolveTaskIdentity(schedule, repo);
             if (!identity) return null;
@@ -98,7 +94,7 @@ export function createCoWorkScheduleHooks(repo: CoWorkRepository, signal: AbortS
                 return null;
             }
             logRunStart('scheduled');
-            return { prompt: prepared.task.prompt };
+            return prepareCoWorkAgentInput(prepared.task.prompt, run.id);
         },
         onFinish: async ({ mastra, agentId, schedule, trigger, outcome, result }) => {
             if (agentId !== COWORK_AGENT_ID) return;

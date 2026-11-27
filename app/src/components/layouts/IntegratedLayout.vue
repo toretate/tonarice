@@ -11,6 +11,7 @@ import MusicWidget from '../MusicWidget.vue';
 import { useMusicStore } from '../../store/music';
 import { storeToRefs } from 'pinia';
 import { resolveMascotImageUrl } from '../../utils/mascot-image-url';
+import type { ConversationKind } from '../../types/scheduled-prompt-task';
 
 const configStore = useConfigStore();
 const taskStore = useTaskStore();
@@ -33,6 +34,7 @@ const {
 const { showTaskWidget } = storeToRefs(taskStore);
 const { showMemoWidget } = storeToRefs(memoStore);
 const { showMusicWidget, playlistExpanded, contentPanelExpanded } = storeToRefs(musicStore);
+const conversationKind = ref<ConversationKind>('chat');
 
 // チャット欄の幅比率の調整（スプリッターのドラッグ）
 const MIN_CHAT_RATIO = 0.2;
@@ -142,6 +144,7 @@ const integratedBackgroundStyle = computed(() => {
         class="integrated-container"
         :class="{
             'is-resizing': isResizing,
+            'is-cowork': conversationKind === 'cowork',
             'is-mascot-hidden': windowMode !== 'compact' && !mascotVisible
         }"
     >
@@ -168,7 +171,7 @@ const integratedBackgroundStyle = computed(() => {
             }"
             :style="chatSectionStyle"
         >
-            <ChatPanel />
+            <ChatPanel @conversation-kind-change="conversationKind = $event" />
         </div>
         
         <!-- フローティングウィジェット用絶対配置レイヤー（Flexレイアウト干渉防止） -->
@@ -337,12 +340,12 @@ const integratedBackgroundStyle = computed(() => {
 }
 
 /* v-showで状態を保持したまま、非表示時はチャットだけを全画面にする */
-.integrated-container.is-mascot-hidden .mascot-section,
-.integrated-container.is-mascot-hidden .section-splitter {
+.integrated-container:is(.is-mascot-hidden, .is-cowork) .mascot-section,
+.integrated-container:is(.is-mascot-hidden, .is-cowork) .section-splitter {
     display: none;
 }
 
-.integrated-container.is-mascot-hidden .chat-section {
+.integrated-container:is(.is-mascot-hidden, .is-cowork) .chat-section {
     flex: 1 1 100%;
     width: 100%;
 }

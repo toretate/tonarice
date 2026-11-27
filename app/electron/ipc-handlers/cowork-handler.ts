@@ -6,6 +6,8 @@ const runPath = /^\/tasks\/[\da-f-]{36}\/run$/i;
 
 export function isCoWorkRequestAllowed({ method, path }: CoWorkDesktopRequest) {
     if (typeof path !== 'string') return false;
+    if (path === '/settings') return method === 'GET' || method === 'PUT' || method === 'DELETE';
+    if (path === '/models') return method === 'POST';
     if (method === 'GET') return path === '' || path === '/activity';
     if (method === 'POST') return path === '/tasks' || path === '/import' || runPath.test(path);
     return (method === 'PATCH' || method === 'DELETE') && taskPath.test(path);
