@@ -1,6 +1,6 @@
 import { createError } from 'h3';
 import { getBetterAuth } from './better-auth-runtime';
-import { confirmCliLogin } from './cli-login';
+import { confirmCliLogin, failCliLogin } from './cli-login';
 
 export function parseLoginState(value: unknown): string {
     if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(value)) {
@@ -18,16 +18,23 @@ export async function beginGoogleLogin(state?: string, requestOrigin?: string, c
     }
 
     const callbackURL = state ? `/api/auth/cli/finish?state=${state}` : '/';
-    const response = await auth.api.signInSocial({
-        body: {
-            provider: 'google',
-            callbackURL,
-            errorCallbackURL: callbackURL
-        },
-        headers: new Headers({ origin }),
-        asResponse: true
-    });
-    return redirectToGoogle(response, state ? 303 : 302);
+    try {
+        const response = await auth.api.signInSocial({
+            body: {
+                provider: 'google',
+                callbackURL,
+                errorCallbackURL: callbackURL
+            },
+            headers: new Headers({ origin }),
+            asResponse: true
+        });
+        const redirect = await redirectToGoogle(response, state ? 303 : 302);
+        if (state && redirect.status !== 303) failCliLogin(state);
+        return redirect;
+    } catch (error) {
+        if (state) failCliLogin(state);
+        throw error;
+    }
 }
 
 export async function redirectToGoogle(response: Response, status: 302 | 303) {
