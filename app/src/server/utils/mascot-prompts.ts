@@ -1,7 +1,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import { APP_ROOT, USERS_DIR } from './paths';
-import { safeWriteFileSync } from './fs-helpers';
+import { useMascotFiles, type MascotFiles } from './mascot-file-transaction';
+import { reconcileManualPromptSave } from '../mastra/companion-state';
 
 export const MASCOT_PROMPT_NAMES = ['identity', 'soul', 'user', 'agents', 'memory'] as const;
 const EXPLICIT_CONFIG_MARKER_NAMES = ['identity', 'soul', 'user', 'agents'] as const;
@@ -38,7 +40,7 @@ export function readUserMascotPrompts(
     userId: string,
     mascotId: string,
     options?: { allowLegacyLocalFallback?: boolean }
-): { prompts: MascotPrompts; configured: boolean } | null {
+) {
     if (!isOwnedMascot(userId, mascotId)) {
         return null;
     }
@@ -46,7 +48,11 @@ export function readUserMascotPrompts(
     const userDir = path.join(USERS_DIR, userId, 'mascots', mascotId);
     const legacyDir = path.join(APP_ROOT, 'mascots', mascotId);
     const allowLegacyFallback = options?.allowLegacyLocalFallback === true;
+    const files = useMascotFiles(userDir, value => value);
+    return resolveMascotPrompts(files, legacyDir, allowLegacyFallback);
+}
 
+function resolveMascotPrompts(files: MascotFiles, legacyDir: string, allowLegacyFallback: boolean) {
     const prompts: MascotPrompts = {
         identity: '',
         soul: '',
@@ -58,10 +64,10 @@ export function readUserMascotPrompts(
     let configured = false;
     for (const name of MASCOT_PROMPT_NAMES) {
         const isMarker = (EXPLICIT_CONFIG_MARKER_NAMES as readonly string[]).includes(name);
-        const userFile = path.join(userDir, `${name}.md`);
-        if (fs.existsSync(userFile)) {
+        const content = files[`${name}.md`];
+        if (content !== undefined) {
             if (isMarker) configured = true;
-            prompts[name] = fs.readFileSync(userFile, 'utf8');
+            prompts[name] = content;
             continue;
         }
         if (allowLegacyFallback) {
@@ -73,17 +79,21 @@ export function readUserMascotPrompts(
         }
     }
 
-    return { prompts, configured };
+    const revision = createHash('sha256').update(JSON.stringify(prompts)).digest('hex');
+    return { prompts, configured, revision };
 }
 
 /**
  * 認証済みユーザーが所有するマスコットの OpenClaw プロンプト全項目をユーザー別保存先へ保存する。
  * 所有していない場合は null を返す。
  */
+export class MascotPromptConflict extends Error {}
+
 export function writeUserMascotPrompts(
     userId: string,
     mascotId: string,
-    prompts: Partial<Record<MascotPromptName, string>>
+    prompts: Partial<Record<MascotPromptName, string>>,
+    options?: { expectedRevision?: string; allowLegacyLocalFallback?: boolean }
 ): MascotPrompts | null {
     if (!isOwnedMascot(userId, mascotId)) {
         return null;
@@ -98,11 +108,18 @@ export function writeUserMascotPrompts(
         memory: ''
     };
 
-    for (const name of MASCOT_PROMPT_NAMES) {
-        const value = typeof prompts[name] === 'string' ? prompts[name] : '';
-        saved[name] = value;
-        safeWriteFileSync(path.join(userDir, `${name}.md`), value);
-    }
+    useMascotFiles(userDir, (files, commit) => {
+        if (options?.expectedRevision && resolveMascotPrompts(
+            files, path.join(APP_ROOT, 'mascots', mascotId), options.allowLegacyLocalFallback === true
+        ).revision !== options.expectedRevision) throw new MascotPromptConflict();
+        const next: MascotFiles = {};
+        for (const name of MASCOT_PROMPT_NAMES) {
+            const value = typeof prompts[name] === 'string' ? prompts[name] : '';
+            saved[name] = value;
+            next[`${name}.md`] = value;
+        }
+        commit(reconcileManualPromptSave(files, next));
+    });
 
     return saved;
 }
@@ -122,27 +139,17 @@ export function writeUserMascotMemory(
     memory: string,
     options?: { expectedCurrentMemory?: string; allowLegacyLocalFallback?: boolean }
 ): WriteMemoryResult {
-    const current = readUserMascotPrompts(userId, mascotId, {
-        allowLegacyLocalFallback: options?.allowLegacyLocalFallback
-    });
-    if (!current) {
+    if (!isOwnedMascot(userId, mascotId)) {
         return { status: 'not_found' };
     }
 
-    if (
-        options?.expectedCurrentMemory !== undefined
-        && current.prompts.memory !== options.expectedCurrentMemory
-    ) {
-        return { status: 'conflict', prompts: current.prompts, configured: current.configured };
-    }
-
     const userDir = path.join(USERS_DIR, userId, 'mascots', mascotId);
-    safeWriteFileSync(path.join(userDir, 'memory.md'), memory);
-
-    return {
-        status: 'saved',
-        memory,
-        prompts: { ...current.prompts, memory },
-        configured: current.configured
-    };
+    return useMascotFiles(userDir, (files, commit) => {
+        const current = resolveMascotPrompts(files, path.join(APP_ROOT, 'mascots', mascotId), options?.allowLegacyLocalFallback === true);
+        if (options?.expectedCurrentMemory !== undefined && current.prompts.memory !== options.expectedCurrentMemory) {
+            return { status: 'conflict', ...current };
+        }
+        commit(reconcileManualPromptSave(files, { 'memory.md': memory }));
+        return { status: 'saved', memory, ...current, prompts: { ...current.prompts, memory } };
+    });
 }

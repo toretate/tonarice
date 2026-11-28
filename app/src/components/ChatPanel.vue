@@ -252,6 +252,10 @@ const {
     handleKeyDown,
     pendingAttachments,
     pendingToolApproval,
+    companionNotice,
+    companionNoticeError,
+    isUndoingCompanion,
+    undoCompanionUpdate,
     respondToToolApproval,
     attachFiles,
     removeAttachment
@@ -743,6 +747,11 @@ onMounted(() => {
             <MemoWidget />
         </div>
         <template v-else-if="conversationKind === 'chat'">
+            <div v-if="companionNotice && companionNotice.mascotId === activeMascot?.id && !isSecretMode" class="history-error" role="status">
+                <span>{{ companionNoticeError || '記憶を更新しました。' }}</span>
+                <button type="button" :disabled="isUndoingCompanion" @click="undoCompanionUpdate">元に戻す</button>
+                <button type="button" @click="companionNotice = undefined">閉じる</button>
+            </div>
             <div v-if="historyError" class="history-error" role="alert">
                 <span>{{ historyError }}</span>
                 <button v-if="!isHistoryLoaded" type="button" :disabled="isHistoryLoading || isAiResponding" @click="loadHistory">再試行</button>

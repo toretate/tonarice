@@ -7,7 +7,7 @@ export type LegacyMascotPromptsPreview = {
 
 const PROMPT_KEYS: readonly MascotPromptKey[] = ['identity', 'soul', 'user', 'agents', 'memory'];
 
-export async function loadMascotPrompts(mascotId: string): Promise<{ prompts: MascotPrompts; configured: boolean }> {
+export async function loadMascotPrompts(mascotId: string): Promise<{ prompts: MascotPrompts; configured: boolean; revision?: string }> {
     const query = new URLSearchParams({ mascotId });
     const response = await fetch('/api/mascots/cli-prompts?' + query, { credentials: 'include', cache: 'no-store' });
     if (!response.ok) throw new Error('サーバーからプロンプトを取得できませんでした。');
@@ -18,14 +18,15 @@ export async function loadMascotPrompts(mascotId: string): Promise<{ prompts: Ma
     return data;
 }
 
-export async function saveMascotPrompts(mascotId: string, prompts: MascotPrompts): Promise<void> {
+export async function saveMascotPrompts(mascotId: string, prompts: MascotPrompts, expectedRevision?: string): Promise<void> {
     const response = await fetch('/api/mascots/cli-prompts', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mascotId, prompts })
+        body: JSON.stringify({ mascotId, prompts, expectedRevision })
     });
-    if (!response.ok) throw new Error('サーバーにプロンプトを保存できませんでした。');
+    if (!response.ok) throw new Error(response.status === 409
+        ? '記憶またはプロンプトが更新されました。編集中の内容を控え、開き直してから保存してください。' : 'プロンプトを保存できませんでした。');
 }
 
 function readLegacyFromLocalStorage(mascotId: string): LegacyMascotPromptsPreview {

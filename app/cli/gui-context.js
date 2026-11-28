@@ -47,23 +47,19 @@ export function createGuiContext(client, options, output) {
         async prepare(mascot, modelOverride, privateMode = false) {
             if (!mascot?.id) throw new CliError('invalid_input', 'マスコットを選択してください。', 2);
             if (!privateMode && mascotId !== mascot.id) await load(mascot);
-            const [config, promptResult] = await Promise.all([client.config(), client.prompts(mascot.id)]);
+            const config = await client.config();
             const explicit = options.explicit || [];
             const engine = explicit.includes('--engine') ? options.chatConfig.engine : modelOverride ? mascot.aiConfig?.chat?.engine : config.selectedEngine || mascot.aiConfig?.chat?.engine || 'gemini';
             if (!['lmstudio', 'openai', 'gemini'].includes(engine)) throw new CliError('invalid_input', 'GUI のチャットエンジンは CLI で使用できません。', 2);
             const defaultModels = { openai: 'gpt-4o', gemini: 'gemini-1.5-flash', lmstudio: '' };
             const model = explicit.includes('--model') ? options.chatConfig.model : modelOverride ? mascot.aiConfig?.chat?.model : config[`${engine}Model`] || mascot.aiConfig?.chat?.model || defaultModels[engine];
-            let systemPrompt = mascot.profile ? `# Mascot Character Profile\n${mascot.profile}\n\n` : '';
-            for (const [name, title] of Object.entries({ identity: 'Mascot Identity', soul: 'Mascot Soul / Tone / Personality', user: 'User Context & Relations', agents: 'Mascot Rules & Action Guidelines', memory: 'Mascot Long-term Memory' })) {
-                if (promptResult.prompts?.[name]) systemPrompt += `# ${title}\n${promptResult.prompts[name]}\n\n`;
-            }
-            if (!systemPrompt.trim()) systemPrompt = 'あなたは対話型のAIデスクトップマスコットです。親しみやすく返答してください。';
-            if (explicit.includes('--system-prompt')) systemPrompt = options.chatConfig.systemPrompt;
+            const customPrompt = explicit.includes('--system-prompt');
+            const chatMode = customPrompt ? (privateMode ? 'secret_cli_override' : 'cli_override') : (privateMode ? 'secret' : 'normal');
             lastId = Math.max(Date.now(), lastId + 1);
             const userId = lastId;
             lastId++;
             return {
-                payload: { engine, model, systemPrompt, activeMascotId: mascot.id, ...(!privateMode ? { memorySessionId: sessionId, memoryUserMessageId: userId, memoryAssistantMessageId: lastId } : {}),
+                payload: { engine, model, promptVersion: 1, chatMode, ...(customPrompt ? { systemPrompt: options.chatConfig.systemPrompt } : {}), activeMascotId: mascot.id, ...(!privateMode ? { memorySessionId: sessionId, memoryUserMessageId: userId, memoryAssistantMessageId: lastId } : {}),
                     lmstudioEndpoint: explicit.includes('--lmstudio-endpoint') ? options.chatConfig.lmstudioEndpoint : config.lmstudioEndpoint,
                     temperature: config.temperature, frequencyPenalty: config.frequencyPenalty, repetitionPenalty: config.repetitionPenalty, maxOutputTokens: config.maxOutputTokens, enableThinking: config.enableThinking },
                 apiKey: engine === 'gemini' ? config.googleAiStudioApiKey : engine === 'openai' ? config.openaiApiKey : ''

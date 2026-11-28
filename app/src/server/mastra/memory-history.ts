@@ -1,6 +1,8 @@
 import type { Memory } from '@mastra/memory';
 import { createMemoryIdentity } from './memory-store';
 import { createChatSessionTitle } from '../../utils/chat-session-title';
+import { getChatDatabasePath } from './chat-sequence';
+import type { LearningMetadata } from './learning-jobs';
 
 export interface HistoryScope {
     userId: string;
@@ -28,9 +30,11 @@ export async function appendMemoryTurn(memory: Memory, scope: HistoryScope, turn
     message: string;
     reply: string;
     attachments?: unknown[];
+    learning?: LearningMetadata;
 }) {
     const { resource, thread } = createMemoryIdentity(scope.userId, scope.mascotId, scope.sessionId, scope.isSecret);
     const existing = await memory.getThreadById({ threadId: thread, resourceId: resource });
+    await getChatDatabasePath(memory);
     if (!existing) {
         const now = new Date();
         await memory.saveThread({ thread: {
@@ -38,11 +42,16 @@ export async function appendMemoryTurn(memory: Memory, scope: HistoryScope, turn
             title: createChatSessionTitle(turn.message), metadata: { sessionId: scope.sessionId }
         } });
     }
+    const savedAt = Date.now();
     const makeMessage = (id: number, role: 'user' | 'assistant', value: string) => ({
         id: memoryMessageId(scope, id), role, threadId: thread, resourceId: resource,
         createdAt: new Date(id), content: {
             format: 2 as const, parts: [{ type: 'text' as const, text: value }],
-            metadata: { displayId: id, ...(role === 'user' && turn.attachments?.length ? { attachments: turn.attachments } : {}) }
+            metadata: {
+                displayId: id, savedAt,
+                ...(role === 'user' && turn.attachments?.length ? { attachments: turn.attachments } : {}),
+                ...(role === 'user' && turn.learning ? { learning: turn.learning } : {})
+            }
         }
     });
     await memory.saveMessages({ messages: [
@@ -89,6 +98,7 @@ export async function deleteMemoryMessage(memory: Memory, scope: HistoryScope, m
     if (!messageId) return false;
     const messages = await listMemoryMessages(memory, scope);
     if (!messages.some(message => message.id === messageId)) return false;
+    await getChatDatabasePath(memory);
     await memory.deleteMessages([messageId]);
     return true;
 }
@@ -98,6 +108,7 @@ export async function deleteMemoryThread(memory: Memory, scope: HistoryScope): P
     const { resource, thread } = createMemoryIdentity(scope.userId, scope.mascotId, scope.sessionId, scope.isSecret);
     const owner = await memory.getThreadById({ threadId: thread, resourceId: resource });
     if (!owner || owner.resourceId !== resource) return false;
+    await getChatDatabasePath(memory);
     await memory.deleteThread(thread);
     return true;
 }

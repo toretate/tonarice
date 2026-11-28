@@ -167,7 +167,9 @@ describe('対話モード', () => {
             assert.match(output, /マスコット: 応答2/);
             assert.equal(requests[1].memorySessionId, 'gui-session');
             assert.equal(requests[1].model, 'gui-model');
-            assert.match(requests[1].systemPrompt, /明るい/);
+            assert.equal(requests[1].promptVersion, 1);
+            assert.equal(requests[1].chatMode, 'normal');
+            assert.equal(requests[1].systemPrompt, undefined);
             assert.equal(requests[0].toolUseEnabled, false);
         } finally { server.close(); http.close(); }
     });

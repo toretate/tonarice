@@ -15,11 +15,18 @@ import { encodeAudioBinaryFrame } from '../../utils/audio-binary-frame';
 import { MastraChatService } from '../mastra/mastra-chat-service';
 import { resolveMastraChatModel } from '../mastra/model-resolver';
 import { getMastraChatErrorMessage } from '../mastra/chat-route';
+import { resolveChatPrompt } from '../mastra/chat-prompt';
 import { openChatMemoryTurn } from '../mastra/chat-memory-turn';
 import { requestToolApproval, respondToolApproval } from '../mastra/tool-approval';
 import { claimMutation } from '../mastra/mutation-claim';
 import { addUserConnection, removeUserConnection, broadcastToUser, trackSessionConnection } from '../utils/user-connections';
 import { GenerationBudget } from '../mastra/generation-budget';
+import { prepareThreadContext } from '../mastra/thread-summary';
+import type { LanguageModel } from 'ai';
+import { learningMetadata, refreshSharedCompanionSources } from '../mastra/learning-jobs';
+import { buildCompanionContext, canOfferCompanionNudge } from '../mastra/companion-context';
+import { finishCompanionNudge } from '../mastra/companion-memory';
+import { isOwnedMascot } from '../utils/mascot-prompts';
 
 
 // ユーザーごとの接続管理（crosswsのPeerオブジェクトをSetに保存）
@@ -211,7 +218,6 @@ export default defineWebSocketHandler({
                 const {
                     message,
                     apiKey,
-                    systemPrompt,
                     model,
                     voicevoxSpeakerId,
                     voicevoxEndpoint,
@@ -253,7 +259,6 @@ export default defineWebSocketHandler({
                 console.log(` - Max Output Tokens: ${maxOutputTokens}`);
                 console.log(` - Enable Thinking: ${enableThinking}`);
                 console.log(` - API Key: "${apiKey ? '***(設定あり)***' : '(設定なし)'}"`);
-                console.log(` - LM Studio Endpoint: "${lmstudioEndpoint}"`);
                 console.log(` - History elements: ${history ? history.length : 0}`);
                 console.log(` - Attachments count: ${attachments ? attachments.length : 0}`);
                 console.log(`=========================================`);
@@ -268,9 +273,21 @@ export default defineWebSocketHandler({
                 const mastraController = new AbortController();
                 const generationBudget = new GenerationBudget(mastraController.signal);
                 let releaseMemory: (() => void) | undefined;
+                const mascotId = typeof data.activeMascotId === 'string' ? data.activeMascotId : '';
+                let nudgeToken: string | undefined;
+                let nudgeSucceeded = false;
                 registerMastraRequest(peer, mastraController);
                 try {
-                    const memoryTurn = await openChatMemoryTurn(userId, data);
+                    let learnedMemoryAvailable = true;
+                    if (data.promptVersion === 1 && userId !== 'anonymous' && mascotId && isOwnedMascot(userId, mascotId)) {
+                        try { await refreshSharedCompanionSources(userId, mascotId); }
+                        catch {
+                            learnedMemoryAvailable = false;
+                            console.warn('[記憶] 保存済み記憶の出所を確認できませんでした。');
+                        }
+                    }
+                    const prompt = resolveChatPrompt(userId, data, learnedMemoryAvailable);
+                    const memoryTurn = await openChatMemoryTurn(userId, prompt.canPersist ? data : {});
                     if (memoryTurn.kind === 'rejected') {
                         peer.send(JSON.stringify({ event: 'chat-error', data: { message: memoryTurn.message } }));
                         return;
@@ -308,16 +325,40 @@ export default defineWebSocketHandler({
                         repetitionPenalty,
                         enableThinking
                     });
+                    const context = memoryTurn.kind === 'persistent' && memoryTurn.context
+                        ? await prepareThreadContext({
+                            ...memoryTurn.context, model: resolved.resolvedModel as LanguageModel, engine: resolved.engine,
+                            message, attachments, systemPrompt: prompt.systemPrompt, maxOutputTokens, signal: generationBudget.signal,
+                            maySummarize: resolved.engine !== 'lmstudio' || resolved.modelId !== 'unspecified'
+                        })
+                        : undefined;
+                    let externalToolExecuted = false;
+                    let companionContext: string | undefined;
+                    const userConversation = prompt.mode === 'normal' || prompt.mode === 'radio';
+                    if (learnedMemoryAvailable && mascotId && userId !== 'anonymous' && (userConversation || prompt.mode === 'active_talk')) {
+                        try {
+                            const companion = buildCompanionContext(userId, mascotId, prompt.mode === 'active_talk'
+                                || (memoryTurn.kind === 'persistent' && canOfferCompanionNudge(memoryTurn.lastActivityAt)));
+                            companionContext = companion?.input;
+                            nudgeToken = companion?.token;
+                        } catch { console.warn('[記憶] 伴走コンテキストを読み込めませんでした。'); }
+                    }
                     reply = await MastraChatService.generateResponse({
                         message,
-                        systemPrompt,
+                        systemPrompt: prompt.systemPrompt,
                         resolvedModel: resolved.resolvedModel,
                         engine: resolved.engine,
                         modelId: resolved.modelId,
                         temperature,
                         frequencyPenalty,
                         maxOutputTokens,
-                        history: memoryTurn.kind === 'persistent' ? memoryTurn.history : history,
+                        history: context?.history ?? (memoryTurn.kind === 'persistent' ? memoryTurn.history : history),
+                        conversationSummary: context?.summary,
+                        companionContext,
+                        keywordSearchScope: enableTools && memoryTurn.kind === 'persistent' && memoryTurn.context
+                            && isOwnedMascot(userId, mascotId)
+                            ? { filename: memoryTurn.context.filename, owner: userId, mascot: mascotId, currentThread: memoryTurn.context.threadId }
+                            : undefined,
                         attachments,
                         weatherEnabled: enableTools && tools?.toolsWeather === true,
                         webSearchEnabled: enableTools && tools?.toolsWebSearch === true,
@@ -338,6 +379,7 @@ export default defineWebSocketHandler({
                             if (!generationBudget.signal.aborted) notifyDataToolResult(peer, name, input, output);
                         },
                         onToolStatus: (name, status) => {
+                            if (status === 'started' && ['searchWeb', 'getWeather', 'getGPSLocation', 'searchPastRecords'].includes(name)) externalToolExecuted = true;
                             if (!generationBudget.signal.aborted) peer.send(JSON.stringify({ event: 'tool-status', data: { name, status } }));
                         },
                         abortSignal: generationBudget.signal,
@@ -345,8 +387,12 @@ export default defineWebSocketHandler({
                     });
                     generationBudget.signal.throwIfAborted();
                     if (memoryTurn.kind === 'persistent') {
-                        await memoryTurn.save(message, reply.replace(/\[TIMER:.*?\]/gi, '').replace(/\[\w+\]/g, '').trim(), attachments);
+                        const learning = userConversation
+                            ? learningMetadata(userId, mascotId, resolved.engine, resolved.modelId, lmstudioEndpoint, !externalToolExecuted)
+                            : undefined;
+                        await memoryTurn.save(message, reply.replace(/\[TIMER:.*?\]/gi, '').replace(/\[\w+\]/g, '').trim(), attachments, learning);
                     }
+                    nudgeSucceeded = !generationBudget.signal.aborted;
                 } catch (aiError) {
                     if (mastraController.signal.aborted) return;
                     console.warn('[WS] Mastraチャットの処理に失敗');
@@ -356,6 +402,10 @@ export default defineWebSocketHandler({
                     }));
                     return;
                 } finally {
+                    if (nudgeToken) {
+                        try { finishCompanionNudge(userId, mascotId, nudgeToken, nudgeSucceeded); }
+                        catch { console.warn('[記憶] 声かけの予約を更新できませんでした。'); }
+                    }
                     generationBudget.dispose();
                     releaseMemory?.();
                     unregisterMastraRequest(peer, mastraController);
@@ -393,9 +443,9 @@ export default defineWebSocketHandler({
 
                 if (timerData) {
                     const durationMs = timerData.seconds * 1000;
-                    console.log(`[WS] Timer registered for user ${userId}: ${timerData.seconds}s, Memo: "${timerData.memo}"`);
+                    console.log(`[WS] Timer registered for user ${userId}: ${timerData.seconds}s`);
                     setTimeout(() => {
-                        console.log(`[WS] Timer triggered for user ${userId}: "${timerData!.memo}"`);
+                        console.log(`[WS] Timer triggered for user ${userId}`);
                         broadcastToUser(userId, 'timer-trigger', {
                             memo: timerData!.memo
                         });

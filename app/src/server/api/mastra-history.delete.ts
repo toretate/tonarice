@@ -1,6 +1,7 @@
 import { createError, defineEventHandler, readBody } from 'h3';
 import { getMemoryStore } from '../mastra/memory-store';
 import { deleteMemoryMessage, deleteMemoryThread, lockMemoryThread, memoryMessageId } from '../mastra/memory-history';
+import { refreshSharedCompanionSources } from '../mastra/learning-jobs';
 
 export default defineEventHandler(async event => {
     const userId = event.context.user?.id;
@@ -18,6 +19,7 @@ export default defineEventHandler(async event => {
         const { memory } = getMemoryStore();
         if (body.kind === 'thread') await deleteMemoryThread(memory, scope);
         else await deleteMemoryMessage(memory, scope, memoryMessageId(scope, body.messageId));
+        await refreshSharedCompanionSources(userId, scope.mascotId);
         return { success: true };
     } finally {
         release();

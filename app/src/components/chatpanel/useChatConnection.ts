@@ -1,12 +1,10 @@
-import { loadMascotPrompts } from '../../utils/mascot-prompt-client';
 import { ref, nextTick, Ref, watch } from 'vue';
+import { useAuthStore } from '../../store/auth';
 import { useConfigStore } from '../../store/config';
 import { useMascotStore } from '../../store/mascot';
 import { storeToRefs } from 'pinia';
 import { AudioPlaylist } from '../../utils/AudioPlaylist';
 import { Message, ChatSession, MessageAttachment } from './useChatHistory';
-import useRadioMode from './use-radiomode-prompt';
-import useIrodoriEmotion from './use-irodori-emotion';
 import { splitSentences } from '../../utils/sentence-splitter';
 import { sanitizeForIrodoriTTS } from '../../utils/irodori-sanitizer';
 import { useTaskStore } from '../../store/task';
@@ -16,6 +14,7 @@ import { normalizeIrodoriSpeed } from '../../utils/irodori-tts-settings';
 import { isLmStudioToolUseEnabled } from '../../utils/lmstudio-tool-settings';
 import { toolApprovalLabels, type ToolApprovalRequest } from './tool-approval-display';
 import { createChatSessionTitle } from '../../utils/chat-session-title';
+import { changeCompanionMemory } from '../../utils/companion-memory-client';
 
 export function useChatConnection(params: {
     messages: Ref<Message[]>;
@@ -36,12 +35,28 @@ export function useChatConnection(params: {
     } = params;
 
     const configStore = useConfigStore();
+    const authStore = useAuthStore();
     const mascotStore = useMascotStore();
     const taskStore = useTaskStore();
     if (!taskStore.isLoaded) {
         taskStore.loadFromLocalStorage();
     }
     const memoStore = useMemoStore();
+    const companionNotice = ref<{ id: string; mascotId: string } | undefined>();
+    const companionNoticeError = ref('');
+    const isUndoingCompanion = ref(false);
+    async function undoCompanionUpdate() {
+        const notice = companionNotice.value;
+        if (!notice || isUndoingCompanion.value) return;
+        isUndoingCompanion.value = true;
+        companionNoticeError.value = '';
+        try {
+            await changeCompanionMemory(notice.mascotId, { undoId: notice.id });
+            if (companionNotice.value?.id === notice.id) companionNotice.value = undefined;
+        } catch (error) {
+            if (companionNotice.value?.id === notice.id) companionNoticeError.value = error instanceof Error ? error.message : '更新を元に戻せませんでした。';
+        } finally { isUndoingCompanion.value = false; }
+    }
     if (!memoStore.isLoaded) {
         memoStore.loadFromLocalStorage();
     }
@@ -296,9 +311,14 @@ export function useChatConnection(params: {
                         approvalTimer = null;
                     }
                 } else if (wsEvent === 'tool-status') {
-                    const names: Record<string, string> = { searchWeb: 'Web検索', getWeather: '天気の取得', getGPSLocation: '位置情報の取得', adjustVolume: '音量調整', launchApp: 'アプリ起動', manageTasks: 'タスク操作', manageMemos: 'メモ操作' };
+                    const names: Record<string, string> = { searchWeb: 'Web検索', getWeather: '天気の取得', getGPSLocation: '位置情報の取得', adjustVolume: '音量調整', launchApp: 'アプリ起動', manageTasks: 'タスク操作', manageMemos: 'メモ操作', searchPastRecords: '過去の記録検索' };
                     const statuses: Record<string, string> = { started: 'を実行中…', succeeded: 'が完了しました。回答を準備中…', failed: 'に失敗しました。回答を準備中…' };
                     if (names[data.name] && statuses[data.status]) updatePendingMascotMessage(names[data.name] + statuses[data.status]);
+                } else if (wsEvent === 'companion-memory-updated') {
+                    if (typeof data?.id === 'string' && typeof data?.mascotId === 'string') {
+                        companionNotice.value = { id: data.id, mascotId: data.mascotId };
+                        companionNoticeError.value = '';
+                    }
                 } else if (wsEvent === 'chat-response') {
                     const { text, emotion } = data;
 
@@ -454,7 +474,8 @@ export function useChatConnection(params: {
         const sentMascotId = sentMascot?.id || 'default';
         const sentMessages = messages.value;
         const sentSession = sessions.value.find(session => session.id === sentSessionId);
-        const shouldPersist = !mascotStore.isSecretMode && !isActiveTalk;
+        const privateMode = mascotStore.isSecretMode;
+        const shouldPersist = authStore.isAuthenticated && !privateMode && !isActiveTalk;
         if (shouldPersist && !sentSessionId) return;
         const retryTarget = retryMessageId !== undefined
             ? sentMessages.find(message => message.id === retryMessageId && message.sender === 'user')
@@ -567,62 +588,7 @@ export function useChatConnection(params: {
         );
         const irodoriCaption = mascot?.aiConfig?.voice?.irodori_caption || configStore.irodoriCaption || '';
 
-        let systemPrompt = '';
-
-        // マスコットの基礎情報
-        if (mascot && mascot.profile) {
-            systemPrompt += `# Mascot Character Profile\n${mascot.profile}\n\n`;
-        }
-
-        // ラジオモードプロンプト
-        if (mascotStore.isRadioMode) {
-            systemPrompt += await useRadioMode(isActiveTalk, configStore);
-        }
-
-        // マスコット固有のプロンプト
-        if (mascot) {
-            try {
-                const { prompts: mascotPrompts } = await loadMascotPrompts(mascot.id);
-                if (mascotPrompts.identity) {
-                    systemPrompt += `# Mascot Identity\n${mascotPrompts.identity}\n\n`;
-                }
-                if (mascotPrompts.soul) {
-                    systemPrompt += `# Mascot Soul / Tone / Personality\n${mascotPrompts.soul}\n\n`;
-                }
-                if (mascotPrompts.user) {
-                    systemPrompt += `# User Context & Relations\n${mascotPrompts.user}\n\n`;
-                }
-                if (mascotPrompts.agents) {
-                    systemPrompt += `# Mascot Rules & Action Guidelines\n${mascotPrompts.agents}\n\n`;
-                }
-                if (mascotPrompts.memory) {
-                    systemPrompt += `# Mascot Long-term Memory\n${mascotPrompts.memory}\n\n`;
-                }
-            } catch (e) {
-                console.error('マスコットのプロンプト取得に失敗しました:', e);
-            }
-        }
-
-        // システムプロンプトが空の場合、デフォルトのシステムプロンプトを設定する
-        if (!systemPrompt.trim()) {
-            systemPrompt = `あなたは対話型のAIデスクトップマスコットです。親しみやすく返答してください。`;
-        }
-
-        // 感情表現ブロック(Irodori-TTSのみ)
-        if (useTts.value && voiceEngine === 'irodori') {
-            systemPrompt += useIrodoriEmotion();
-        }
-        // 感情タグブロック(マスコットの表情向け)
-        systemPrompt += "\n# System Instructions\n回答の最後に、自分の現在の感情に合わせて [happy], [sad], [angry], [surprised], [neutral] のいずれかの感情タグを必ず1つ含めて終了してください。例:「こんにちは！ [happy]」";
-
-        // タイマー指定ブロック（マスコットの一時的リマインド専用。ユーザーのタスク一覧には保存されない）
-        if (!systemPrompt.includes('[TIMER:')) {
-            systemPrompt += "\n# Timer Instructions\nユーザーから「〇分後に教えて」「後でお知らせして」「カップラーメンにお湯を入れた（できたら教えて）」など、その場限りで一度だけ知らせればよい一時的なリマインドを求められた場合は、会話の応答テキストの末尾（感情タグの直前）に、必ず次のフォーマットでタイマー起動タグを付与してください。\n[TIMER:秒数,お知らせ内容]\n※秒数は半角数字で指定してください。お知らせ内容には具体的なリマインド内容を記述してください。例:「了解、3分測るね。[TIMER:180,カップラーメンができました！] [happy]」\n【重要な区別】このタイマーは一度きりの通知専用で、ユーザーのタスク一覧（TODO/予定）には保存されません。したがって『N分後に通知』などの一時的リマインドは manageTasks ツールでは登録しないでください。逆に、ユーザーが後から一覧で管理・確認したいTODOや予定（例:『明日15時に会議』『レポートを書く』）は、このタイマータグではなく必ず manageTasks ツールで登録してください。\n【履歴の扱い】会話履歴に含まれる過去のタイマー依頼は既に対応済みです。最新（今回）のメッセージで新たに『N分後に…』と頼まれたときだけタイマータグを付けてください。過去の履歴に依頼が残っていることを理由に、タイマーを再設定しないでください。";
-        }
-
-        if (!toolUseEnabled) {
-            systemPrompt += '\n\n# ツール利用制限\n今回はすべてのツールが無効です。タスクやメモの操作、検索などを実行したと装わず、利用できないことを伝えてください。一時的なタイマータグは引き続き利用できます。';
-        }
+        const chatMode = isActiveTalk ? 'active_talk' : mascotStore.isRadioMode ? 'radio' : 'normal';
 
         let aiMessage = retryTarget?.responseMessageId !== undefined
             ? sentMessages.find(message => message.id === retryTarget.responseMessageId && message.sender === 'mascot')
@@ -678,7 +644,10 @@ export function useChatConnection(params: {
                     memoryAssistantMessageId: aiMessageId
                 } : {}),
                 apiKey: apiKey,
-                systemPrompt: systemPrompt,
+                promptVersion: 1,
+                chatMode: privateMode ? 'secret' + (chatMode === 'normal' ? '' : '_' + chatMode) : chatMode,
+                localProfile: sentMascot?.profile,
+                extendedRadio: configStore.useExRadio,
                 model: model,
                 voicevoxSpeakerId: voicevoxSpeakerId,
                 voicevoxEndpoint: voicevoxEndpointUrl,
@@ -763,6 +732,10 @@ export function useChatConnection(params: {
         handleKeyDown,
         pendingAttachments,
         pendingToolApproval,
+        companionNotice,
+        companionNoticeError,
+        isUndoingCompanion,
+        undoCompanionUpdate,
         respondToToolApproval,
         attachFiles,
         removeAttachment

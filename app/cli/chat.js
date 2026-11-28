@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { CliError, assertIsolatedServer, parseOrigin } from './main.js';
 
-const allowedFields = new Set(['message', 'engine', 'model', 'systemPrompt', 'lmstudioEndpoint', 'history', 'activeMascotId', 'memorySessionId', 'memoryUserMessageId', 'memoryAssistantMessageId', 'turnId', 'temperature', 'frequencyPenalty', 'repetitionPenalty', 'maxOutputTokens', 'enableThinking', 'enableTools', 'tools', 'approval']);
+const allowedFields = new Set(['message', 'engine', 'model', 'systemPrompt', 'promptVersion', 'chatMode', 'lmstudioEndpoint', 'history', 'activeMascotId', 'memorySessionId', 'memoryUserMessageId', 'memoryAssistantMessageId', 'turnId', 'temperature', 'frequencyPenalty', 'repetitionPenalty', 'maxOutputTokens', 'enableThinking', 'enableTools', 'tools', 'approval']);
 
 export function resolveApiKey(engine, env, fallback = '') {
     const providerKey = engine === 'openai' ? env.OPENAI_API_KEY : engine === 'gemini' ? env.GEMINI_API_KEY : '';

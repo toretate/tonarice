@@ -27,7 +27,10 @@ import handler from '../routes/ws';
 import { requestToolApproval } from '../mastra/tool-approval';
 import { claimMutation } from '../mastra/mutation-claim';
 import * as memoryStore from '../mastra/memory-store';
-import { listMemorySessions } from '../mastra/memory-history';
+import { appendMemoryTurn, listMemoryMessages, listMemorySessions } from '../mastra/memory-history';
+import * as mascotPrompts from '../utils/mascot-prompts';
+import * as companionContext from '../mastra/companion-context';
+import * as companionMemory from '../mastra/companion-memory';
 import { Memory } from '@mastra/memory';
 import { LibSQLStore } from '@mastra/libsql';
 
@@ -136,6 +139,42 @@ describe('WebSocketのMastra対話経路', () => {
             event: 'chat-response',
             data: { text: 'こんにちは！', speechText: 'こんにちは！', emotion: 'happy' }
         });
+    });
+
+    it.each(['成功', '生成失敗', '切断'] as const)('message_継続中のラジオ返信で声かけを予約し%sの結果に応じて確定する', async outcome => {
+        const storage = new LibSQLStore({ id: 'ws-radio-memory-test', url: ':memory:' });
+        const memory = new Memory({ storage });
+        const scope = { userId: 'user-test', mascotId: 'radio-mascot', sessionId: 'radio-session', isSecret: false };
+        const peer = createPeer();
+        vi.spyOn(memoryStore, 'getMemoryStore').mockReturnValue({ memory, storage });
+        vi.spyOn(mascotPrompts, 'isOwnedMascot').mockReturnValue(true);
+        vi.spyOn(mascotPrompts, 'readUserMascotPrompts').mockReturnValue({
+            configured: true, revision: 'test', prompts: { user: '', memory: '', identity: '', soul: '', agents: '' }
+        });
+        const token = '00000000-0000-0000-0000-000000000001';
+        const build = vi.spyOn(companionContext, 'buildCompanionContext').mockReturnValue({ input: '{"concern":"予定"}', token });
+        const finish = vi.spyOn(companionMemory, 'finishCompanionNudge').mockImplementation(() => {});
+        try {
+            const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() - 7 * 60 * 60000);
+            try {
+                await appendMemoryTurn(memory, scope, { userId: 101, assistantId: 102, message: '前回の発言', reply: '前回の返事' });
+            } finally { clock.mockRestore(); }
+            serviceMocks.mastraGenerate.mockImplementationOnce(async () => {
+                if (outcome === '生成失敗') throw new Error('生成失敗');
+                if (outcome === '切断') (handler as any).close(peer, {});
+                return '了解';
+            });
+            await sendChat(peer, {
+                promptVersion: 1, chatMode: 'radio', activeMascotId: scope.mascotId, memorySessionId: scope.sessionId,
+                memoryUserMessageId: 103, memoryAssistantMessageId: 104
+            });
+            expect(build).toHaveBeenCalledWith(scope.userId, scope.mascotId, true);
+            expect(serviceMocks.mastraGenerate.mock.calls[0]?.[0]).toMatchObject({ companionContext: '{"concern":"予定"}' });
+            expect(finish).toHaveBeenCalledWith(scope.userId, scope.mascotId, token, outcome === '成功');
+            const saved = (await listMemoryMessages(memory, scope)).find(item => item.content.metadata?.displayId === 103);
+            if (outcome === '成功') expect(saved?.content.metadata?.learning).toMatchObject({ eligible: true });
+            else expect(saved).toBeUndefined();
+        } finally { await storage.close(); }
     });
 
     it('message_OpenAIでツール無効時にすべてのツールを公開しないこと', async () => {

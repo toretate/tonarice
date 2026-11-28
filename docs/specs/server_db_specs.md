@@ -53,6 +53,8 @@ app/storage/
 
 通常チャットの履歴は、ストレージルートの `mastra/memory.db` に Mastra Memory が保存します。Web・Electron・Android は認証付きの `/api/mastra-history` で履歴を取得・削除します。保存条件と会話の分離は [Mastra 統合仕様](MastraIntegration.spec.md) を参照してください。
 
+同じ DB の `tonarice_chat_sequence` と `tonarice_chat_context` は、原文の保存順、要約の対象範囲、削除による無効化を管理します。`tonarice_learning_jobs` は出所と遅延抽出の実行位置を保持し、認証情報は保持しません。`tonarice_keyword_*` は原文から再作成できる横断検索用の索引です。マスコット別の `user.md`、`memory.md`、`pulse.json` は同じファイル更新記録で確定します。
+
 ## 3. 旧会話履歴の取り扱い
 
 アップデート時、以下のデータは元の場所に残ります。アプリは旧データの読み込み、書き込み、削除、名前変更、Mastra Memory への自動取り込みを行いません。

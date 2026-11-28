@@ -34,3 +34,16 @@ export function normalizeLmStudioBaseUrl(endpoint?: string): string {
     }
     return `${baseEndpoint.replace(/\/$/, '')}/v1`;
 }
+
+/** 遅延実行に保存・照合できる接続先だけを同じ URL 形式にそろえる。 */
+export function canonicalLmStudioEndpoint(endpoint?: string): string | null {
+    try {
+        const target = new URL(normalizeLmStudioBaseUrl(endpoint));
+        if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password || target.search || target.hash) return null;
+        return target.toString();
+    } catch { return null; }
+}
+
+export function isDefaultLmStudioEndpoint(endpoint: string): boolean {
+    return endpoint === 'http://localhost:1234/v1' || endpoint === 'http://127.0.0.1:1234/v1';
+}
