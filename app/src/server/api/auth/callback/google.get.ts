@@ -24,8 +24,9 @@ export default defineEventHandler(async event => {
     headers.set('cache-control', 'no-store');
     headers.set('referrer-policy', 'no-referrer');
     const state = target.searchParams.get('state');
-    const completed = token && !target.searchParams.has('error');
-    const settled = token && completed ? completeCliLogin(state, token) : failCliLogin(state);
+    const hasError = target.searchParams.has('error');
+    const completed = Boolean(token) && !hasError;
+    const settled = token && !hasError ? completeCliLogin(state, token) : failCliLogin(state);
     if (!settled) {
         return new Response('ログイン要求が無効または期限切れです。', { status: 400, headers: {
             'cache-control': 'no-store', 'referrer-policy': 'no-referrer'

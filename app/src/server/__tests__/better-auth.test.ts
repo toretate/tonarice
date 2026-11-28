@@ -5,6 +5,10 @@ import { createApp, createRouter, toWebHandler } from 'h3';
 import { initializeBetterAuth } from '../utils/better-auth';
 import desktopLogin from '../api/auth/electron/login.get';
 import googleCallback from '../api/auth/callback/google.get';
+import submitLogin from '../api/auth/login.post';
+import claimLogin from '../api/auth/cli/claim.post';
+import loginResult from '../api/auth/cli/result.get';
+import { startCliLogin } from '../utils/cli-login';
 
 const { getBetterAuth } = vi.hoisted(() => ({ getBetterAuth: vi.fn() }));
 vi.mock('../utils/better-auth-runtime', () => ({ getBetterAuth }));
@@ -131,6 +135,91 @@ it('initializeBetterAuth Google OAuth の開始とコールバックでセッシ
         const rejected = await signIn();
         expect(rejected.headers.get('set-auth-token')).toBeNull();
         expect(database.prepare('SELECT count(*) AS total FROM account').get()).toEqual({ total: 1 });
+    } finally {
+        vi.unstubAllGlobals();
+        database.close();
+    }
+});
+
+it('initializeBetterAuth_CLIログインで未許可Googleアカウントとプロバイダーエラーを失敗通知する', async () => {
+    const database = new Database(':memory:');
+    const baseURL = 'http://localhost:3000';
+    const google = { clientId: 'test-client', clientSecret: 'test-secret' };
+    const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const jwk = { ...publicKey.export({ format: 'jwk' }), kid: 'test-key', alg: 'RS256', use: 'sig' };
+
+    vi.stubGlobal('fetch', async (input: URL | Request | string) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url === 'https://www.googleapis.com/oauth2/v3/certs') return Response.json({ keys: [jwk] });
+        if (url === 'https://oauth2.googleapis.com/token') {
+            const now = Math.floor(Date.now() / 1000);
+            const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
+            const data = `${encode({ alg: 'RS256', kid: jwk.kid })}.${encode({
+                sub: 'unlisted-sub', email: 'unlisted@example.test', email_verified: true,
+                name: 'Unlisted User', iss: 'https://accounts.google.com', aud: google.clientId, iat: now, exp: now + 60
+            })}`;
+            const signature = sign('RSA-SHA256', Buffer.from(data), privateKey).toString('base64url');
+            return Response.json({ access_token: 'test-access', token_type: 'Bearer', id_token: `${data}.${signature}` });
+        }
+        throw new Error('想定外の外部リクエストです。');
+    });
+
+    try {
+        const auth = await initializeBetterAuth({
+            database, baseURL, secret: 'test-only-better-auth-secret-for-memory-database', google,
+            authorizeGoogle: profile => profile.sub === 'allowed-sub' && profile.email_verified,
+            authorizeSession: () => true
+        });
+        getBetterAuth.mockResolvedValue({ auth });
+
+        const app = toWebHandler(createApp().use(createRouter()
+            .post('/api/auth/login', submitLogin)
+            .get('/api/auth/callback/google', googleCallback)
+            .post('/api/auth/cli/claim', claimLogin)
+            .get('/api/auth/cli/result', loginResult)));
+
+        const runCliFailureFlow = async (callbackParams: (oauthState: string) => URLSearchParams) => {
+            const { state, verifier, confirmationCode } = startCliLogin();
+            const start = await app(new Request(`${baseURL}/api/auth/login`, {
+                method: 'POST',
+                headers: { origin: baseURL },
+                body: new URLSearchParams({ state, confirmationCode })
+            }));
+            expect(start.status).toBe(303);
+            const googleUrl = new URL(start.headers.get('location')!);
+            const oauthState = googleUrl.searchParams.get('state')!;
+            const cookie = start.headers.getSetCookie().map(value => value.split(';', 1)[0]).join('; ');
+
+            const callbackUrl = new URL('/api/auth/callback/google', baseURL);
+            for (const [key, value] of callbackParams(oauthState)) callbackUrl.searchParams.set(key, value);
+            const callback = await app(new Request(callbackUrl, { headers: { cookie } }));
+            expect(callback.status).toBe(302);
+            expect(callback.headers.get('set-auth-token')).toBeNull();
+            expect(callback.headers.getSetCookie().some(item => item.startsWith('better-auth.session_token='))).toBe(false);
+
+            const resultUrl = new URL(callback.headers.get('location')!, baseURL);
+            expect(resultUrl.pathname).toBe('/api/auth/cli/result');
+            expect(resultUrl.searchParams.get('status')).toBe('failed');
+            expect(resultUrl.searchParams.has('state')).toBe(false);
+
+            const resultPage = await app(new Request(resultUrl));
+            expect(resultPage.status).toBe(200);
+            expect(await resultPage.text()).toContain('/login からやり直してください');
+
+            const claim = await app(new Request(`${baseURL}/api/auth/cli/claim`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ state, verifier })
+            }));
+            expect(await claim.json()).toEqual({ status: 'failed' });
+        };
+
+        await runCliFailureFlow(oauthState => new URLSearchParams({ state: oauthState, code: 'test-code' }));
+        await runCliFailureFlow(oauthState => new URLSearchParams({ state: oauthState, error: 'access_denied' }));
+
+        expect(database.prepare('SELECT count(*) AS total FROM user').get()).toEqual({ total: 0 });
+        expect(database.prepare('SELECT count(*) AS total FROM account').get()).toEqual({ total: 0 });
+        expect(database.prepare('SELECT count(*) AS total FROM session').get()).toEqual({ total: 0 });
     } finally {
         vi.unstubAllGlobals();
         database.close();

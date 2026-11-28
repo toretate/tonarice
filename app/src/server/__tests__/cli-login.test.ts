@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { claimCliLogin, completeCliLogin, confirmCliLogin, startCliLogin } from '../utils/cli-login';
+import { claimCliLogin, completeCliLogin, confirmCliLogin, failCliLogin, startCliLogin } from '../utils/cli-login';
 
 describe('CLIログイン連携', () => {
     it('claimCliLogin_検証値が一致する要求のみ一度だけ受け取る', () => {
@@ -13,6 +13,18 @@ describe('CLIログイン連携', () => {
         expect(completeCliLogin(state, 'secret')).toBe(true);
         expect(completeCliLogin(state, 'replacement')).toBe(false);
         expect(claimCliLogin(state, verifier)).toEqual({ status: 'complete', token: 'secret' });
+        expect(claimCliLogin(state, verifier)).toEqual({ status: 'invalid' });
+    });
+
+    it('failCliLogin_確認済み要求のみ一度だけ失敗を確定し検証値付きで受け取る', () => {
+        const { state, verifier, confirmationCode } = startCliLogin();
+        expect(failCliLogin(state)).toBe(false);
+        expect(confirmCliLogin(state, confirmationCode)).toBe(true);
+        expect(failCliLogin(state)).toBe(true);
+        expect(failCliLogin(state)).toBe(false);
+        expect(completeCliLogin(state, 'secret')).toBe(false);
+        expect(claimCliLogin(state, 'x'.repeat(43))).toEqual({ status: 'invalid' });
+        expect(claimCliLogin(state, verifier)).toEqual({ status: 'failed' });
         expect(claimCliLogin(state, verifier)).toEqual({ status: 'invalid' });
     });
 

@@ -80,3 +80,57 @@ it.each([true, false])('CLI ログイン 結果をブラウザーと CLI に返�
         : { status: 'failed' });
     expect((await claim()).status).toBe(400);
 });
+
+it('beginGoogleLogin_OAuth開始失敗時にCLIログイン要求を失敗確定する', async () => {
+    const app = toWebHandler(createApp().use(createRouter()
+        .post('/api/auth/login', submitLogin)
+        .post('/api/auth/cli/claim', claimLogin)));
+
+    const first = startCliLogin();
+    signInSocial.mockResolvedValueOnce(new Response('upstream error', { status: 500 }));
+    const failedResponse = await app(new Request('http://localhost:3000/api/auth/login', {
+        method: 'POST',
+        headers: { origin: 'http://localhost:3000' },
+        body: new URLSearchParams({ state: first.state, confirmationCode: first.confirmationCode })
+    }));
+    expect(failedResponse.status).toBe(500);
+    const firstClaim = await app(new Request('http://localhost:3000/api/auth/cli/claim', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ state: first.state, verifier: first.verifier })
+    }));
+    expect(await firstClaim.json()).toEqual({ status: 'failed' });
+
+    const second = startCliLogin();
+    signInSocial.mockRejectedValueOnce(new Error('network error'));
+    const thrownResponse = await app(new Request('http://localhost:3000/api/auth/login', {
+        method: 'POST',
+        headers: { origin: 'http://localhost:3000' },
+        body: new URLSearchParams({ state: second.state, confirmationCode: second.confirmationCode })
+    }));
+    expect(thrownResponse.status).toBe(500);
+    const secondClaim = await app(new Request('http://localhost:3000/api/auth/cli/claim', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ state: second.state, verifier: second.verifier })
+    }));
+    expect(await secondClaim.json()).toEqual({ status: 'failed' });
+});
+
+it('googleCallback_無効または未確認のCLIログイン要求に400を返しセッションを漏らさない', async () => {
+    const { state } = startCliLogin();
+    const target = new URL('/api/auth/cli/finish', 'http://localhost:3000');
+    target.searchParams.set('state', state);
+    const headers = new Headers({
+        location: target.href,
+        'set-auth-token': 'fixture-session',
+        'set-cookie': 'better-auth.session_token=fixture-session; HttpOnly; Path=/'
+    });
+    oauthCallback.mockResolvedValueOnce(new Response(null, { status: 302, headers }));
+    const app = toWebHandler(createApp().use(createRouter().get('/api/auth/callback/google', googleCallback)));
+
+    const callback = await app(new Request('http://localhost:3000/api/auth/callback/google'));
+    expect(callback.status).toBe(400);
+    expect(callback.headers.get('set-auth-token')).toBeNull();
+    expect(callback.headers.get('set-cookie')).toBeNull();
+});
