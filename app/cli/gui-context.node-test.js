@@ -15,7 +15,9 @@ describe('GUI の設定と履歴', () => {
         assert.equal(first.payload.engine, 'gemini');
         assert.equal(first.payload.model, 'gui-model');
         assert.equal(first.payload.memorySessionId, 'latest');
-        assert.match(first.payload.systemPrompt, /親切/);
+        assert.equal(first.payload.promptVersion, 1);
+        assert.equal(first.payload.chatMode, 'normal');
+        assert.equal(first.payload.systemPrompt, undefined);
         assert.equal(first.apiKey, 'secret');
         assert.ok(second.payload.memoryUserMessageId > first.payload.memoryAssistantMessageId);
     });

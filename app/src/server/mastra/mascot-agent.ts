@@ -5,10 +5,11 @@ import { mastraWebSearchTool } from './web-search-tool';
 import { mastraLocationTool } from './location-tool';
 import { mastraTasksTool, mastraMemosTool } from './data-tools';
 import { mastraVolumeTool, mastraAppLauncherTool } from './desktop-tools';
+import { mastraKeywordSearchTool } from './chat-keyword-tool';
 
 type MascotTool = typeof mastraWeatherTool | typeof mastraWebSearchTool
     | typeof mastraLocationTool | typeof mastraTasksTool | typeof mastraMemosTool
-    | typeof mastraVolumeTool | typeof mastraAppLauncherTool;
+    | typeof mastraVolumeTool | typeof mastraAppLauncherTool | typeof mastraKeywordSearchTool;
 
 export const MASCOT_AGENT_ID = 'mascot-agent';
 
@@ -49,6 +50,9 @@ export function createMascotAgent(): Agent<
             if (requestContext.get('dataToolsEnabled')) {
                 tools.manageTasks = mastraTasksTool;
                 tools.manageMemos = mastraMemosTool;
+            }
+            if (requestContext.get('keywordSearchScope')) {
+                tools.searchPastRecords = mastraKeywordSearchTool;
             }
             if (requestContext.get('volumeEnabled')) {
                 tools.adjustVolume = mastraVolumeTool;

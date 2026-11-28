@@ -1,6 +1,9 @@
 import type { MastraChatHistoryItem } from './chat-input';
 import { appendMemoryTurn, listMemoryMessages, lockMemoryThread, memoryMessageId, memoryMessageText } from './memory-history';
-import { getMemoryStore } from './memory-store';
+import { createMemoryIdentity, getMemoryStore } from './memory-store';
+import { getChatDatabasePath, readChatSequence, type ChatSequenceState } from './chat-sequence';
+import type { OrderedChatMessage } from './thread-summary';
+import type { LearningMetadata } from './learning-jobs';
 
 interface MemoryTurnInput {
     memorySessionId?: unknown;
@@ -12,8 +15,10 @@ interface MemoryTurnInput {
 type MemoryTurn = { kind: 'transient' } | { kind: 'rejected'; message: string } | {
     kind: 'persistent';
     history: MastraChatHistoryItem[];
+    lastActivityAt?: number;
+    context: { filename: string; threadId: string; state: ChatSequenceState; messages: OrderedChatMessage[] } | undefined;
     savedReply: string | undefined;
-    save: (message: string, reply: string, attachments: unknown) => Promise<void>;
+    save: (message: string, reply: string, attachments: unknown, learning?: LearningMetadata) => Promise<void>;
     release: () => void;
 };
 
@@ -51,21 +56,40 @@ export async function openChatMemoryTurn(userId: string, input: MemoryTurnInput)
     try {
         const { memory } = getMemoryStore();
         const stored = await listMemoryMessages(memory, scope);
+        const filename = await getChatDatabasePath(memory);
         const previousReply = stored.find(item => item.role === 'assistant' && item.id === memoryMessageId(scope, memoryAssistantMessageId));
         const currentUserMessageId = memoryMessageId(scope, memoryUserMessageId);
-        const history = stored.filter(item => (item.role === 'assistant' || item.role === 'user') && item.id !== currentUserMessageId)
-            .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).slice(-10)
+        const conversation = stored.filter(item => (item.role === 'assistant' || item.role === 'user') && item.id !== currentUserMessageId);
+        const lastActivityAt = conversation.reduce<number | undefined>((latest, item) => {
+            const savedAt = item.content.metadata?.savedAt;
+            const time = typeof savedAt === 'number' && Number.isFinite(savedAt) ? savedAt : item.createdAt.getTime();
+            return Math.max(latest ?? 0, time);
+        }, undefined);
+        const history = conversation.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).slice(-10)
             .map(item => ({ sender: item.role === 'user' ? 'user' : 'mascot', text: memoryMessageText(item) }));
+        const { thread: threadId } = createMemoryIdentity(scope.userId, scope.mascotId, scope.sessionId, false);
+        const sequence = filename ? readChatSequence(filename, threadId) : undefined;
+        const byId = new Map(stored.map(item => [item.id, item]));
+        const context = filename && sequence ? {
+            filename, threadId, state: sequence.state,
+            messages: sequence.sequence.flatMap((entry): OrderedChatMessage[] => {
+                const item = byId.get(entry.id);
+                if (!item || item.id === currentUserMessageId || (item.role !== 'assistant' && item.role !== 'user')) return [];
+                return [{ ...entry, sender: item.role === 'user' ? 'user' : 'mascot', text: memoryMessageText(item) }];
+            })
+        } : undefined;
         return {
             kind: 'persistent',
             history,
+            lastActivityAt,
+            context,
             savedReply: previousReply ? memoryMessageText(previousReply) : undefined,
-            save: (message, reply, attachments) => appendMemoryTurn(memory, scope, {
+            save: (message, reply, attachments, learning) => appendMemoryTurn(memory, scope, {
                 userId: memoryUserMessageId,
                 assistantId: memoryAssistantMessageId,
                 message,
                 reply,
-                attachments: selectAttachments(attachments)
+                attachments: selectAttachments(attachments), learning
             }),
             release
         };

@@ -128,7 +128,7 @@ function startNitroServer() {
             NODE_ENV: 'production',
             ELECTRON_RUN_AS_NODE: '1'
         },
-        stdio: 'inherit'
+        stdio: ['inherit', 'inherit', 'inherit', 'ipc']
     });
 
     serverProcess.on('error', (err) => {
@@ -140,12 +140,25 @@ function startNitroServer() {
     });
 }
 
-function stopNitroServer() {
-    if (serverProcess) {
-        console.log('[Electron] Killing Nitro server process...');
-        serverProcess.kill('SIGTERM');
-        serverProcess = null;
-    }
+function stopNitroServer(): Promise<void> {
+    const child = serverProcess;
+    if (!child || child.exitCode !== null) return Promise.resolve();
+    serverProcess = null;
+    return new Promise(resolve => {
+        const finish = () => {
+            clearTimeout(timeout);
+            child.off('message', onMessage);
+            child.off('exit', finish);
+            if (child.exitCode === null) child.kill('SIGTERM');
+            resolve();
+        };
+        const onMessage = (message: unknown) => { if (message === 'tonarice-learning-stopped') finish(); };
+        const timeout = setTimeout(finish, 2000);
+        child.once('exit', finish);
+        child.on('message', onMessage);
+        if (child.connected) child.send('tonarice-stop-learning', error => { if (error) finish(); });
+        else finish();
+    });
 }
 
 // --- ウィンドウ群の初期化 ---
@@ -341,12 +354,15 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-    stopNitroServer();
     if (process.platform !== 'darwin') {
         app.quit();
     }
 });
 
-app.on('will-quit', () => {
-    stopNitroServer();
+let finishingQuit = false;
+app.on('before-quit', event => {
+    if (!serverProcess || finishingQuit) return;
+    event.preventDefault();
+    finishingQuit = true;
+    void stopNitroServer().finally(() => app.quit());
 });

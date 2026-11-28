@@ -6,6 +6,7 @@ import { useTaskStore } from '../../../store/task';
 import { useMascotStore } from '../../../store/mascot';
 import { useConfigStore } from '../../../store/config';
 import { ref } from 'vue';
+import { useAuthStore } from '../../../store/auth';
 
 describe('useChatConnection.ts のタスク連携機能テスト', () => {
     let mockWebSocket: any;
@@ -13,6 +14,7 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
 
     beforeEach(() => {
         setActivePinia(createPinia());
+        useAuthStore().user = { id: 'test-user', email: '', sub: '', role: '' };
 
         // window.electronAPI のモック
         window.electronAPI = {
@@ -86,7 +88,22 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
         connection.disconnectWebSocket();
     });
 
-    it('sendMessage_Electronでもサーバーに保存したマスコット設定を対話に使う', async () => {
+    it('toolStatus_過去の記録検索を日本語で表示する', async () => {
+        const messages = ref<import('../useChatHistory').Message[]>([]);
+        const connection = useChatConnection({
+            messages, activeSessionId: ref('session'), sessions: ref([]), inputText: ref('試験'),
+            saveHistory: vi.fn(), scrollToBottom: vi.fn()
+        });
+        connection.connectWebSocket();
+        mockWebSocket.readyState = 1;
+        try {
+            await connection.sendMessage();
+            await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-status', data: { name: 'searchPastRecords', status: 'started' } }) });
+            expect(messages.value.at(-1)?.text).toBe('過去の記録検索を実行中…');
+        } finally { connection.disconnectWebSocket(); }
+    });
+
+    it('sendMessage_Electronでもプロンプトの組み立てをサーバーに委譲する', async () => {
         useConfigStore().mascots = [{ id: 'shared-mascot', name: '共有マスコット' }];
         const legacyReader = vi.fn();
         window.electronAPI!.getMascotPrompts = legacyReader;
@@ -105,7 +122,9 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
         try {
             await connection.sendMessage();
             const sent = JSON.parse(mockWebSocket.send.mock.calls.at(-1)[0]).data;
-            expect(sent.systemPrompt).toContain('共有された設定');
+            expect(sent).toMatchObject({ promptVersion: 1, chatMode: 'normal', activeMascotId: 'shared-mascot' });
+            expect(sent).not.toHaveProperty('systemPrompt');
+            expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/mascots/cli-prompts'))).toBe(false);
             expect(legacyReader).not.toHaveBeenCalled();
         } finally {
             connection.disconnectWebSocket();

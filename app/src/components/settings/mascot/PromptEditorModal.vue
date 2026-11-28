@@ -8,6 +8,7 @@ import {
     type MascotPrompts
 } from '../../../utils/mascot-prompt-client';
 import AppModalShell from '../../common/AppModalShell.vue';
+import CompanionMemorySettings from './CompanionMemorySettings.vue';
 
 const props = defineProps<{
     visible: boolean;
@@ -25,10 +26,23 @@ const userPrompt = ref('');
 const agents = ref('');
 const memory = ref('');
 const isSaving = ref(false);
+const undoPending = ref(false);
+const needsReload = ref(false);
+const isReloading = ref(false);
 
 const loaded = ref(false);
 const canImportLegacy = ref(false);
 let loadVersion = 0;
+let promptRevision: string | undefined;
+let loadedDraft = '';
+
+function currentPrompts(): MascotPrompts {
+    return { identity: identity.value, soul: soul.value, user: userPrompt.value, agents: agents.value, memory: memory.value };
+}
+
+function draft() {
+    return JSON.stringify(currentPrompts());
+}
 
 function showPrompts(data?: MascotPrompts) {
     identity.value = data?.identity || '';
@@ -36,11 +50,15 @@ function showPrompts(data?: MascotPrompts) {
     userPrompt.value = data?.user || '';
     agents.value = data?.agents || '';
     memory.value = data?.memory || '';
+    loadedDraft = draft();
 }
 
 watch(() => [props.visible, props.mascotId] as const, async ([visible, mascotId]) => {
     const version = ++loadVersion;
     loaded.value = false;
+    undoPending.value = false;
+    needsReload.value = false;
+    isReloading.value = false;
     canImportLegacy.value = false;
     showPrompts();
     if (!visible || !mascotId) return;
@@ -48,6 +66,7 @@ watch(() => [props.visible, props.mascotId] as const, async ([visible, mascotId]
         const result = await loadMascotPrompts(mascotId);
         if (version !== loadVersion || !props.visible) return;
         showPrompts(result.prompts);
+        promptRevision = result.revision;
         loaded.value = true;
         if (!result.configured) {
             const legacy = await previewLocalLegacyMascotPrompts(mascotId);
@@ -58,6 +77,32 @@ watch(() => [props.visible, props.mascotId] as const, async ([visible, mascotId]
         if (version === loadVersion && props.visible) alert('プロンプトを読み込めませんでした。');
     }
 }, { immediate: true });
+
+async function syncAfterUndo(discardEdits = false) {
+    needsReload.value = true;
+    const before = draft();
+    if (!loaded.value || (!discardEdits && before !== loadedDraft)) return;
+    const version = ++loadVersion;
+    isReloading.value = true;
+    try {
+        const result = await loadMascotPrompts(props.mascotId);
+        if (version !== loadVersion || !props.visible || before !== draft()) return;
+        showPrompts(result.prompts);
+        promptRevision = result.revision;
+        needsReload.value = false;
+        if (result.configured) canImportLegacy.value = false;
+    } catch {
+        // 一時的な読み込み失敗でも編集中の欄と再読込ボタンを残す。
+    } finally {
+        if (version === loadVersion) isReloading.value = false;
+    }
+}
+
+function reloadPrompts() {
+    if (draft() === loadedDraft || window.confirm('未保存の編集を破棄して、Undo 後のプロンプトを読み込みますか？')) {
+        void syncAfterUndo(true);
+    }
+}
 
 async function importLegacyPrompts() {
     if (!canImportLegacy.value || !window.confirm('この端末にある旧設定が、現在のアカウントに移す内容であることを確認してください。読み込んだ内容は保存前に確認できます。')) return;
@@ -81,22 +126,16 @@ async function importLegacyPrompts() {
 }
 
 async function handleSave() {
-    if (!loaded.value || isSaving.value) return;
+    if (!loaded.value || isSaving.value || undoPending.value || needsReload.value || isReloading.value) return;
     const version = loadVersion;
     isSaving.value = true;
     try {
-        await saveMascotPrompts(props.mascotId, {
-            identity: identity.value,
-            soul: soul.value,
-            user: userPrompt.value,
-            agents: agents.value,
-            memory: memory.value
-        });
+        await saveMascotPrompts(props.mascotId, currentPrompts(), promptRevision);
         if (version !== loadVersion) return;
         emit('save-done');
         emit('close');
-    } catch {
-        alert('プロンプトを保存できませんでした。');
+    } catch (error) {
+        alert(error instanceof Error ? error.message : 'プロンプトを保存できませんでした。');
     } finally {
         isSaving.value = false;
     }
@@ -126,6 +165,12 @@ async function handleSave() {
 
             <div class="modal-body-container flex flex-column gap-3 mt-3 overflow-y-auto flex-1 pr-1">
                 
+                <CompanionMemorySettings v-if="visible && mascotId" :mascot-id="mascotId" :disabled="!loaded || isSaving || isReloading"
+                    @undo-pending="undoPending = $event" @undo-done="syncAfterUndo()" />
+                <p v-if="needsReload && !isReloading" role="status" class="text-sm m-0">
+                    記憶を元に戻しました。保存する前に最新のプロンプトを読み込んでください。
+                    <button type="button" @click="reloadPrompts">再読み込み</button>
+                </p>
                 <!-- Identity -->
                 <div class="prompt-section p-3 bg-slate-50 border-round border-1 border-gray-200">
                     <div class="flex align-items-center justify-content-between mb-1">
@@ -216,7 +261,8 @@ async function handleSave() {
         <div class="modal-footer flex justify-content-end gap-2 pt-3 border-top border-gray-200 mt-3">
             <Button v-if="canImportLegacy" label="この端末の旧設定を読み込む" class="p-button-outlined p-button-sm" @click="importLegacyPrompts" :disabled="isSaving" />
             <Button label="キャンセル" icon="pi pi-times" class="p-button-outlined p-button-secondary p-button-sm" @click="emit('close')" :disabled="isSaving" />
-            <Button label="保存する" icon="pi pi-save" class="p-button-primary p-button-sm px-4" @click="handleSave" :loading="isSaving" :disabled="!loaded" />
+            <Button label="保存する" icon="pi pi-save" class="p-button-primary p-button-sm px-4" @click="handleSave"
+                :loading="isSaving" :disabled="!loaded || undoPending || needsReload || isReloading" />
         </div>
     </AppModalShell>
 </template>

@@ -1,5 +1,6 @@
 import { RequestContext } from '@mastra/core/request-context';
 import type { ToolStatusCallback } from './tool-observation';
+import type { KeywordSearchScope } from './chat-keyword-tool';
 
 export interface MascotAgentRequestContextValues {
     resolvedModel: unknown;
@@ -16,6 +17,7 @@ export interface MascotAgentRequestContextValues {
     appLauncherEnabled: boolean;
     appLauncherUsed: boolean;
     dataToolsEnabled: boolean;
+    keywordSearchScope?: KeywordSearchScope;
     onToolStatus?: ToolStatusCallback;
     authorizeSideEffect?: (name: string, input: Record<string, unknown>) => Promise<string | null>;
     executeDataTool?: (name: 'manageTasks' | 'manageMemos', input: Record<string, unknown>) => Promise<string>;
@@ -35,6 +37,7 @@ export interface CreateMascotRequestContextParams {
     onDataToolResult?: MascotAgentRequestContextValues['onDataToolResult'];
     onToolStatus?: ToolStatusCallback;
     authorizeSideEffect?: MascotAgentRequestContextValues['authorizeSideEffect'];
+    keywordSearchScope?: KeywordSearchScope;
 }
 
 /**
@@ -59,6 +62,7 @@ export function createMascotRequestContext(
         ['appLauncherEnabled', params.appLauncherEnabled === true],
         ['appLauncherUsed', false],
         ['dataToolsEnabled', typeof params.executeDataTool === 'function'],
+        ['keywordSearchScope', params.keywordSearchScope],
         ['onToolStatus', params.onToolStatus],
         ['authorizeSideEffect', params.authorizeSideEffect],
         ['executeDataTool', params.executeDataTool],

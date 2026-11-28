@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { Memory } from '@mastra/memory';
 import { LibSQLStore } from '@mastra/libsql';
 import { STORAGE_DIR } from '../utils/paths';
+import { registerChatSequence } from './chat-sequence';
 
 /** 利用者の実際の識別子をDBのキーに直接含めず、各スコープを明確に分離する。 */
 export function createMemoryIdentity(userId: string, mascotId: string, sessionId: string, isSecret: boolean): { resource: string; thread: string } {
@@ -18,8 +19,10 @@ export function createMemoryIdentity(userId: string, mascotId: string, sessionId
 export function createMemoryStore(storageDirectory = STORAGE_DIR): { memory: Memory; storage: LibSQLStore } {
     const directory = join(storageDirectory, 'mastra');
     mkdirSync(directory, { recursive: true });
-    const storage = new LibSQLStore({ id: 'tonarice-memory', url: pathToFileURL(join(directory, 'memory.db')).href });
+    const filename = join(directory, 'memory.db');
+    const storage = new LibSQLStore({ id: 'tonarice-memory', url: pathToFileURL(filename).href });
     const memory = new Memory({ storage, options: { lastMessages: 10 } });
+    registerChatSequence(memory, storage, filename);
     return { memory, storage };
 }
 

@@ -17,7 +17,7 @@ Codex などの AI エージェントおよび開発者が、ターミナルか�
 | `app/cli/main.js` | 引数解析、環境変数からの接続先解決、`ping` 実行、終了コード整形 |
 | `app/cli/chat.js` | `chat send` 入力検証、WebSocket (`/ws`) 接続、ツール承認応答 |
 | `app/cli/interactive.js` | 対話モードの入出力制御、Esc / Ctrl+C 処理、`/private` 切替 |
-| `app/cli/gui-context.js` | GUI 設定・プロンプト・Mastra Memory 履歴の取得と送信ペイロード構築 |
+| `app/cli/gui-context.js` | GUI 設定と Mastra Memory 履歴の取得、サーバーがプロンプトを組み立てるための版・発話モードの送信 |
 | `app/cli/mascot-menu.js` | `/mascot`・`/model` の対話メニュー（選択・作成・性格編集・モデル設定） |
 | `app/cli/mascots.js` | 既存サーバー HTTP API クライアント |
 | `app/cli/data-commands.js` | `/memo`・`/todo` コマンド処理 |
@@ -152,7 +152,8 @@ node cli/index.js chat send [--url <origin>] [--timeout <ms>] [--isolated --url 
 | `message` | 必須 | ユーザー発話文字列（空白のみ不可） |
 | `engine` | 必須 | `lmstudio`、`openai`、`gemini` のいずれか |
 | `model` | 任意 | モデル ID |
-| `systemPrompt` | 任意 | システムプロンプト（GUI 設定やプロンプトは自動取得しない） |
+| `systemPrompt` | 任意 | 旧形式または明示上書き用のシステムプロンプト |
+| `promptVersion` / `chatMode` | 任意 | 版1の発話モード。所有マスコットのプロンプトはサーバーが組み立てる |
 | `lmstudioEndpoint` | 任意 | LM Studio 接続先 URL |
 | `history` | 任意 | 一時会話時の過去履歴配列 |
 | `activeMascotId` | 条件付必須 | 通常会話保存時のマスコット ID（1〜200 文字） |
@@ -216,7 +217,7 @@ npm run cli [-- --engine <engine> --model <id> --lmstudio-endpoint <url> --syste
 - マスコットのプロフィールおよび認証済みユーザーが所有するマスコットのプロンプトファイル（`/api/mascots/cli-prompts`）をシステムプロンプトへ組み込む。プロンプトはユーザー別保存先（`USERS_DIR/<userId>/mascots/<mascotId>/*.md`）を優先し、所有権（`mascot_config.json` の存在）がないマスコット ID は `404` で拒否する。複数ユーザー環境では共有の `APP_ROOT/mascots/` へフォールバックせず、単一ローカル開発バイパス（`ALLOW_AUTH_BYPASS=true` かつ `usr_local_dev_bypass`）かつ所有権確認済みの場合に限り未移行の `APP_ROOT/mascots/<mascotId>/*.md` を互換読み込みする。プロフィール・チャット設定は各マスコットの `config.yaml` に保存し、従来の `mascot_config.json` と互換読み込みを維持する。
 - GUI のプロンプト編集と対話も同じユーザー別プロンプトを読み込む。サーバー側に明示保存済みの共有設定（`memory.md` 以外のファイル）がなく、端末に旧設定が存在する場合、編集画面の「この端末の旧設定を読み込む」から副作用なし（ファイル・テンプレート自動作成なし）でプレビューし、確認後に保存すると CLI と共有できる。一部の項目のみ存在する旧設定を読み込んでもサーバー側の別項目は空欄で上書きしない。空の設定を明示保存した場合も設定済みとして扱う。
 - 長期記憶の記憶専用更新には POST /api/mascots/cli-prompts の mode: "memory" を使う。更新するファイルは memory.md のみ。expectedCurrentMemory を指定した場合は並行編集を検出し、現在の記憶が一致しなければ 409 Conflict を返す。通常会話の履歴は Mastra Memory に保存する。
-- GUI と同じ Mastra Memory を利用し、初期状態では最新の通常会話を選ぶ。生成成功時の発話はサーバーへ保存され、GUI 側で履歴を再読み込みすれば参照できる。
+- GUI と同じ Mastra Memory を利用し、初期状態では最新の通常会話を選ぶ。プロンプトはサーバー側で組み立てる。`--system-prompt` の明示指定は `cli_override` または `secret_cli_override` として渡す。生成成功時の発話はサーバーへ保存され、GUI 側で履歴を再読み込みすれば参照できる。
 - **非共有範囲**: GUI のブラウザー内ローカルストレージにのみ存在する「現在選択中の会話 ID」「ローカル専用プロンプト」「シークレット会話」は共有しない。
 - 対話モードでは TTS と AI ツールを無効とする。
 - `/memo`・`/todo` の変更はプライベート会話中でも通常データへ永続化され、リビジョン番号を付与して同一ユーザーの接続中 GUI へ既存の同期イベントを配信する。GUI 側はサーバー起点の同期適用時に全件 POST を発生させず、リビジョンが飛んだ場合はサーバーの最新状態を取得する。GUI の編集は保存要求を順番に処理し、`409 Conflict` 時は最新のサーバー状態に手元の変更を重ねて再送する。同じ項目の同じフィールドを両方で変更した場合は手元の編集を優先する。

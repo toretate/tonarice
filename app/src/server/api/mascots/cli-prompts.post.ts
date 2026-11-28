@@ -2,6 +2,7 @@ import { createError, defineEventHandler, readBody } from 'h3';
 import { isAuthBypassAllowed } from '../../utils/auth-bypass';
 import {
     MASCOT_PROMPT_NAMES,
+    MascotPromptConflict,
     MAX_PROMPT_LENGTH,
     writeUserMascotMemory,
     writeUserMascotPrompts,
@@ -63,7 +64,16 @@ export default defineEventHandler(async event => {
         prompts[name] = value ?? '';
     }
 
-    const saved = writeUserMascotPrompts(userId, mascotId, prompts);
+    let saved;
+    try {
+        saved = writeUserMascotPrompts(userId, mascotId, prompts, {
+            expectedRevision: typeof body.expectedRevision === 'string' ? body.expectedRevision : undefined,
+            allowLegacyLocalFallback: isAuthBypassAllowed() && userId === LOCAL_DEV_BYPASS_USER_ID
+        });
+    } catch (error) {
+        if (error instanceof MascotPromptConflict) throw createError({ statusCode: 409 });
+        throw error;
+    }
     if (!saved) throw createError({ statusCode: 404 });
 
     return { success: true, prompts: saved, configured: true };
