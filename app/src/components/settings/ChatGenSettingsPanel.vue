@@ -27,13 +27,7 @@ const {
     enableThinking,
     googleAiStudioApiKey: geminiApiKey,
     useExRadio,
-    radioActiveTalkInterval,
-    summaryEngine,
-    summaryGeminiModel,
-    summaryOpenaiModel,
-    summaryAnthropicModel,
-    summaryLmstudioModel,
-    summaryMaxCharLimit
+    radioActiveTalkInterval
 } = storeToRefs(configStore);
 
 const lmstudioToolUseEnabled = computed({
@@ -59,15 +53,6 @@ const aiEngines = ref([
     { name: 'LM Studio (ローカル)', value: 'lmstudio', disabled: false },
     { name: 'OpenAI (未実装)', value: 'openai', disabled: true },
     { name: 'Claude (Anthropic) (未実装)', value: 'anthropic', disabled: true }
-]);
-
-// --- 要約用AIエンジンのデータ定義 ---
-const summaryAiEngines = ref([
-    { name: '対話AIエンジンと同期する', value: 'chat-sync' },
-    { name: 'Gemini AI Studio', value: 'gemini' },
-    { name: 'LM Studio (ローカル)', value: 'lmstudio' },
-    { name: 'OpenAI', value: 'openai' },
-    { name: 'Claude (Anthropic)', value: 'anthropic' }
 ]);
 
 // Gemini モデル取得用の状態変数
@@ -953,102 +938,6 @@ onMounted(async () => {
                     <label for="enableThinking" class="font-medium cursor-pointer">
                         思考機能を有効にする (Enable Thinking / Reasoning)
                     </label>
-                </div>
-
-                <!-- 区切り線 -->
-                <hr class="my-4 section-divider" />
-
-                <!-- 要約用AI設定セクション -->
-                <div class="flex flex-column gap-3">
-                    <h3 class="text-base font-semibold m-0 flex align-items-center gap-2">
-                        <i class="pi pi-file-edit text-brand-500"></i>
-                        <span>メッセージ履歴の要約設定</span>
-                    </h3>
-                    <p class="text-xs text-gray-500 m-0">
-                        一定の会話数を超えた際、過去の履歴を圧縮（要約）するために使用するAIエンジンとモデルを指定します。
-                    </p>
-
-                    <div class="form-field">
-                        <label class="font-medium">要約用AIエンジン</label>
-                        <Select 
-                            v-model="summaryEngine" 
-                            :options="summaryAiEngines" 
-                            optionLabel="name" 
-                            optionValue="value" 
-                            class="w-full" 
-                        />
-                    </div>
-
-                    <div v-if="summaryEngine !== 'chat-sync'" class="form-field mt-2">
-                        <label class="font-medium">要約用モデル名</label>
-
-                        <!-- Gemini -->
-                        <div v-if="summaryEngine === 'gemini'" class="flex flex-column gap-2 w-full">
-                            <Select 
-                                v-model="summaryGeminiModel" 
-                                :options="geminiModelOptions" 
-                                editable
-                                placeholder="モデルを選択または直接入力..." 
-                                class="w-full" 
-                            />
-                        </div>
-
-                        <!-- LM Studio -->
-                        <div v-else-if="summaryEngine === 'lmstudio'" class="flex flex-column gap-2 w-full">
-                            <Select 
-                                v-if="lmstudioModels.length > 0"
-                                v-model="summaryLmstudioModel" 
-                                :options="lmstudioModels" 
-                                optionLabel="id"
-                                optionValue="id"
-                                editable
-                                placeholder="モデルを選択または直接入力..." 
-                                class="w-full" 
-                            />
-                            <InputText 
-                                v-else
-                                v-model="summaryLmstudioModel" 
-                                placeholder="例: Meta-Llama-3-8B-Instruct-GGUF" 
-                                class="w-full" 
-                            />
-                        </div>
-
-                        <!-- OpenAI -->
-                        <Select 
-                            v-else-if="summaryEngine === 'openai'"
-                            v-model="summaryOpenaiModel" 
-                            :options="openaiModelOptions" 
-                            editable
-                            placeholder="モデルを選択または直接入力..." 
-                            class="w-full" 
-                        />
-
-                        <!-- Anthropic -->
-                        <Select 
-                            v-else-if="summaryEngine === 'anthropic'"
-                            v-model="summaryAnthropicModel" 
-                            :options="anthropicModelOptions" 
-                            editable
-                            placeholder="モデルを選択または直接入力..." 
-                            class="w-full" 
-                        />
-                    </div>
-
-                    <div class="form-field mt-3">
-                        <label class="font-medium flex justify-content-between">
-                            <span>要約対象の最大総文字数</span>
-                        </label>
-                        <InputText
-                            :model-value="String(summaryMaxCharLimit)"
-                            @update:model-value="value => summaryMaxCharLimit = Number(value)"
-                            type="number"
-                            placeholder="例: 2500" 
-                            class="w-full" 
-                        />
-                        <small class="text-xs text-gray-500 mt-1">
-                            ※ ローカルLLMなどのコンテキスト制限エラーを防ぐため、要約対象となる履歴の総文字数を制限します（デフォルト: 2500）。
-                        </small>
-                    </div>
                 </div>
             </div>
 

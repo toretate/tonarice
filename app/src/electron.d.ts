@@ -41,9 +41,6 @@ export interface IElectronAPI {
     forgeGetLoras: (host: string) => Promise<string[]>;
     askGemini: (message: string, apiKey: string, systemPrompt: string, modelName: string, history?: any[], attachments?: any[]) => Promise<string>;
     askLmStudio: (message: string, systemPrompt: string, modelName: string, endpoint: string, history?: any[], attachments?: any[], tools?: any) => Promise<string>;
-    getChatHistory: () => Promise<any>;
-    saveChatHistory: (history: any) => Promise<{ success: boolean; error?: string }>;
-    openChatHistory: () => void;
     openFolder: (path: string) => void;
     previewLegacyMascotPrompts?: (mascotId: string) => Promise<{
         found: boolean;

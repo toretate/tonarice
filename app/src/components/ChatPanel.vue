@@ -231,7 +231,6 @@ const {
     messages,
     showHistoryList,
     isHistoryLoaded,
-    usesMastraHistory,
     historyError,
     isHistoryLoading,
     loadHistory,
@@ -240,7 +239,6 @@ const {
     selectSession,
     deleteSession,
     deleteMessage,
-    runCompaction,
     toggleHistoryList,
     applyActiveMascotHistory
 } = useChatHistory(scrollToBottom);
@@ -261,11 +259,9 @@ const {
     messages,
     activeSessionId,
     isHistoryLoaded,
-    usesMastraHistory,
     sessions,
     inputText,
     saveHistory,
-    runCompaction,
     scrollToBottom
 });
 

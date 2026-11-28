@@ -256,55 +256,6 @@ if (typeof window !== 'undefined' && !window.electronAPI) {
                 throw e;
             }
         },
-        getChatHistory: async () => {
-            try {
-                const response = await fetch('/api/history');
-                if (response.ok) {
-                    const resJson = await response.json();
-                    if (resJson.success && resJson.history) {
-                        console.log('[Polyfill] Chat history successfully loaded from server');
-                        // 同期用にローカルのlocalStorageにも保存しておく
-                        localStorage.setItem('desktop_ai_mascot_chat_history', JSON.stringify(resJson.history));
-                        return resJson.history;
-                    }
-                }
-            } catch (e) {
-                console.warn('[Polyfill] Failed to fetch chat history from server, using local fallback:', e);
-            }
-            try {
-                const historyStr = localStorage.getItem('desktop_ai_mascot_chat_history');
-                return historyStr ? JSON.parse(historyStr) : {};
-            } catch (e) {
-                console.error('[Polyfill] Failed to load chat history from localStorage:', e);
-                return {};
-            }
-        },
-        saveChatHistory: async (history: any) => {
-            try {
-                const response = await fetch('/api/history', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(history)
-                });
-                if (response.ok) {
-                    console.log('[Polyfill] Chat history successfully saved to server');
-                }
-            } catch (e) {
-                console.warn('[Polyfill] Failed to save chat history to server, using local fallback:', e);
-            }
-            try {
-                localStorage.setItem('desktop_ai_mascot_chat_history', JSON.stringify(history));
-                return { success: true };
-            } catch (e: any) {
-                console.error('[Polyfill] Failed to save chat history to localStorage:', e);
-                return { success: false, error: e.message };
-            }
-        },
-        openChatHistory: () => {
-            console.log('[Polyfill] openChatHistory triggered');
-        },
         openFolder: (path: string) => {
             console.log(`[Polyfill] openFolder triggered for path: ${path}`);
         },

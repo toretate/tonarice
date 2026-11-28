@@ -28,33 +28,6 @@ export async function saveMascotPrompts(mascotId: string, prompts: MascotPrompts
     if (!response.ok) throw new Error('サーバーにプロンプトを保存できませんでした。');
 }
 
-/**
- * 長期記憶（memory.md）のみをサーバーへ保存する。
- * 並行更新により記憶が既に変わっていた場合（409）は上書きせず conflict: true を返す。
- */
-export async function saveMascotMemory(
-    mascotId: string,
-    memory: string,
-    expectedCurrentMemory?: string
-): Promise<{ saved: boolean; conflict?: boolean }> {
-    const response = await fetch('/api/mascots/cli-prompts', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            mascotId,
-            mode: 'memory',
-            memory,
-            ...(expectedCurrentMemory !== undefined ? { expectedCurrentMemory } : {})
-        })
-    });
-    if (response.status === 409) {
-        return { saved: false, conflict: true };
-    }
-    if (!response.ok) throw new Error('サーバーに長期記憶を保存できませんでした。');
-    return { saved: true };
-}
-
 function readLegacyFromLocalStorage(mascotId: string): LegacyMascotPromptsPreview {
     if (typeof localStorage === 'undefined') return { found: false, prompts: {} };
     try {

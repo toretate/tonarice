@@ -20,12 +20,10 @@ import { createChatSessionTitle } from '../../utils/chat-session-title';
 export function useChatConnection(params: {
     messages: Ref<Message[]>;
     activeSessionId: Ref<string | null>;
-    usesMastraHistory?: Ref<boolean>;
     isHistoryLoaded?: Ref<boolean>;
     sessions: Ref<ChatSession[]>;
     inputText: Ref<string>;
     saveHistory: () => Promise<void>;
-    runCompaction: (mascotId: string, sessionId: string) => Promise<void>;
     scrollToBottom: () => void;
 }) {
     const {
@@ -34,7 +32,6 @@ export function useChatConnection(params: {
         sessions,
         inputText,
         saveHistory,
-        runCompaction,
         scrollToBottom
     } = params;
 
@@ -48,7 +45,6 @@ export function useChatConnection(params: {
     if (!memoStore.isLoaded) {
         memoStore.loadFromLocalStorage();
     }
-    let compactionTimer: any = null;
 
     const playlist = new AudioPlaylist((speaking) => {
         mascotStore.setSpeaking(speaking);
@@ -120,9 +116,8 @@ export function useChatConnection(params: {
             if (pendingMessage) {
                 pendingMessage.text = text;
                 pendingMessage.timestamp = Date.now();
-                return;
             }
-            if (params.usesMastraHistory?.value) return;
+            return;
         }
         for (let i = messages.value.length - 1; i >= 0; i--) {
             if (messages.value[i].sender === 'mascot') {
@@ -309,25 +304,6 @@ export function useChatConnection(params: {
 
                     updatePendingMascotMessage(text);
                     
-                    // 会話終了後、30秒間無操作が続いた場合にバックグラウンドで要約＆長期記憶マージを実行
-                    if (compactionTimer) {
-                        clearTimeout(compactionTimer);
-                    }
-                    compactionTimer = setTimeout(async () => {
-                        try {
-                            console.log('[Compaction] Idle timeout reached. Starting compaction & memory update...');
-                            const mascotId = activeMascot.value?.id || 'default';
-                            if (activeSessionId.value) {
-                                await runCompaction(mascotId, activeSessionId.value);
-                                await saveHistory();
-                            }
-                        } catch (compactionErr) {
-                            console.error('[Compaction] Deferred compaction failed:', compactionErr);
-                        } finally {
-                            compactionTimer = null;
-                        }
-                    }, 30000);
-
                     mascotStore.setEmotion(emotion);
                     if (window.electronAPI) {
                         window.electronAPI.changeEmotion(emotion);
@@ -478,7 +454,7 @@ export function useChatConnection(params: {
         const sentMascotId = sentMascot?.id || 'default';
         const sentMessages = messages.value;
         const sentSession = sessions.value.find(session => session.id === sentSessionId);
-        const shouldPersist = params.usesMastraHistory?.value && !mascotStore.isSecretMode && !isActiveTalk;
+        const shouldPersist = !mascotStore.isSecretMode && !isActiveTalk;
         if (shouldPersist && !sentSessionId) return;
         const retryTarget = retryMessageId !== undefined
             ? sentMessages.find(message => message.id === retryMessageId && message.sender === 'user')
@@ -486,13 +462,6 @@ export function useChatConnection(params: {
         if (retryMessageId !== undefined && (!retryTarget || retryTarget.deliveryStatus !== 'failed')) return;
         if (!isActiveTalk && !retryTarget && !inputText.value.trim() && pendingAttachments.value.length === 0) return;
         if (isAiResponding.value) return;
-
-        // 会話継続のため、予定されていた要約処理タイマーをクリアして延期する
-        if (compactionTimer) {
-            clearTimeout(compactionTimer);
-            compactionTimer = null;
-            console.log('[Compaction] User sent a message. Compaction deferred.');
-        }
 
         playlist.stop();
 
@@ -653,11 +622,6 @@ export function useChatConnection(params: {
 
         if (!toolUseEnabled) {
             systemPrompt += '\n\n# ツール利用制限\n今回はすべてのツールが無効です。タスクやメモの操作、検索などを実行したと装わず、利用できないことを伝えてください。一時的なタイマータグは引き続き利用できます。';
-        }
-
-        const currentSession = sentSession;
-        if (!params.usesMastraHistory?.value && currentSession && currentSession.summary) {
-            systemPrompt += `\n\n# Previous Conversation Summary\n以下はこれまでのマスターとの会話履歴の要約です。この文脈を考慮して返答してください。\n${currentSession.summary}\n`;
         }
 
         let aiMessage = retryTarget?.responseMessageId !== undefined
