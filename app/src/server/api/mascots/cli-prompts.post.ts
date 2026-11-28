@@ -20,7 +20,7 @@ export default defineEventHandler(async event => {
         throw createError({ statusCode: 400, statusMessage: '入力が不正です。' });
     }
 
-    // 自動要約からの長期記憶のみ保存経路（memory.md のみを更新し他項目には触れない）
+    // 長期記憶だけを保存する経路（memory.md のみを更新）
     if (body?.mode === 'memory') {
         const memory = body.memory;
         const expectedCurrentMemory = body.expectedCurrentMemory;

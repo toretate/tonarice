@@ -7,18 +7,21 @@ import { Agent } from '@mastra/core/agent';
 import { createMockModel } from '@mastra/core/test-utils/llm-mock';
 import { Memory } from '@mastra/memory';
 import { LibSQLStore } from '@mastra/libsql';
-import { createMemoryIdentity } from '../memory-store';
+import { createMemoryIdentity, createMemoryStore } from '../memory-store';
 import { appendMemoryTurn, deleteMemoryMessage, deleteMemoryThread, listMemoryMessages, listMemorySessions, lockMemoryThread, memoryMessageId, memoryMessageText } from '../memory-history';
 
 describe('Mastra Memory の永続化検証', () => {
-    it('appendMemoryTurn_画面表示とモデル入力が同じ保存内容を参照し削除が両方に反映されること', async () => {
-        const storage = new LibSQLStore({ id: 'ui-memory-test', url: ':memory:' });
-        const memory = new Memory({ storage });
+    it('appendMemoryTurn_DBを開き直しても履歴を表示でき削除が保存先に反映されること', async () => {
+        const directory = mkdtempSync(join(tmpdir(), 'tonarice-history-test-'));
+        let store = createMemoryStore(directory);
         const scope = { userId: 'owner', mascotId: 'mascot', sessionId: 'session', isSecret: false };
         try {
             const turn = { userId: 1000, assistantId: 1001, message: '合言葉', reply: '了解', attachments: [{ type: 'file', name: 'sample.txt', url: 'data:text/plain;base64,QQ==' }] };
-            await appendMemoryTurn(memory, scope, turn);
-            await appendMemoryTurn(memory, scope, turn);
+            await appendMemoryTurn(store.memory, scope, turn);
+            await appendMemoryTurn(store.memory, scope, turn);
+            await store.storage.close();
+            store = createMemoryStore(directory);
+            const { memory } = store;
             const sessions = await listMemorySessions(memory, 'owner', 'mascot');
             expect(sessions).toMatchObject([{ id: 'session', messages: [{ id: 1000, sender: 'user', text: '合言葉', attachments: turn.attachments }, { id: 1001, sender: 'mascot', text: '了解' }] }]);
             expect(sessions[0].messages).toHaveLength(2);
@@ -35,7 +38,9 @@ describe('Mastra Memory の永続化検証', () => {
             expect(await deleteMemoryThread(memory, scope)).toBe(true);
             expect(await listMemorySessions(memory, 'owner', 'mascot')).toEqual([]);
         } finally {
-            await storage.close();
+            await store.storage.close();
+            // WindowsではネイティブDBのファイル解放が遅れる場合がある。
+            try { rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch { /* OSの一時領域へ残す。 */ }
         }
     });
 

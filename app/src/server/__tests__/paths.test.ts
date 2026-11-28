@@ -87,7 +87,6 @@ describe('getRuntimePathConfig', () => {
             usersDir: path.join(STORAGE_DIR, 'users'),
             pythonDir: PYTHON_DIR,
             visionDir: path.join(PYTHON_DIR, 'vision'),
-            historyTemplatePath: path.join(WORKSPACE_ROOT, 'chat_history.json')
         });
     });
 });

@@ -17,19 +17,7 @@ describe('useChatHistory.ts のテスト', () => {
         configStore.mascots = [{ id: 'default', name: 'マスコット', profile: 'プロファイル' }];
         configStore.activeMascotId = 'default';
 
-        // window.electronAPI のモック
-        window.electronAPI = {
-            getChatHistory: vi.fn().mockResolvedValue({}),
-            saveChatHistory: vi.fn().mockResolvedValue(undefined),
-            getMascotPrompts: vi.fn().mockResolvedValue({ memory: '既存の長期記憶' }),
-            saveMascotPrompts: vi.fn().mockResolvedValue(undefined)
-        } as any;
-
-        // グローバルの fetch をモック
-        global.fetch = vi.fn().mockResolvedValue({
-            ok: true,
-            json: async () => ({ success: true, summary: '要約テキスト', memory: '新しい長期記憶' })
-        }) as any;
+        global.fetch = vi.fn().mockResolvedValue(Response.json({ sessions: [] }));
     });
 
     it('loadHistory_Mastra履歴を表示し、削除が成功した場合だけ画面から除くこと', async () => {
@@ -41,27 +29,22 @@ describe('useChatHistory.ts のテスト', () => {
             .mockResolvedValueOnce({ ok: false } as Response)
             .mockResolvedValueOnce({ ok: true } as Response)
             .mockResolvedValueOnce({ ok: true } as Response);
-        const alert = vi.fn();
-        vi.stubGlobal('alert', alert);
-        try {
-            const history = useChatHistory(vi.fn());
-            await history.loadHistory();
-            expect(history.messages.value[0].text).toBe('合言葉');
-            expect(window.electronAPI!.getChatHistory).not.toHaveBeenCalled();
-            await history.deleteMessage(1000);
-            expect(history.messages.value).toHaveLength(1);
-            expect(history.historyError.value).toContain('削除できませんでした');
-            await history.deleteMessage(1000);
-            expect(JSON.parse(String(request.mock.calls[2][1]?.body))).toEqual({
-                kind: 'message', sessionId: 'memory-session', messageId: 1000, mascotId: 'default'
-            });
-            expect(history.messages.value).toHaveLength(0);
-            await history.deleteSession('memory-session', new Event('click'));
-            expect(history.sessions.value.some(session => session.id === 'memory-session')).toBe(false);
-            expect(window.electronAPI!.saveChatHistory).not.toHaveBeenCalled();
-        } finally {
-            vi.unstubAllGlobals();
-        }
+        const history = useChatHistory(vi.fn());
+        await history.loadHistory();
+        expect(history.messages.value[0].text).toBe('合言葉');
+        await history.deleteMessage(1000);
+        expect(history.messages.value).toHaveLength(1);
+        expect(history.historyError.value).toContain('削除できませんでした');
+        await history.deleteMessage(1000);
+        expect(JSON.parse(String(request.mock.calls[2][1]?.body))).toEqual({
+            kind: 'message', sessionId: 'memory-session', messageId: 1000, mascotId: 'default'
+        });
+        expect(history.messages.value).toHaveLength(0);
+        await history.deleteSession('memory-session', new Event('click'));
+        expect(JSON.parse(String(request.mock.calls[3][1]?.body))).toEqual({
+            kind: 'thread', sessionId: 'memory-session', mascotId: 'default'
+        });
+        expect(history.sessions.value.some(session => session.id === 'memory-session')).toBe(false);
     });
 
     it('loadHistory_初回取得失敗後も画面内で再試行して送信可能になること', async () => {
@@ -71,7 +54,6 @@ describe('useChatHistory.ts のテスト', () => {
         await history.loadHistory();
         expect(history.isHistoryLoaded.value).toBe(false);
         expect(history.historyError.value).toContain('再試行');
-        expect(window.electronAPI!.getChatHistory).not.toHaveBeenCalled();
         await history.loadHistory();
         expect(history.isHistoryLoaded.value).toBe(true);
         expect(history.historyError.value).toBe('');
@@ -91,7 +73,6 @@ describe('useChatHistory.ts のテスト', () => {
         const second = useChatHistory(vi.fn());
         await second.loadHistory();
         expect(second.activeSessionId.value).toBe('old');
-        expect(window.electronAPI!.saveChatHistory).not.toHaveBeenCalled();
     });
 
     it('loadHistory_マスコット切替中の古い通信結果を適用しないこと', async () => {
@@ -140,161 +121,5 @@ describe('useChatHistory.ts のテスト', () => {
 
         // 通常セッションに戻る
         expect(history.sessions.value[0].isSecret).toBeFalsy();
-    });
-
-    it('runCompaction_シークレットセッションの場合は長期記憶の更新処理がスキップされること', async () => {
-        const scrollToBottom = vi.fn();
-        const history = useChatHistory(scrollToBottom);
-        const mascotStore = useMascotStore();
-
-        await history.loadHistory();
-
-        // シークレットモードでセッションを作成
-        mascotStore.setSecretMode(true);
-        await nextTick();
-
-        // セッション内のメッセージ数を要約閾値(15)以上にするためメッセージを追加
-        const currentSession = history.sessions.value[0];
-        currentSession.messages = Array.from({ length: 15 }, (_, i) => ({
-            id: i,
-            sender: i % 2 === 0 ? 'user' : 'mascot',
-            text: `メッセージ ${i}`
-        }));
-
-        // runCompaction の実行
-        await history.runCompaction('default', currentSession.id);
-
-        const savedPrompts = () => vi.mocked(fetch).mock.calls.filter(([url, init]) => url === '/api/mascots/cli-prompts' && init?.method === 'POST');
-        expect(savedPrompts()).toHaveLength(0);
-
-        // 通常モードに戻す
-        mascotStore.setSecretMode(false);
-        await nextTick();
-
-        const normalSession = history.sessions.value[0];
-        normalSession.messages = Array.from({ length: 15 }, (_, i) => ({
-            id: i,
-            sender: i % 2 === 0 ? 'user' : 'mascot',
-            text: `メッセージ ${i}`
-        }));
-
-        // 通常セッションの長期記憶は共有プロンプト API に保存する。
-        const defaultFetch = vi.mocked(fetch).getMockImplementation()!;
-        vi.mocked(fetch).mockImplementation((url, init) => String(url).startsWith('/api/mascots/cli-prompts')
-            ? Promise.resolve(Response.json({ success: true, configured: true, prompts: { memory: '既存の長期記憶' } }))
-            : defaultFetch(url, init));
-        await history.runCompaction('default', normalSession.id);
-
-        // 通常セッションなので memory 専用保存が呼び出されていること
-        expect(savedPrompts()).toHaveLength(1);
-        expect(JSON.parse(String(savedPrompts()[0][1]?.body))).toMatchObject({
-            mascotId: 'default',
-            mode: 'memory',
-            memory: '新しい長期記憶',
-            expectedCurrentMemory: '既存の長期記憶'
-        });
-    });
-
-    it('runCompaction_IPCのない新規未設定マスコットでも長期記憶を初回保存し未移行旧設定がある場合は抑止する', async () => {
-        // window.electronAPI のない Web 環境を再現
-        delete (window as any).electronAPI;
-
-        const scrollToBottom = vi.fn();
-        const history = useChatHistory(scrollToBottom);
-        const defaultFetch = vi.mocked(fetch).getMockImplementation()!;
-        vi.mocked(fetch).mockImplementation((url, init) => {
-            if (String(url).startsWith('/api/mascots/cli-prompts') && init?.method !== 'POST') {
-                return Promise.resolve(Response.json({
-                    success: true,
-                    configured: false,
-                    prompts: { identity: '', soul: '', user: '', agents: '', memory: '' }
-                }));
-            }
-            if (String(url) === '/api/mascots/cli-prompts' && init?.method === 'POST') {
-                return Promise.resolve(Response.json({ success: true, memory: '新しい長期記憶', configured: false }));
-            }
-            return defaultFetch(url, init);
-        });
-
-        await history.loadHistory();
-        const session = history.sessions.value[0];
-        session.messages = Array.from({ length: 15 }, (_, i) => ({
-            id: i,
-            sender: i % 2 === 0 ? 'user' : 'mascot',
-            text: `メッセージ ${i}`
-        }));
-
-        await history.runCompaction('default', session.id);
-
-        const memoryPosts = () => vi.mocked(fetch).mock.calls.filter(
-            ([url, init]) => url === '/api/mascots/cli-prompts' && init?.method === 'POST'
-        );
-        expect(memoryPosts()).toHaveLength(1);
-        expect(JSON.parse(String(memoryPosts()[0][1]?.body))).toEqual({
-            mascotId: 'default',
-            mode: 'memory',
-            memory: '新しい長期記憶',
-            expectedCurrentMemory: ''
-        });
-
-        // 端末に未移行の旧設定が存在する場合は自動更新を抑止し共有先へ送らないこと
-        vi.mocked(fetch).mockClear();
-        localStorage.setItem('desktop_ai_mascot_prompts_default', JSON.stringify({ soul: '旧ローカル設定' }));
-        session.messages = Array.from({ length: 15 }, (_, i) => ({
-            id: i + 100,
-            sender: i % 2 === 0 ? 'user' : 'mascot',
-            text: `メッセージ ${i}`
-        }));
-        await history.runCompaction('default', session.id);
-        expect(memoryPosts()).toHaveLength(0);
-    });
-
-    it('deleteMessage_指定したIDのメッセージを削除し、履歴を保存すること', async () => {
-        const scrollToBottom = vi.fn();
-        const history = useChatHistory(scrollToBottom);
-        await history.loadHistory();
-
-        // メッセージをいくつか追加
-        history.messages.value = [
-            { id: 1, sender: 'mascot', text: '初期メッセージ' },
-            { id: 2, sender: 'user', text: 'ユーザーメッセージ1' },
-            { id: 3, sender: 'mascot', text: 'マスコットメッセージ1' }
-        ];
-
-        // ID=2 のメッセージを削除
-        await history.deleteMessage(2);
-
-        // ID=2 が削除され、1 と 3 が残っていること
-        expect(history.messages.value).toEqual([
-            { id: 1, sender: 'mascot', text: '初期メッセージ' },
-            { id: 3, sender: 'mascot', text: 'マスコットメッセージ1' }
-        ]);
-
-        // saveChatHistory が呼び出されたこと
-        expect(window.electronAPI!.saveChatHistory).toHaveBeenCalled();
-    });
-
-    it('loadHistory_旧形式メッセージの到着時刻を補完すること', async () => {
-        const messageId = new Date(2026, 6, 25, 9, 7).getTime();
-        window.electronAPI!.getChatHistory = vi.fn().mockResolvedValue({
-            default: {
-                activeSessionId: 'session-1',
-                sessions: [{
-                    id: 'session-1',
-                    title: '既存の話題',
-                    timestamp: messageId + 1000,
-                    messages: [
-                        { id: messageId, sender: 'user', text: '既存メッセージ' },
-                        { id: 1, sender: 'mascot', text: '初期メッセージ' }
-                    ]
-                }]
-            }
-        });
-
-        const history = useChatHistory(vi.fn());
-        await history.loadHistory();
-
-        expect(history.messages.value[0].timestamp).toBe(messageId);
-        expect(history.messages.value[1].timestamp).toBe(messageId + 1000);
     });
 });

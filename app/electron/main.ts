@@ -13,7 +13,7 @@ import { registerVoicevoxHandlers } from './ipc-handlers/voicevox-handler';
 import { registerIrodoriHandlers } from './ipc-handlers/irodori-handler';
 import { registerGoogleHandlers } from './ipc-handlers/google-handler';
 import { registerHeartbeatHandlers } from './ipc-handlers/heartbeat-handler';
-import { registerHistoryHandlers } from './ipc-handlers/history-handler';
+import { registerFileHandlers } from './ipc-handlers/file-handler';
 import { registerLifecycleHandlers } from './ipc-handlers/lifecycle-handler';
 import { registerAuthHandlers } from './ipc-handlers/auth-handler';
 import { registerCoWorkHandlers } from './ipc-handlers/cowork-handler';
@@ -226,7 +226,7 @@ app.whenReady().then(async () => {
     registerIrodoriHandlers(config);
     registerGoogleHandlers();
     registerHeartbeatHandlers();
-    registerHistoryHandlers();
+    registerFileHandlers();
     registerLifecycleHandlers();
     registerScheduleHandlers();
     registerConfigHandlers(config);

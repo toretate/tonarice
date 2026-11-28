@@ -68,15 +68,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getLmStudioModels: (endpoint: string) =>
         ipcRenderer.invoke('get-lmstudio-models', endpoint),
 
-    // チャット履歴の取得
-    getChatHistory: () => ipcRenderer.invoke('get-chat-history'),
-
-    // チャット履歴の保存
-    saveChatHistory: (history: any) => ipcRenderer.invoke('save-chat-history', history),
-
-    // チャット履歴ファイルをシステムのエディタで開く
-    openChatHistory: () => ipcRenderer.send('open-chat-history'),
-
     // 指定されたパスのフォルダを開く
     openFolder: (path: string) => ipcRenderer.send('open-folder', path),
 

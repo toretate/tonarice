@@ -99,8 +99,6 @@ export const USERS_FILE_PATH = path.join(STORAGE_DIR, 'users.json');
 export const VISION_DIR = path.join(WORKSPACE_ROOT, 'python-services/vision');
 export const PYTHON_DIR = path.join(WORKSPACE_ROOT, 'python-services');
 
-// 履歴テンプレート
-export const HISTORY_TEMPLATE_PATH = path.join(WORKSPACE_ROOT, 'chat_history.json');
 
 export interface RuntimePathConfig {
     appRoot: string;
@@ -109,7 +107,6 @@ export interface RuntimePathConfig {
     usersDir: string;
     pythonDir: string;
     visionDir: string;
-    historyTemplatePath: string;
 }
 
 /**
@@ -122,8 +119,7 @@ export function getRuntimePathConfig(): RuntimePathConfig {
         storageDir: STORAGE_DIR,
         usersDir: USERS_DIR,
         pythonDir: PYTHON_DIR,
-        visionDir: VISION_DIR,
-        historyTemplatePath: HISTORY_TEMPLATE_PATH
+        visionDir: VISION_DIR
     };
 }
 

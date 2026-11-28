@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useChatConnection } from '../useChatConnection';
 import { useTaskStore } from '../../../store/task';
+import { useMascotStore } from '../../../store/mascot';
 import { useConfigStore } from '../../../store/config';
 import { ref } from 'vue';
 
@@ -52,7 +53,7 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
 
     it('toolApproval_今回のみ承認し設定を変更しないこと', async () => {
         const store = useConfigStore();
-        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: vi.fn(), runCompaction: vi.fn(), scrollToBottom: vi.fn() });
+        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: vi.fn(), scrollToBottom: vi.fn() });
         connection.connectWebSocket();
         mockWebSocket.readyState = 1;
         await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '1', name: 'manageMemos', input: { action: 'add', content: 'テスト' } } }) });
@@ -68,8 +69,8 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
         const sourceSession = sessions.value[0];
         const activeSessionId = ref('source');
         const connection = useChatConnection({ messages: sourceMessages, activeSessionId, sessions,
-            inputText: ref('試験'), usesMastraHistory: ref(true), saveHistory: async () => {},
-            runCompaction: async () => {}, scrollToBottom: () => {} });
+            inputText: ref('試験'), saveHistory: async () => {},
+            scrollToBottom: () => {} });
         const pending = connection.sendMessage();
         await new Promise(resolve => setTimeout(resolve, 0));
         mockWebSocket.readyState = 1;
@@ -97,7 +98,7 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
         ));
         const connection = useChatConnection({
             messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref('試験'),
-            usesMastraHistory: ref(true), saveHistory: vi.fn(), runCompaction: vi.fn(), scrollToBottom: vi.fn()
+            saveHistory: vi.fn(), scrollToBottom: vi.fn()
         });
         connection.connectWebSocket();
         mockWebSocket.readyState = 1;
@@ -111,8 +112,43 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
         }
     });
 
+    it.each([
+        { mode: '通常チャット', isSecret: false, isActiveTalk: false, persists: true },
+        { mode: 'シークレット会話', isSecret: true, isActiveTalk: false, persists: false },
+        { mode: '自発発話', isSecret: false, isActiveTalk: true, persists: false }
+    ])('sendMessage_$mode の保存条件を適用すること', async ({ isSecret, isActiveTalk, persists }) => {
+        useMascotStore().setSecretMode(isSecret);
+        const connection = useChatConnection({
+            messages: ref([]),
+            activeSessionId: ref('session'),
+            sessions: ref([]),
+            inputText: ref('試験'),
+            saveHistory: vi.fn(),
+            scrollToBottom: vi.fn()
+        });
+        connection.connectWebSocket();
+        mockWebSocket.readyState = 1;
+        try {
+            await connection.sendMessage(isActiveTalk);
+            const sent = JSON.parse(mockWebSocket.send.mock.calls.at(-1)[0]).data;
+            if (persists) {
+                expect(sent.memorySessionId).toBe('session');
+                expect(sent.memoryUserMessageId).toEqual(expect.any(Number));
+                expect(sent.memoryAssistantMessageId).toEqual(expect.any(Number));
+                expect(sent).not.toHaveProperty('history');
+            } else {
+                expect(sent).not.toHaveProperty('memorySessionId');
+                expect(sent).not.toHaveProperty('memoryUserMessageId');
+                expect(sent).not.toHaveProperty('memoryAssistantMessageId');
+                expect(sent.history).toEqual(expect.any(Array));
+            }
+        } finally {
+            connection.disconnectWebSocket();
+        }
+    });
+
     it('toolApproval_サーバーが承認を終了したら確認画面を閉じること', async () => {
-        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: async () => {}, runCompaction: async () => {}, scrollToBottom: () => {} });
+        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: async () => {}, scrollToBottom: () => {} });
         connection.connectWebSocket();
         mockWebSocket.readyState = 1;
         await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '1', name: 'manageMemos', input: { action: 'add' } } }) });
@@ -122,7 +158,7 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
     });
 
     it('disconnectWebSocket_手動切断でも承認画面を閉じ拒否を返すこと', async () => {
-        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: async () => {}, runCompaction: async () => {}, scrollToBottom: () => {} });
+        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: async () => {}, scrollToBottom: () => {} });
         connection.connectWebSocket();
         mockWebSocket.readyState = 1;
         await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '1', name: 'manageMemos', input: { action: 'add' } } }) });
@@ -132,7 +168,7 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
     });
 
     it('sendMessage_時計が巻き戻っても発話と応答のIDを逆転させないこと', async () => {
-        const connection = useChatConnection({ messages: ref([{ id: 5000, sender: 'mascot' as const, text: '前の応答' }]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref('試験'), usesMastraHistory: ref(true), saveHistory: async () => {}, runCompaction: async () => {}, scrollToBottom: () => {} });
+        const connection = useChatConnection({ messages: ref([{ id: 5000, sender: 'mascot' as const, text: '前の応答' }]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref('試験'), saveHistory: async () => {}, scrollToBottom: () => {} });
         connection.connectWebSocket();
         mockWebSocket.readyState = 1;
         const clock = vi.spyOn(Date, 'now').mockReturnValue(1000);
@@ -150,7 +186,7 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
     it('toolApproval_確認省略設定は対象ツールのみ承認すること', async () => {
         const store = useConfigStore();
         store.toolApprovalSkipped = ['manageMemos'];
-        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: vi.fn(), runCompaction: vi.fn(), scrollToBottom: vi.fn() });
+        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: vi.fn(), scrollToBottom: vi.fn() });
         connection.connectWebSocket();
         mockWebSocket.readyState = 1;
         await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '1', name: 'manageMemos', input: { action: 'add' } } }) });
@@ -166,7 +202,7 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
         const store = useConfigStore();
         store.isLoaded = true;
         const saveConfig = vi.spyOn(store, 'saveConfig').mockResolvedValue(undefined);
-        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: vi.fn(), runCompaction: vi.fn(), scrollToBottom: vi.fn() });
+        const connection = useChatConnection({ messages: ref([]), activeSessionId: ref('s'), sessions: ref([]), inputText: ref(''), saveHistory: vi.fn(), scrollToBottom: vi.fn() });
         connection.connectWebSocket();
         mockWebSocket.readyState = 1;
         await mockWebSocket.onmessage({ data: JSON.stringify({ event: 'tool-approval-request', data: { id: '1', name: 'manageMemos', input: { action: 'add' } } }) });
@@ -192,7 +228,6 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
         const sessions = ref<any[]>([]);
         const inputText = ref('');
         const saveHistory = vi.fn().mockResolvedValue(undefined);
-        const runCompaction = vi.fn().mockResolvedValue(undefined);
         const scrollToBottom = vi.fn();
 
         const connection = useChatConnection({
@@ -201,7 +236,6 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
             sessions,
             inputText,
             saveHistory,
-            runCompaction,
             scrollToBottom
         });
 
@@ -258,7 +292,6 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
         const sessions = ref<any[]>([]);
         const inputText = ref('');
         const saveHistory = vi.fn().mockResolvedValue(undefined);
-        const runCompaction = vi.fn().mockResolvedValue(undefined);
         const scrollToBottom = vi.fn();
 
         const connection = useChatConnection({
@@ -267,7 +300,6 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
             sessions,
             inputText,
             saveHistory,
-            runCompaction,
             scrollToBottom
         });
 
@@ -315,7 +347,6 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
         const sessions = ref<any[]>([]);
         const inputText = ref('');
         const saveHistory = vi.fn().mockResolvedValue(undefined);
-        const runCompaction = vi.fn().mockResolvedValue(undefined);
         const scrollToBottom = vi.fn();
 
         const connection = useChatConnection({
@@ -324,7 +355,6 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
             sessions,
             inputText,
             saveHistory,
-            runCompaction,
             scrollToBottom
         });
 
@@ -375,7 +405,6 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
             sessions: ref([]),
             inputText: ref('再送テスト'),
             saveHistory,
-            runCompaction: vi.fn().mockResolvedValue(undefined),
             scrollToBottom: vi.fn()
         });
 
@@ -402,7 +431,6 @@ describe('useChatConnection.ts のタスク連携機能テスト', () => {
             sessions: ref([]),
             inputText: ref('もう一度送る'),
             saveHistory: vi.fn().mockResolvedValue(undefined),
-            runCompaction: vi.fn().mockResolvedValue(undefined),
             scrollToBottom: vi.fn()
         });
 
