@@ -53,6 +53,8 @@ import * as net from 'net';
 
 // 開発環境と本番環境の判定
 const isDev = process.env.VITE_DEV_SERVER_URL !== undefined;
+const authBaseURL = process.env.BETTER_AUTH_URL || process.env.VITE_DEV_SERVER_URL || 'http://localhost:3000';
+registerAuthHandlers(authBaseURL);
 
 // グローバルな例外ハンドラーの登録（アプリ終了時の接続リセット等を逃がす）
 process.on('unhandledRejection', (reason) => {
@@ -226,7 +228,6 @@ app.whenReady().then(async () => {
     registerHeartbeatHandlers();
     registerHistoryHandlers();
     registerLifecycleHandlers();
-    registerAuthHandlers(() => config.get());
     registerScheduleHandlers();
     registerConfigHandlers(config);
     registerWindowHandlers(config);

@@ -1,5 +1,6 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useConfigStore } from '../../../store/config';
+import { useAuthStore } from '../../../store/auth';
 import { storeToRefs } from 'pinia';
 
 interface MascotAsset {
@@ -31,6 +32,7 @@ interface MascotData {
 
 export function useSettingsWindow() {
     const configStore = useConfigStore();
+    const authStore = useAuthStore();
 
     const {
         googleAiStudioApiKey: geminiApiKey,
@@ -92,6 +94,7 @@ export function useSettingsWindow() {
         applyRequestedMenu();
         window.addEventListener('storage', handleSettingsMenuStorage);
         await configStore.loadConfig();
+        void authStore.checkAuthStatus();
 
         if (mascots.value.length === 0) {
             mascots.value = [{

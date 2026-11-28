@@ -85,7 +85,7 @@ export async function chatSend(options, text, dependencies = {}) {
         dependencies.signal?.addEventListener('abort', onAbort, { once: true });
         if (dependencies.signal?.aborted) { onAbort(); return; }
         try {
-            socket = new WebSocket(url, { headers: token ? { Cookie: `session_token=${encodeURIComponent(token)}` } : {} });
+            socket = new WebSocket(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
             socket.on('open', () => {
                 try { socket.send(JSON.stringify({ event: 'chat-send', data: input })); sent = true; }
                 catch { finish(new CliError('connection_error', '送信に失敗しました。処理結果は不明です。', 4)); }

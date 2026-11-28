@@ -71,7 +71,7 @@ export function createIntegratedWindow(): BrowserWindow {
         frame: true,
         alwaysOnTop: configData.alwaysOnTop,
         resizable: true,
-        title: 'Desktop AI Mascot - 統合モード',
+        title: 'tonarice - 統合モード',
         webPreferences: {
             preload: path.join(__dirname, 'preload.cjs'),
             contextIsolation: true,

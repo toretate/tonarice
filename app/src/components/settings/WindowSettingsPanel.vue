@@ -86,7 +86,7 @@ const chatBackgroundImageFitOptions = ref([
 
 const saveStatus = ref('設定を保存');
 const isSaving = ref(false);
-const activeTab = ref<'general' | 'integrated' | 'mascot' | 'chat' | 'server'>('general');
+const activeTab = defineModel<'general' | 'integrated' | 'mascot' | 'chat' | 'server'>('activeTab', { default: 'general' });
 let initialWindowMode = '';
 
 watch(windowMode, (mode) => {
@@ -442,9 +442,8 @@ const chatPreviewBackgroundStyle = computed(() => {
     return styles;
 });
 
-onMounted(async () => {
+onMounted(() => {
     initialWindowMode = windowMode.value;
-    authStore.checkAuthStatus();
 });
 </script>
 

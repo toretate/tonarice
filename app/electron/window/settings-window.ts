@@ -53,7 +53,7 @@ export function createSettingsWindow(): BrowserWindow {
         maxWidth: 1600,
         minHeight: 480,
         show: false, // 必要なタイミングまで非表示
-        title: 'Desktop AI Mascot 設定',
+        title: 'tonarice 設定',
         webPreferences: {
             preload: path.join(__dirname, 'preload.cjs'),
             contextIsolation: true,

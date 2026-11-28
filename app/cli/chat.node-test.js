@@ -71,11 +71,11 @@ describe('chat send', () => {
         assert.throws(() => parseChatInput(JSON.stringify({ message: 'x', engine: 'openai', apiKey: 'secret' }), {}));
     });
 
-    it('chatSend_認証情報を Cookie で送信し承認を拒否して応答を返す', async () => {
+    it('chatSend_認証情報を Bearer で送信し承認を拒否して応答を返す', async () => {
         const pending = chatSend(options, input, { WebSocket: FakeSocket, env: { TONARICE_SESSION_TOKEN: 'token' } });
         await new Promise(resolve => setImmediate(resolve));
         const socket = FakeSocket.latest;
-        assert.equal(socket.config.headers.Cookie, 'session_token=token');
+        assert.equal(socket.config.headers.Authorization, 'Bearer token');
         assert.equal(socket.sent[0].event, 'chat-send');
         socket.emit('message', JSON.stringify({ event: 'tool-approval-request', data: { id: 'approval', name: 'test' } }));
         assert.deepEqual(socket.sent[1], { event: 'tool-approval-response', data: { id: 'approval', approved: false } });

@@ -1,6 +1,6 @@
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 
-interface PendingLogin { verifierHash: Buffer; expiresAt: number; token?: string }
+interface PendingLogin { verifierHash: Buffer; expiresAt: number; confirmationHash: Buffer; confirmed?: boolean; token?: string }
 const pending = new Map<string, PendingLogin>();
 const ttl = 5 * 60 * 1000;
 
@@ -13,15 +13,29 @@ export function startCliLogin() {
     if (pending.size >= 100) throw new Error('ログイン要求が多すぎます。');
     const state = randomBytes(32).toString('base64url');
     const verifier = randomBytes(32).toString('base64url');
-    pending.set(state, { verifierHash: createHash('sha256').update(verifier).digest(), expiresAt: Date.now() + ttl });
-    return { state, verifier, expiresIn: ttl / 1000 };
+    const confirmationCode = randomBytes(6).toString('base64url');
+    pending.set(state, {
+        verifierHash: createHash('sha256').update(verifier).digest(),
+        confirmationHash: createHash('sha256').update(confirmationCode).digest(),
+        expiresAt: Date.now() + ttl
+    });
+    return { state, verifier, confirmationCode, expiresIn: ttl / 1000 };
+}
+
+export function confirmCliLogin(state: string, code: unknown): boolean {
+    prune();
+    const login = pending.get(state);
+    if (!login || login.confirmed || typeof code !== 'string' || !/^[A-Za-z0-9_-]{8}$/.test(code)) return false;
+    if (!timingSafeEqual(login.confirmationHash, createHash('sha256').update(code).digest())) return false;
+    login.confirmed = true;
+    return true;
 }
 
 export function completeCliLogin(state: unknown, token: string): boolean {
     prune();
     if (typeof state !== 'string') return false;
     const login = pending.get(state);
-    if (!login || login.token) return false;
+    if (!login?.confirmed || login.token) return false;
     login.token = token;
     return true;
 }
