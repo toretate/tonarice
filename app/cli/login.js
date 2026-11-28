@@ -37,6 +37,7 @@ export async function login(options, output, dependencies = {}) {
     while (Date.now() < deadline) {
         const result = await request('/api/auth/cli/claim', { state: start.state, verifier: start.verifier });
         if (result?.status === 'complete' && typeof result.token === 'string' && result.token) return result.token;
+        if (result?.status === 'failed') throw new CliError('auth_error', 'Google ログインを完了できませんでした。ブラウザーを確認し、/login からやり直してください。', 3);
         if (result?.status !== 'pending') throw new CliError('invalid_response', 'ログイン応答の形式が不正です。', 6);
         try { await (dependencies.delay || delay)(1500, undefined, { signal }); }
         catch { throw new CliError('cancelled', 'ログインを中断しました。', 130); }

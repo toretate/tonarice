@@ -1,6 +1,8 @@
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 
-interface PendingLogin { verifierHash: Buffer; expiresAt: number; confirmationHash: Buffer; confirmed?: boolean; token?: string }
+type CliLoginResult = { status: 'complete'; token: string } | { status: 'failed' };
+
+interface PendingLogin { verifierHash: Buffer; expiresAt: number; confirmationHash: Buffer; confirmed?: boolean; result?: CliLoginResult }
 const pending = new Map<string, PendingLogin>();
 const ttl = 5 * 60 * 1000;
 
@@ -32,20 +34,28 @@ export function confirmCliLogin(state: string, code: unknown): boolean {
 }
 
 export function completeCliLogin(state: unknown, token: string): boolean {
+    return settleCliLogin(state, { status: 'complete', token });
+}
+
+export function failCliLogin(state: unknown): boolean {
+    return settleCliLogin(state, { status: 'failed' });
+}
+
+function settleCliLogin(state: unknown, result: CliLoginResult): boolean {
     prune();
     if (typeof state !== 'string') return false;
     const login = pending.get(state);
-    if (!login?.confirmed || login.token) return false;
-    login.token = token;
+    if (!login?.confirmed || login.result) return false;
+    login.result = result;
     return true;
 }
 
-export function claimCliLogin(state: unknown, verifier: unknown): { status: 'pending' | 'invalid' } | { status: 'complete'; token: string } {
+export function claimCliLogin(state: unknown, verifier: unknown): { status: 'pending' | 'invalid' } | CliLoginResult {
     prune();
     if (typeof state !== 'string' || typeof verifier !== 'string' || state.length !== 43 || verifier.length !== 43) return { status: 'invalid' };
     const login = pending.get(state);
     if (!login || !timingSafeEqual(login.verifierHash, createHash('sha256').update(verifier).digest())) return { status: 'invalid' };
-    if (!login.token) return { status: 'pending' };
+    if (!login.result) return { status: 'pending' };
     pending.delete(state);
-    return { status: 'complete', token: login.token };
+    return login.result;
 }

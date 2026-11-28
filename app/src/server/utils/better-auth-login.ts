@@ -17,11 +17,12 @@ export async function beginGoogleLogin(state?: string, requestOrigin?: string, c
         throw createError({ statusCode: 400, message: '確認コードが一致しないか、ログイン要求が期限切れです。' });
     }
 
+    const callbackURL = state ? `/api/auth/cli/finish?state=${state}` : '/';
     const response = await auth.api.signInSocial({
         body: {
             provider: 'google',
-            callbackURL: state ? `/api/auth/cli/finish?state=${state}` : '/',
-            errorCallbackURL: '/'
+            callbackURL,
+            errorCallbackURL: callbackURL
         },
         headers: new Headers({ origin }),
         asResponse: true

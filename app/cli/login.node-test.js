@@ -24,6 +24,16 @@ describe('CLIログイン', () => {
         assert.equal(text.includes(token), false);
     });
 
+    it('login_プロバイダー認証失敗の通知で待機を終了する', async () => {
+        await assert.rejects(login({ url: 'http://localhost:3000', timeout: 500 }, { write() {} }, {
+            fetch: async url => Response.json(url.pathname.endsWith('/start')
+                ? { state: 'a'.repeat(43), verifier: 'b'.repeat(43), confirmationCode: 'abcd1234', expiresIn: 60 }
+                : { status: 'failed' }),
+            delay: () => assert.fail('失敗通知後に待機した'),
+            openBrowser: () => {}
+        }), error => error.code === 'auth_error');
+    });
+
     it('login_平文の遠隔サーバーを拒否する', async () => {
         await assert.rejects(login({ url: 'http://example.com', timeout: 10 }, { write() {} }), error => error.code === 'invalid_input');
     });
