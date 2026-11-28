@@ -8,7 +8,7 @@ export default defineEventHandler(event => {
     const value = parseLoginState(state);
     return new Response(`<!doctype html><html lang="ja"><meta charset="utf-8">
         <title>tonarice のログイン</title><h1>tonarice のログイン</h1>
-        <p>ログインを開始したデスクトップアプリまたは CLI に表示された確認コードを入力してください。</p>
+        <p>CLI に表示された確認コードを入力してください。</p>
         <form method="post" action="/api/auth/login">
             <input type="hidden" name="state" value="${value}">
             <label>確認コード <input name="confirmationCode" required maxlength="8" autocomplete="off"></label>
@@ -17,8 +17,8 @@ export default defineEventHandler(event => {
         headers: {
             'content-type': 'text/html; charset=utf-8',
             'cache-control': 'no-store',
-            'referrer-policy': 'no-referrer',
-            'content-security-policy': "default-src 'none'; form-action 'self'; frame-ancestors 'none'"
+            'referrer-policy': 'strict-origin-when-cross-origin',
+            'content-security-policy': "default-src 'none'; form-action 'self' https://accounts.google.com; frame-ancestors 'none'"
         }
     });
 });

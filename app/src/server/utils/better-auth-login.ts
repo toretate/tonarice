@@ -26,11 +26,15 @@ export async function beginGoogleLogin(state?: string, requestOrigin?: string, c
         headers: new Headers({ origin }),
         asResponse: true
     });
+    return redirectToGoogle(response, state ? 303 : 302);
+}
+
+export async function redirectToGoogle(response: Response, status: 302 | 303) {
     if (!response.ok) return response;
 
     const { url } = await response.json() as { url?: string };
     if (!url) throw createError({ statusCode: 502, message: 'Google ログインを開始できません。' });
     const headers = new Headers({ location: url, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
     for (const cookie of response.headers.getSetCookie()) headers.append('set-cookie', cookie);
-    return new Response(null, { status: 302, headers });
+    return new Response(null, { status, headers });
 }

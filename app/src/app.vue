@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted } from 'vue';
 import MascotViewer from './components/MascotViewer.vue';
 import ChatPanel from './components/ChatPanel.vue';
 import SettingsWindow from './components/settings/SettingsWindow.vue';
+import ElectronAuthCompletion from './components/settings/ElectronAuthCompletion.vue';
 import IntegratedLayout from './components/layouts/IntegratedLayout.vue';
 import CompactLayout from './components/layouts/CompactLayout.vue';
 import TaskManagement from './components/TaskManagement.vue';
@@ -39,6 +40,7 @@ onUnmounted(() => {
         <MascotViewer v-if="currentHash === '#mascot'" />
         <ChatPanel v-else-if="currentHash === '#chat'" />
         <SettingsWindow v-else-if="currentHash === '#settings'" />
+        <ElectronAuthCompletion v-else-if="currentHash === '#electron-auth'" />
         <TaskManagement v-else-if="currentHash === '#tasks'" />
         <MemoWidget v-else-if="currentHash === '#memo'" />
         <MusicWidget v-else-if="currentHash === '#music'" />

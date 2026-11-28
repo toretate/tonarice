@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import Card from 'primevue/card';
+import { ref, watch } from 'vue';
+import { useAuthStore } from '@/store/auth';
 
 // リファクタリング済みコンポーネントおよび composable のインポート
 import SettingsSideBar from './components/SettingsSideBar.vue';
@@ -27,6 +29,18 @@ const {
     saveSettings,
     goBack
 } = useSettingsWindow();
+
+const authStore = useAuthStore();
+const windowSettingsTab = ref<'general' | 'integrated' | 'mascot' | 'chat' | 'server'>('general');
+
+watch(activeMenu, menu => {
+    if (menu !== 'chatwindow') windowSettingsTab.value = 'general';
+});
+
+function openAuthSettings() {
+    activeMenu.value = 'chatwindow';
+    windowSettingsTab.value = 'server';
+}
 </script>
 
 <template>
@@ -40,7 +54,9 @@ const {
         <SettingsSideBar 
             v-model:activeMenu="activeMenu"
             :menuItems="menuItems"
+            :is-authenticated="authStore.isAuthenticated"
             @back="goBack"
+            @open-auth-settings="openAuthSettings"
         />
 
         <!-- 2. 右側メインコンテンツエリア -->
@@ -66,7 +82,7 @@ const {
 
                 <!-- パネル2.5: ウィンドウ・ディスプレイ設定 -->
                 <div v-else-if="activeMenu === 'chatwindow'" class="panel-section">
-                    <WindowSettingsPanel />
+                    <WindowSettingsPanel v-model:active-tab="windowSettingsTab" />
                 </div>
 
                 <!-- パネル3: 音声AI -->
@@ -180,6 +196,7 @@ const {
     gap: 0.25rem;
 }
 
+:where(.settings-layout) :deep(.auth-settings-btn),
 :where(.settings-layout) :deep(.relaunch-btn) {
     display: flex;
     align-items: center;
@@ -193,6 +210,13 @@ const {
     width: 100%;
     font-weight: 600;
     transition: all 0.2s ease;
+}
+:where(.settings-layout) :deep(.auth-settings-btn) {
+    color: #cbd5e1;
+    white-space: nowrap;
+}
+:where(.settings-layout) :deep(.auth-settings-btn:hover) {
+    background: rgba(255, 255, 255, 0.1);
 }
 :where(.settings-layout) :deep(.relaunch-btn:hover) {
     background: rgba(234, 179, 8, 0.1);

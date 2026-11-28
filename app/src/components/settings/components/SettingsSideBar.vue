@@ -1,17 +1,20 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 const activeMenu = defineModel<string>('activeMenu', { required: true });
 
-defineProps<{
+const props = defineProps<{
+    isAuthenticated: boolean;
     menuItems: { name: string; value: string; icon: string }[];
 }>();
 
 const emit = defineEmits<{
     (e: 'back'): void;
+    (e: 'open-auth-settings'): void;
 }>();
 
 const isSidebarCollapsed = ref(true);
+const authLabel = computed(() => props.isAuthenticated ? 'ログアウト' : 'ログイン');
 
 const handleMouseEnter = () => {
     isSidebarCollapsed.value = false;
@@ -72,6 +75,16 @@ const goBack = () => {
         </nav>
 
         <div class="sidebar-footer no-drag">
+            <button
+                type="button"
+                class="auth-settings-btn"
+                :aria-label="authLabel"
+                :title="isSidebarCollapsed ? authLabel : ''"
+                @click="emit('open-auth-settings')"
+            >
+                <i :class="isAuthenticated ? 'pi pi-sign-out' : 'pi pi-sign-in'" aria-hidden="true"></i>
+                <span v-if="!isSidebarCollapsed">{{ authLabel }}</span>
+            </button>
             <button class="relaunch-btn" @click="relaunchApp" :title="isSidebarCollapsed ? '再起動' : ''">
                 <i class="pi pi-refresh"></i>
                 <span v-if="!isSidebarCollapsed">再起動</span>

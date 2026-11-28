@@ -17,6 +17,7 @@ export default defineEventHandler(async (event) => {
     // 認証開始・OAuthコールバック・pingは未認証でアクセスできる必要がある。
     if (url === '/api/ping' || url === '/api/auth/login' || url === '/api/auth/callback' || url === '/api/auth/callback/google' || url === '/api/auth/logout'
         || url === '/api/cowork/pair/claim'
+        || url === '/api/auth/electron/login' || url === '/api/auth/electron/token'
         || url === '/api/auth/cli/start' || url === '/api/auth/cli/claim') {
         return;
     }

@@ -114,8 +114,11 @@ AIによるテキスト生成および音声合成を提供する外部のロー
 - ログインには Better Auth と Google OAuth を使用します。認証セッションは `MASCOT_STORAGE_DIR` 配下の `auth.sqlite` に保存し、既存の `users.json` を許可リストとロールの参照元にします。Google の `sub` から既存の内部ユーザー ID を解決します。
 - `/api/auth/login` でログインを開始し、Google のコールバックは `/api/auth/callback/google` が受けます。Cookie または署名済みの Better Auth セッショントークンを使用し、ログアウトでセッションを失効させます。
 - `BETTER_AUTH_URL` にはブラウザーがアクセスするオリジン、`BETTER_AUTH_SECRET` には十分な乱数から作成した32文字以上の固定値を設定します。Google のクライアント ID とシークレットは `GOOGLE_CLIENT_ID` と `GOOGLE_CLIENT_SECRET` に設定します。
+- ローカル開発では `npm run dev` と `npm run dev:electron` の起動時に `app/.env.local` があれば読み込みます。既に起動しているサーバーへ接続する場合は、そのサーバーの起動時に読み込まれた設定が使われます。
 - Google Cloud Console で `BETTER_AUTH_URL` に `/api/auth/callback/google` を加えた URI を承認済みリダイレクト URI に登録します。オリジンには HTTPS を使用し、ローカルのループバック接続では HTTP も使用できます。
-- Electron と CLI は起動元に表示された確認コードをブラウザーに入力します。受け渡し要求は5分間有効で、セッションを一度だけ取得できます。
+- Electron の「Googleでログイン」は既定ブラウザーで Google 認証を開始します。認証後は Better Auth の Electron プラグインがディープリンク `com.toretate.tonarice://auth/callback` を開き、PKCE で検証したうえでアプリにセッションを設定します。ブラウザーに確認が表示された場合は tonarice を開きます。
+- Google Cloud Console には Nuxt のコールバック URI を登録します。ディープリンクは tonarice が OS に登録します。Electron の表示元と `BETTER_AUTH_URL` は、同じオリジンで起動します。
+- CLI はターミナルに表示された確認コードをブラウザーに入力します。受け渡し要求は5分間有効で、セッションを一度だけ取得できます。
 - 移行後は Web、Electron、CLI で再ログインします。従来の Google ID トークンは移行対象外です。旧バージョンへ切り戻す場合は、旧コールバック URI と旧バージョン用の設定を復元し、利用者は再ログインします。
 
 ### 3.4 外部AI・外部サービスの共通エラー処理

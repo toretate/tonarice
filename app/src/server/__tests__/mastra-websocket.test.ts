@@ -19,7 +19,7 @@ vi.mock('../utils/tool-executor', () => ({
     executeTasksTool: serviceMocks.executeTasks
 }));
 vi.mock('../utils/tasks-service', () => ({ updateTaskInDb: vi.fn() }));
-vi.mock('../utils/better-auth-runtime', () => ({ requireBetterAuthSession: vi.fn() }));
+vi.mock('../utils/better-auth-runtime', () => ({ requireBetterAuthSession: vi.fn().mockResolvedValue({ user: { id: 'user-test' }, session: { id: 'test-session' } }) }));
 vi.mock('../mastra/tool-approval', () => ({ requestToolApproval: vi.fn().mockResolvedValue(true), respondToolApproval: vi.fn() }));
 vi.mock('../mastra/mutation-claim', () => ({ claimMutation: vi.fn().mockReturnValue(true) }));
 
@@ -34,11 +34,15 @@ import { LibSQLStore } from '@mastra/libsql';
 interface TestPeer {
     context: Record<string, unknown>;
     send: ReturnType<typeof vi.fn>;
+    close: ReturnType<typeof vi.fn>;
+    request: { headers: Headers };
 }
 
 function createPeer(): TestPeer {
     return {
         context: { userId: 'user-test' },
+        request: { headers: new Headers() },
+        close: vi.fn(),
         send: vi.fn()
     };
 }
@@ -69,6 +73,7 @@ describe('WebSocketのMastra対話経路', () => {
 
 
     beforeEach(() => {
+        vi.stubEnv('ALLOW_AUTH_BYPASS', 'false');
         serviceMocks.mastraGenerate.mockReset();
         serviceMocks.synthesize.mockReset();
         serviceMocks.executeMemos.mockReset();
@@ -80,6 +85,7 @@ describe('WebSocketのMastra対話経路', () => {
     });
 
     afterEach(() => {
+        vi.unstubAllEnvs();
         vi.restoreAllMocks();
     });
 

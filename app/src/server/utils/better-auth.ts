@@ -1,4 +1,6 @@
 import { APIError } from 'better-auth/api';
+import { electron } from '@better-auth/electron';
+import { electronAuthScheme } from '../../utils/electron-auth-protocol';
 import { bearer } from 'better-auth/plugins';
 import { betterAuth } from 'better-auth';
 import { getMigrations } from 'better-auth/db/migration';
@@ -19,7 +21,8 @@ export async function initializeBetterAuth({ database, baseURL, secret, google, 
         database,
         baseURL,
         secret,
-        plugins: [bearer({ requireSignature: true })],
+        trustedOrigins: [`${electronAuthScheme}:/`],
+        plugins: [electron(), bearer({ requireSignature: true })],
         session: { cookieCache: { enabled: false } },
         logger: {
             level: 'warn',

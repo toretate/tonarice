@@ -1,7 +1,13 @@
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { expect, it, vi } from 'vitest';
+import { createApp, createRouter, toWebHandler } from 'h3';
 import { initializeBetterAuth } from '../utils/better-auth';
+import desktopLogin from '../api/auth/electron/login.get';
+import googleCallback from '../api/auth/callback/google.get';
+
+const { getBetterAuth } = vi.hoisted(() => ({ getBetterAuth: vi.fn() }));
+vi.mock('../utils/better-auth-runtime', () => ({ getBetterAuth }));
 
 it('initializeBetterAuth 認証スキーマを作成して再初期化できる', async () => {
     const database = new Database(':memory:');
@@ -56,13 +62,20 @@ it('initializeBetterAuth Google OAuth の開始とコールバックでセッシ
             authorizeSession: userId => allowed && !!database.prepare('SELECT id FROM account WHERE userId = ?').get(userId)
         });
 
-        const signIn = async () => {
-            const response = await auth.api.signInSocial({
-                body: { provider: 'google', callbackURL: '/done' },
-                headers: new Headers({ origin: baseURL }),
-                asResponse: true
-            });
-            const { url } = await response.json();
+        getBetterAuth.mockResolvedValue({ auth });
+        const desktopHandler = toWebHandler(createApp().use(createRouter()
+            .get('/api/auth/electron/login', desktopLogin)
+            .get('/api/auth/callback/google', googleCallback)));
+        const signIn = async (query?: { client_id: string; code_challenge: string; state: string }) => {
+            const response = query
+                ? await desktopHandler(new Request(baseURL + '/api/auth/electron/login?' + new URLSearchParams(query)))
+                : await auth.api.signInSocial({
+                    body: { provider: 'google', callbackURL: '/done' },
+                    headers: new Headers({ origin: baseURL }),
+                    asResponse: true
+                });
+            const url = query ? response.headers.get('location') : (await response.json()).url;
+            expect(url).toBeTruthy();
             const params = new URL(url).searchParams;
             expect(params.get('code_challenge_method')).toBe('S256');
             expect(params.get('state')).toBeTruthy();
@@ -71,7 +84,8 @@ it('initializeBetterAuth Google OAuth の開始とコールバックでセッシ
             target.searchParams.set('state', params.get('state')!);
             target.searchParams.set('code', 'test-code');
             const cookie = response.headers.getSetCookie().map(value => value.split(';', 1)[0]).join('; ');
-            return auth.handler(new Request(target, { headers: { cookie } }));
+            const callback = new Request(target, { headers: { cookie } });
+            return query ? desktopHandler(callback) : auth.handler(callback);
         };
 
         const missingState = await auth.handler(new Request(`${baseURL}/api/auth/callback/google?code=test-code`));
@@ -88,6 +102,30 @@ it('initializeBetterAuth Google OAuth の開始とコールバックでセッシ
         expect((await auth.api.getSession({ headers }))?.user.email).toBe(claims.email);
         await auth.api.signOut({ headers });
         await expect(auth.api.getSession({ headers })).resolves.toBeNull();
+
+        const verifier = 'v'.repeat(43);
+        const desktopState = 'S'.repeat(16);
+        const desktopCallback = await signIn({
+            client_id: 'electron',
+            code_challenge: createHash('sha256').update(verifier).digest('base64url'),
+            state: desktopState
+        });
+        expect(desktopCallback.headers.get('location')).toMatch(/#electron-auth$/);
+        expect(desktopCallback.headers.getSetCookie().some(cookie => cookie.startsWith('better-auth.session_token='))).toBe(false);
+        const handoff = desktopCallback.headers.getSetCookie()
+            .find(cookie => cookie.startsWith('better-auth.electron='));
+        expect(handoff).toBeDefined();
+        const encoded = handoff!.split(';', 1)[0]!.slice('better-auth.electron='.length);
+        const { identifier } = JSON.parse(Buffer.from(decodeURIComponent(encoded), 'base64url').toString('utf8'));
+        const exchange = () => auth.handler(new Request(baseURL + '/api/auth/electron/token', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: 'com.toretate.tonarice:/' },
+            body: JSON.stringify({ token: identifier, state: desktopState, code_verifier: verifier })
+        }));
+        const desktop = await exchange();
+        expect(desktop.status).toBe(200);
+        expect(desktop.headers.get('set-auth-token')).toBeTruthy();
+        expect((await exchange()).ok).toBe(false);
 
         claims = { ...claims, sub: 'unlisted-sub', email: 'unlisted@example.test' };
         const rejected = await signIn();
