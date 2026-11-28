@@ -1,4 +1,3 @@
-import { APIError } from 'better-auth/api';
 import { electron } from '@better-auth/electron';
 import { electronAuthScheme } from '../../utils/electron-auth-protocol';
 import { bearer } from 'better-auth/plugins';
@@ -50,19 +49,26 @@ export async function initializeBetterAuth({ database, baseURL, secret, google, 
                 }
             }
         },
+        user: authorizeGoogle ? {
+            // OAuth コールバックの errorCallbackURL へリダイレクトされる検証経路で許可リストを強制する。
+            validateUserInfo: ({ source }) => {
+                if (source.method !== 'oauth' || source.oauth?.providerId !== 'google') return;
+                const profile = source.oauth.profile;
+                const sub = typeof profile?.sub === 'string' ? profile.sub : '';
+                const email = typeof profile?.email === 'string' ? profile.email : '';
+                const emailVerified = profile?.email_verified === true;
+                if (!sub || !email || !authorizeGoogle({ sub, email, email_verified: emailVerified })) {
+                    return { error: 'access_denied' };
+                }
+            }
+        } : undefined,
         socialProviders: {
             google: {
                 ...google,
                 // 許可リストを検証できる構成でのみ登録する。
                 disableSignUp: !authorizeGoogle,
                 disableIdTokenSignIn: true,
-                requireEmailVerification: true,
-                mapProfileToUser: profile => {
-                    if (authorizeGoogle && !authorizeGoogle(profile)) {
-                        throw new APIError('FORBIDDEN', { message: 'アクセスが許可されていません。' });
-                    }
-                    return {};
-                }
+                requireEmailVerification: true
             }
         },
         account: {

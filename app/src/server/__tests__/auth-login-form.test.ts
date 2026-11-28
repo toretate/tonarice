@@ -2,12 +2,15 @@ import { createApp, createRouter, toWebHandler } from 'h3';
 import { expect, it, vi } from 'vitest';
 import loginPage from '../api/auth/login.get';
 import submitLogin from '../api/auth/login.post';
-import { startCliLogin } from '../utils/cli-login';
+import { confirmCliLogin, startCliLogin } from '../utils/cli-login';
+import googleCallback from '../api/auth/callback/google.get';
+import claimLogin from '../api/auth/cli/claim.post';
+import loginResult from '../api/auth/cli/result.get';
 
-const { signInSocial } = vi.hoisted(() => ({ signInSocial: vi.fn() }));
+const { signInSocial, oauthCallback } = vi.hoisted(() => ({ signInSocial: vi.fn(), oauthCallback: vi.fn() }));
 vi.mock('../utils/better-auth-runtime', () => ({
     getBetterAuth: () => ({
-        auth: { options: { baseURL: 'http://localhost:3000' }, api: { signInSocial } }
+        auth: { options: { baseURL: 'http://localhost:3000' }, api: { signInSocial }, handler: oauthCallback }
     })
 }));
 
@@ -38,4 +41,96 @@ it('ログイン確認フォーム 同一オリジンの送信からGoogle認証
     expect(response.status).toBe(303);
     expect(response.headers.get('location')).toBe(googleUrl);
     expect(response.headers.get('set-cookie')).toContain('test_oauth_state=mock');
+});
+
+
+it.each([true, false])('CLI ログイン 結果をブラウザーと CLI に返す（成功: %s）', async success => {
+    const { state, verifier, confirmationCode } = startCliLogin();
+    expect(confirmCliLogin(state, confirmationCode)).toBe(true);
+    const target = new URL('/api/auth/cli/finish', 'http://localhost:3000');
+    target.searchParams.set('state', state);
+    if (!success) target.searchParams.set('error', 'access_denied');
+    const headers = new Headers({ location: target.href });
+    if (success) {
+        headers.set('set-auth-token', 'fixture-session');
+        headers.set('set-cookie', 'better-auth.session_token=fixture-session; HttpOnly; Path=/');
+    }
+    oauthCallback.mockResolvedValueOnce(new Response(null, { status: 302, headers }));
+    const app = toWebHandler(createApp().use(createRouter()
+        .get('/api/auth/callback/google', googleCallback)
+        .post('/api/auth/cli/claim', claimLogin)
+        .get('/api/auth/cli/result', loginResult)));
+
+    const callback = await app(new Request('http://localhost:3000/api/auth/callback/google'));
+    expect(callback.status).toBe(302);
+    expect(callback.headers.get('set-auth-token')).toBeNull();
+    expect(callback.headers.get('set-cookie')).toBeNull();
+    const resultURL = new URL(callback.headers.get('location')!, target.origin);
+    expect(resultURL.searchParams.has('state')).toBe(false);
+    const result = await app(new Request(resultURL));
+    expect(await result.text()).toContain(success ? 'CLI に戻ってください' : '/login からやり直してください');
+
+    const claim = () => app(new Request('http://localhost:3000/api/auth/cli/claim', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ state, verifier })
+    }));
+    expect(await (await claim()).json()).toEqual(success
+        ? { status: 'complete', token: 'fixture-session' }
+        : { status: 'failed' });
+    expect((await claim()).status).toBe(400);
+});
+
+it('beginGoogleLogin_OAuth開始失敗時にCLIログイン要求を失敗確定する', async () => {
+    const app = toWebHandler(createApp().use(createRouter()
+        .post('/api/auth/login', submitLogin)
+        .post('/api/auth/cli/claim', claimLogin)));
+
+    const first = startCliLogin();
+    signInSocial.mockResolvedValueOnce(new Response('upstream error', { status: 500 }));
+    const failedResponse = await app(new Request('http://localhost:3000/api/auth/login', {
+        method: 'POST',
+        headers: { origin: 'http://localhost:3000' },
+        body: new URLSearchParams({ state: first.state, confirmationCode: first.confirmationCode })
+    }));
+    expect(failedResponse.status).toBe(500);
+    const firstClaim = await app(new Request('http://localhost:3000/api/auth/cli/claim', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ state: first.state, verifier: first.verifier })
+    }));
+    expect(await firstClaim.json()).toEqual({ status: 'failed' });
+
+    const second = startCliLogin();
+    signInSocial.mockRejectedValueOnce(new Error('network error'));
+    const thrownResponse = await app(new Request('http://localhost:3000/api/auth/login', {
+        method: 'POST',
+        headers: { origin: 'http://localhost:3000' },
+        body: new URLSearchParams({ state: second.state, confirmationCode: second.confirmationCode })
+    }));
+    expect(thrownResponse.status).toBe(500);
+    const secondClaim = await app(new Request('http://localhost:3000/api/auth/cli/claim', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ state: second.state, verifier: second.verifier })
+    }));
+    expect(await secondClaim.json()).toEqual({ status: 'failed' });
+});
+
+it('googleCallback_無効または未確認のCLIログイン要求に400を返しセッションを漏らさない', async () => {
+    const { state } = startCliLogin();
+    const target = new URL('/api/auth/cli/finish', 'http://localhost:3000');
+    target.searchParams.set('state', state);
+    const headers = new Headers({
+        location: target.href,
+        'set-auth-token': 'fixture-session',
+        'set-cookie': 'better-auth.session_token=fixture-session; HttpOnly; Path=/'
+    });
+    oauthCallback.mockResolvedValueOnce(new Response(null, { status: 302, headers }));
+    const app = toWebHandler(createApp().use(createRouter().get('/api/auth/callback/google', googleCallback)));
+
+    const callback = await app(new Request('http://localhost:3000/api/auth/callback/google'));
+    expect(callback.status).toBe(400);
+    expect(callback.headers.get('set-auth-token')).toBeNull();
+    expect(callback.headers.get('set-cookie')).toBeNull();
 });

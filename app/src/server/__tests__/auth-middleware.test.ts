@@ -97,7 +97,18 @@ describe('認証ミドルウェア', () => {
         await expect(authMiddleware(createEvent('/api/cowork'))).rejects.toMatchObject({ statusCode: 401 });
     });
 
-    it.each(['/api/auth/login', '/api/auth/callback', '/api/auth/callback?code=test-code', '/api/auth/electron/login', '/api/auth/electron/token', '/api/cowork/pair/claim'])(
+    it.each([
+        '/api/auth/login',
+        '/api/auth/callback',
+        '/api/auth/callback?code=test-code',
+        '/api/auth/electron/login',
+        '/api/auth/electron/token',
+        '/api/auth/cli/start',
+        '/api/auth/cli/claim',
+        '/api/auth/cli/result',
+        '/api/auth/cli/result?status=success',
+        '/api/cowork/pair/claim'
+    ])(
         '認証ミドルウェア_%sは未認証でも許可すること',
         async (path) => {
             await expect(authMiddleware(createEvent(path))).resolves.toBeUndefined();

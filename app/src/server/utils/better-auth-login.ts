@@ -1,6 +1,6 @@
 import { createError } from 'h3';
 import { getBetterAuth } from './better-auth-runtime';
-import { confirmCliLogin } from './cli-login';
+import { confirmCliLogin, failCliLogin } from './cli-login';
 
 export function parseLoginState(value: unknown): string {
     if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(value)) {
@@ -17,16 +17,24 @@ export async function beginGoogleLogin(state?: string, requestOrigin?: string, c
         throw createError({ statusCode: 400, message: '確認コードが一致しないか、ログイン要求が期限切れです。' });
     }
 
-    const response = await auth.api.signInSocial({
-        body: {
-            provider: 'google',
-            callbackURL: state ? `/api/auth/cli/finish?state=${state}` : '/',
-            errorCallbackURL: '/'
-        },
-        headers: new Headers({ origin }),
-        asResponse: true
-    });
-    return redirectToGoogle(response, state ? 303 : 302);
+    const callbackURL = state ? `/api/auth/cli/finish?state=${state}` : '/';
+    try {
+        const response = await auth.api.signInSocial({
+            body: {
+                provider: 'google',
+                callbackURL,
+                errorCallbackURL: callbackURL
+            },
+            headers: new Headers({ origin }),
+            asResponse: true
+        });
+        const redirect = await redirectToGoogle(response, state ? 303 : 302);
+        if (state && redirect.status !== 303) failCliLogin(state);
+        return redirect;
+    } catch (error) {
+        if (state) failCliLogin(state);
+        throw error;
+    }
 }
 
 export async function redirectToGoogle(response: Response, status: 302 | 303) {
